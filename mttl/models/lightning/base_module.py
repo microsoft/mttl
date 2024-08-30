@@ -36,16 +36,19 @@ class OnLogCallback:
         return output
 
 
-class EfficientCheckpointModule(OnLogCallback, PushToHubMixin, LightningModule):
+class LightningEfficientCheckpoint(OnLogCallback, PushToHubMixin, LightningModule):
     """Efficiently save and load checkpoints.
 
     Only saves and loads parameters that are either in the trainable parameters
     or have been loaded from a previous checkpoint.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, model_object=None, **kwargs):
         LightningModule.__init__(self)
         PushToHubMixin.__init__(self)
+
+        self.model_object = model_object
+        self.save_hyperparameters(kwargs)
 
         self.loss_plugins = {}
         # If True, do not delete any parameters that were loaded in a

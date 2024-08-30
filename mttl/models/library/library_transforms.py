@@ -19,6 +19,7 @@ from tqdm import tqdm
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import logger
 from mttl.models.containers.lora_containers import ExpertContainer
+from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.lightning.callbacks import LiveCheckpointCallback
@@ -50,25 +51,15 @@ def train_module(args: "ExpertConfig", module: "ExpertModule", dm):
         val_check_interval = None
     else:
         val_check_interval = args.gradient_accumulation_steps * args.eval_every
-        if val_check_interval > len(dm.train_dataloader()):
-            val_check_interval = len(dm.train_dataloader())
-        elif val_check_interval > args.total_steps and args.total_steps != -1:
-            val_check_interval = args.total_steps
 
-    val_check_interval = args.eval_every
-    if val_check_interval == -1 or val_check_interval is None:
-        val_check_interval = None
-    else:
-        val_check_interval = args.gradient_accumulation_steps * args.eval_every
         if val_check_interval > len(dm.train_dataloader()):
             val_check_interval = len(dm.train_dataloader())
-        elif val_check_interval > args.total_steps and args.total_steps != -1:
+
+        if val_check_interval > args.total_steps and args.total_steps != -1:
             val_check_interval = args.total_steps
 
     trainer = Trainer(
-        devices=-1,
-        accelerator="gpu",
-        logger=loggers,
+        accelerator=getattr(args, "accelerator", "gpu"),
         num_sanity_val_steps=0,
         default_root_dir=args.output_dir,
         max_epochs=args.num_train_epochs,
@@ -76,6 +67,7 @@ def train_module(args: "ExpertConfig", module: "ExpertModule", dm):
         gradient_clip_val=args.max_grad_norm,
         strategy=args.compute_strategy if args.compute_strategy else "auto",
         callbacks=callbacks,
+        logger=loggers,
         enable_checkpointing=False,
         log_every_n_steps=args.gradient_accumulation_steps,
         accumulate_grad_batches=args.gradient_accumulation_steps,
@@ -84,10 +76,15 @@ def train_module(args: "ExpertConfig", module: "ExpertModule", dm):
         ),
         val_check_interval=val_check_interval,
     )
+
     trainer.fit(module, dm)
+
     checkpoint = (
         checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
     )
+
+    # reload the best/last model from the checkpoint
+    module.load_from_checkpoint(checkpoint)
     return checkpoint
 
 
@@ -443,7 +440,6 @@ class HiddenStateComputer(LibraryTransform):
         super().__init__(config or HiddenStateComputerConfig())
 
     def _update_args(self, args, default_args):
-        # TODO: put in library utils
         for k, v in vars(default_args).items():
             if not hasattr(args, k):
                 setattr(args, k, v)
@@ -481,8 +477,10 @@ class HiddenStateComputer(LibraryTransform):
 
     def _track_hidden_states(self, model, keys=None, device="cpu"):
         model.container = {}
+
         if model.model is None:
             raise ValueError("Model must have a model attribute")
+
         if self.config.track == "last_layer":
             # Add a hook to the last layer
             def fetch_input(module, input, output):
@@ -555,6 +553,7 @@ class HiddenStateComputer(LibraryTransform):
 
         for _, (expert_name, expert) in enumerate(library.items()):
             training_config = expert.training_config
+
             if default_args is not None:
                 self._update_args(training_config, default_args)
 
@@ -563,14 +562,20 @@ class HiddenStateComputer(LibraryTransform):
 
             training_config.device_map = "cuda"
 
-            model = MultiExpertModule(**vars(training_config))
-
+            model = MultiExpertModel(
+                MultiExpertModelConfig(
+                    base_model=training_config.model,
+                ),
+                model_object=None,
+                device_map="cuda",
+            )
             if not self.config.use_base_model_only:
                 model.add_expert_instance(expert, is_default=True)
 
             self._track_hidden_states(
                 model, keys=expert.expert_weights.keys(), device=device
             )
+
             training_config.dataset = expert.expert_info.dataset
             training_config.subsample_train = self.config.max_samples_per_task
             if expert.expert_info.expert_task_name:
@@ -596,8 +601,8 @@ class HiddenStateComputer(LibraryTransform):
             for _, batch in pbar:
                 batch = transfer_batch_to_device(batch, device_model)
 
-                if isinstance(model, ExpertModule):
-                    model.forward(batch, reduction="none")
+                if isinstance(model, MultiExpertModel):
+                    model.forward(**batch)
                 else:
                     model.forward(
                         input_ids=batch["input_ids"],
@@ -660,6 +665,11 @@ class PhatgooseConfig(LibraryTransformConfig):
     n_steps: int = 1000
     learning_rate: float = 3e-3
     warmup_ratio: float = 0.1  # 0.9999999 # 0.1
+    micro_batch_size: int = 1
+    batch_size: int = 1
+
+    def __post_init__(self):
+        self.gradient_accumulation_steps = self.batch_size // self.micro_batch_size
 
 
 @LibraryTransform.register("phatgoose", PhatgooseConfig)
@@ -715,46 +725,36 @@ class PhatgooseTransform(HiddenStateComputer):
                 continue
 
             training_config: ExpertConfig = expert.training_config
+
+            if default_args is not None:
+                self._update_args(training_config, default_args)
+
             training_config.router_selector = "phatgoose_trainer_selector"
             training_config.trainable_param_names = ".*selector.*"
             training_config.logging_prefix = expert_name + "/"
             training_config.weight_decay = 0.0
-
             # for training, we set this to true even if there is just a single expert.
             # This ensures that we do (gate * AB * x) instead of ((gate * A) * (gate * B) * x)
             training_config.lora_merge_after = True
-
+            # get datamodule
+            training_config.eval_every = -1
+            training_config.total_steps = self.config.n_steps
+            training_config.learning_rate = self.config.learning_rate
+            training_config.warmup_proportion = self.config.warmup_ratio
+            training_config.train_batch_size = self.config.batch_size
+            training_config.micro_batch_size = self.config.micro_batch_size
+            training_config.gradient_accumulation_steps = (
+                self.config.gradient_accumulation_steps
+            )
             training_config.dataset = expert.expert_info.dataset
+
             if expert.expert_info.expert_task_name:
                 train_tasks = expert.expert_info.expert_task_name.split(",")
                 training_config.finetune_task_name = ",".join(train_tasks)
             else:
                 train_tasks = None
 
-            if default_args is not None:
-                self._update_args(training_config, default_args)
-                training_config.include_task_source = default_args.include_task_source
-                training_config.output_dir = default_args.output_dir
-                training_config.wandb_project = default_args.wandb_project
-                # we set also train_batch_size, micro_batch_size, and gradient_accumulation_steps from default_args
-                # TODO: correct this in the future
-                # background: gradient_accumulation_steps is set in post_init of the mttl/config.py and hence not saved correctly in expert's config
-                training_config.gradient_accumulation_steps = (
-                    default_args.gradient_accumulation_steps
-                )
-                training_config.train_batch_size = default_args.train_batch_size
-                training_config.micro_batch_size = default_args.micro_batch_size
-            else:
-                raise ValueError(
-                    "batch size and gradient accumulation steps must be set from the cmd line args"
-                )
-
-            # get datamodule
             dm = get_datamodule(training_config)
-            training_config.eval_every = -1
-            training_config.total_steps = self.config.n_steps
-            training_config.learning_rate = self.config.learning_rate
-            training_config.warmup_proportion = self.config.warmup_ratio
 
             logger.info("Training config: {}".format(vars(training_config)))
 
@@ -804,7 +804,7 @@ class PhatgooseTransform(HiddenStateComputer):
 
             # extract prototypes
             prototypes = {}
-            for name, module in model.named_experts():
+            for name, module in model.model.named_modules():
                 if isinstance(module, ExpertContainer) and hasattr(
                     module.selector, "get_prototypes"
                 ):

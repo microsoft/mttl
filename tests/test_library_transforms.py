@@ -10,12 +10,16 @@ from pytorch_lightning import seed_everything
 
 from mttl.arguments import ExpertConfig
 from mttl.logging import logger
+from mttl.models.containers.selectors import PhatgooseSelector, PhatgooseSelectorConfig
+from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
 from mttl.models.library.expert_library import HFExpertLibrary, LocalExpertLibrary
 from mttl.models.library.library_transforms import (
     ArrowConfig,
     ArrowTransform,
     MBClusteringTransformConfig,
     MBCWithCosSimTransform,
+    PhatgooseConfig,
+    PhatgooseTransform,
     TiesMerge,
     TiesMergeConfig,
     WeightedLinearMerge,
@@ -112,6 +116,63 @@ def test_arrow_with_tiedlora(tmp_path, create_dummy_expert):
         sums.append(task_sum)
 
     assert np.allclose(sums, [-13.642, -7.734], atol=1e-3)
+
+
+def test_phatgoose(tiny_flan, tmp_path, create_dummy_expert, monkeypatch):
+    # disable wandb
+    monkeypatch.setenv("WANDB_MODE", "disabled")
+
+    dataset, dataset_id = tiny_flan
+
+    config = ExpertConfig(
+        **{
+            "model_modifier": "lora",
+            "lora_rank": 32,
+            "lora_alpha": 16,
+            "warmup_steps": 0,
+            "modify_layers": "k_proj|v_proj|q_proj|o_proj",
+            "trainable_param_names": ".*lora_[ab].*",
+            "output_dir": tmp_path,
+            "precision": "32",
+            "model": "EleutherAI/gpt-neo-125m",
+            "dataset": dataset_id,
+            "device_map": "cpu",
+            "dataset_type": "flan",
+            "lora_init_b_random": True,  # this is important otw phatgoose gates are 0 given that the experts are not trained
+            "accelerator": "cpu",
+        }
+    )
+
+    config.finetune_task_name = "cot_creak"
+    expert1 = create_dummy_expert(config, "cot_creak")
+
+    config.finetune_task_name = "cot_creak_ii"
+    expert2 = create_dummy_expert(config, "cot_creak_ii")
+
+    library = LocalExpertLibrary(tmp_path)
+    library.add_expert(expert1)
+    library.add_expert(expert2)
+
+    pg_config = PhatgooseConfig(n_steps=10, warmup_ratio=0.0, learning_rate=1e-2)
+    phatgoose = PhatgooseTransform(pg_config)
+
+    phatgoose.transform(library, persist=True, recompute=True, default_args=config)
+
+    # now try to load a selector with the same config
+    model = MultiExpertModel(
+        MultiExpertModelConfig(
+            base_model="EleutherAI/gpt-neo-125m",
+            selector_config=PhatgooseSelectorConfig(
+                library_id="local://" + str(tmp_path),
+                selector_data_id=pg_config.save_name,
+            ),
+        )
+    )
+
+    model.add_experts_from_library(library)
+    assert len(model.experts_names) == 2
+    assert model.selectors["lora"][0].prototypes.shape[0] == 2
+    assert model.selectors["lora"][0].prototypes.shape[1] == 768
 
 
 def test_compute_svd_embeddings():

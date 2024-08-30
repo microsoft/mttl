@@ -5,12 +5,12 @@ import nevergrad as ng
 import wandb
 
 from mttl.logging import logger
+from mttl.models.expert_model import MultiExpertModel
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.library.library_transforms import (
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
 )
-from mttl.models.lightning.expert_module import MultiExpertModule
 
 
 def default_l1_regularization(weights):
@@ -24,7 +24,7 @@ def default_l1_regularization(weights):
 class NGRoutingOptimizer:
     def __init__(
         self,
-        model: MultiExpertModule,
+        model: MultiExpertModel,
         expert_lib: ExpertLibrary,
         get_loss: Callable,  # function that takes model as input and returns loss
         budget=5,
@@ -36,11 +36,12 @@ class NGRoutingOptimizer:
         self.log = log
         self.regularizer_factor = regularizer_factor
         self.task_name = task_name
-        self.model: MultiExpertModule = model
+        self.model: MultiExpertModel = model
         self.K = len(expert_lib)
         # vars ordered in the same order as data in expert_lib
         init = [0] * self.K
         self.library = expert_lib
+
         if base_module_name is not None:
             init_one = list(expert_lib.keys()).index(base_module_name)
             init[init_one] = 1
@@ -60,7 +61,7 @@ class NGRoutingOptimizer:
     def optimize(
         self,
     ):
-        def get_score(weights, basemodel: MultiExpertModule, get_loss, get_regular):
+        def get_score(weights, basemodel: MultiExpertModel, get_loss, get_regular):
             config = WeightedLinearMergeConfig(
                 weights={
                     exp_name: w for exp_name, w in zip(self.library.keys(), weights)
