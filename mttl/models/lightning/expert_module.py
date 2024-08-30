@@ -88,7 +88,7 @@ class LightningTrainingMixin:
 
     def log_loss(self, split="val"):
         outputs = self.inference_outputs
-        losses = torch.cat([out[0] for out in outputs], 0)
+        losses = torch.cat([out for out in outputs], 0)
         self.inference_outputs.clear()
 
         self.log(
