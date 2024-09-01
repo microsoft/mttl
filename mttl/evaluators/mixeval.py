@@ -105,10 +105,8 @@ class MultiExpertAdapter(ChatModel):
 
 
 class MixEvalEvaluator(GenerativeEvaluator):
-    def __init__(
-        self,
-    ):
-        super().__init__(config=MixEvalConfig())
+    def __init__(self, config: MixEvalConfig = None):
+        super().__init__(config=config or MixEvalConfig())
 
         if not mixeval_available:
             raise ValueError(
