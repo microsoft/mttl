@@ -35,7 +35,6 @@ class MixEvalConfig:
     split: str = None
     output_dir: str = None
     verbose: bool = False
-    model: MultiExpertModel = None
 
 
 @register_model("mix_eval_expert_adapter")
@@ -73,7 +72,6 @@ class MultiExpertAdapter(ChatModel):
 
     def __init__(self, args):
         self.model = args.model
-        args.model = None
 
         super().__init__(args)
 
