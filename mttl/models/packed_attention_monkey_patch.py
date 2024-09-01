@@ -48,12 +48,13 @@ def flash_attn_varlen_func_wrapper(
     causal,
     **flash_kwargs,
 ):
-    if query_states.shape != key_states.shape:
-        raise ValueError("q and k must have the same shape")
-
     context = InfoContainer.get()
     if context is not None and context.routing_infos.packed_seq_lens is not None:
         warn_once("Using the Flash Attention 2 Sequence Packing Wrapper!")
+
+        if query_states.shape != key_states.shape:
+            raise ValueError("q and k must have the same shape")
+
         cu_seqlens_q = context.routing_infos.packed_seq_lens
         cu_seqlens_k = context.routing_infos.packed_seq_lens
         max_seqlen_q = context.routing_infos.seq_lens.max().item()
@@ -87,15 +88,15 @@ def flash_attn_func_wrapper(
     deterministic=False,
     return_attn_probs=False,
 ):
-
-    if q.shape != k.shape:
-        raise ValueError("q and k must have the same shape")
-
     # assert there are no padding tokens if we get here
     context = InfoContainer.get()
-    assert (context.routing_infos.attention_mask == 1).all()  # no padding tokens
 
-    if context.routing_infos.packed_seq_lens is not None:
+    if context and context.routing_infos.packed_seq_lens is not None:
+        assert (context.routing_infos.attention_mask == 1).all()  # no padding tokens
+
+        if q.shape != k.shape:
+            raise ValueError("q and k must have the same shape")
+
         cu_seqlens_q = cu_seqlens_k = context.routing_infos.packed_seq_lens
         max_seqlen_q = max_seqlen_k = context.routing_infos.seq_lens.max().item()
         q, k, v = q.flatten(0, 1), k.flatten(0, 1), v.flatten(0, 1)

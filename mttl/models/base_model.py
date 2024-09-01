@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional, Union
 
 import torch
 from huggingface_hub import hf_hub_download
+from transformers import PreTrainedModel
 from transformers.modeling_outputs import CausalLMOutput
 
 from mttl.logging import logger
@@ -64,6 +65,10 @@ class BaseExpertModel(torch.nn.Module, Registrable):
             if model_object is None
             else model_object
         )
+        if not isinstance(self.model, PreTrainedModel):
+            raise ValueError(
+                f"Model is not a subclass of PreTrainedModel. Got {type(self.model)}."
+            )
 
         if model_object:
             logger.warning(
@@ -72,6 +77,18 @@ class BaseExpertModel(torch.nn.Module, Registrable):
 
         self.config = config
         self.loading_kwargs = loading_kwargs
+
+    @property
+    def base_model_name_or_path(self) -> str:
+        return self.config.base_model
+
+    @property
+    def max_position_embeddings(self) -> int:
+        return self.base_model.config.max_position_embeddings
+
+    @property
+    def base_model(self) -> PreTrainedModel:
+        return self.model
 
     def _delete_non_trainable_params(
         self, state_dict: Dict[str, torch.Tensor]
