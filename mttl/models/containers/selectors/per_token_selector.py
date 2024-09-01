@@ -106,7 +106,11 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
         else:
             mean_angle = angle.mean()
 
-        task = self.routing_infos.task_names[0]
+        task_names = self.routing_infos.task_names
+        if task_names is None:
+            return
+
+        task = task_names[0]
 
         to_store = {"angle": mean_angle.item()}
         self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)
@@ -126,7 +130,11 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
         else:
             mean_entropy = entropy.mean()
 
-        task = self.routing_infos.task_names[0]
+        task_names = self.routing_infos.task_names
+        if task_names is None:
+            return
+
+        task = task_names[0]
 
         to_store = {"ent_routing": mean_entropy.item()}
         self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)
@@ -139,7 +147,10 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
     def _maybe_log_in_dist(self, logits):
         probs = F.softmax(logits, dim=-1)
         bs, seq_len, _ = probs.size()
+
         task_names = self.routing_infos.task_names
+        if task_names is None:
+            return
 
         if all([t in self.task_to_expert_name for t in task_names]):
             expert_names = [self.task_to_expert_name[t] for t in task_names]
