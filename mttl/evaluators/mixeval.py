@@ -32,6 +32,12 @@ class MixEvalConfig:
     model_name: str = "mix_eval_expert_adapter"
     benchmark: str = "mixeval_hard"
     data_path: str = None
+    free_form_parser: str = "model"
+    multi_choice_parser: str = "model"
+    multichoice_judge: str = "gpt-3.5-turbo-0125"
+    freeform_judge: str = "gpt-3.5-turbo-0125"
+    extract_base_model_response: bool = False
+    compute_score_from_judged_file: bool = False
     version: str = "2024-08-11"
     split: str = None
     output_dir: str = None
