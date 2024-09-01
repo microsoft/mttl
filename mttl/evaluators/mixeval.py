@@ -34,8 +34,8 @@ class MixEvalConfig:
     data_path: str = None
     free_form_parser: str = "model"
     multi_choice_parser: str = "model"
-    multichoice_judge: str = "gpt-4o"
-    freeform_judge: str = "gpt-4o"
+    multichoice_judge: str = "gpt-4o-mini"
+    freeform_judge: str = "gpt-4o-mini"
     extract_base_model_response: bool = False
     compute_score_from_judged_file: bool = False
     version: str = "2024-08-11"
