@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 
 try:
     from mix_eval.api.registry import register_model
@@ -39,6 +40,9 @@ class MixEvalConfig:
 
 @register_model("mix_eval_expert_adapter")
 class MultiExpertAdapter(ChatModel):
+    # model context is used to inject model into the class
+    model_context = threading.local()
+
     def chunk_generate(
         self,
         inputs,
@@ -71,10 +75,9 @@ class MultiExpertAdapter(ChatModel):
         return responses
 
     def __init__(self, args):
-        self.model = args.model
-
         super().__init__(args)
 
+        self.model = self.model_context.model
         self.tokenizer = get_tokenizer_with_args(
             model_name=self.model.base_model_name_or_path,
             model_family="gpt",
@@ -151,8 +154,10 @@ class MixEvalEvaluator(GenerativeEvaluator):
         verbose=False,
         **kwargs,
     ):
+        # inject model into MultiExpertAdapter
+        MultiExpertAdapter.model_context.model = model
+
         # inject model into config
-        self.config.model = model
         self.config.verbose = verbose
 
         if split is not None:
