@@ -34,14 +34,15 @@ class MixEvalConfig:
     data_path: str = None
     free_form_parser: str = "model"
     multi_choice_parser: str = "model"
-    multichoice_judge: str = "gpt-3.5-turbo-0125"
-    freeform_judge: str = "gpt-3.5-turbo-0125"
+    multichoice_judge: str = "gpt-4o"
+    freeform_judge: str = "gpt-4o"
     extract_base_model_response: bool = False
     compute_score_from_judged_file: bool = False
     version: str = "2024-08-11"
     split: str = None
     output_dir: str = None
     verbose: bool = False
+    api_parallel_num: int = 10
 
 
 @register_model("mix_eval_expert_adapter")
@@ -158,6 +159,8 @@ class MixEvalEvaluator(GenerativeEvaluator):
         verbose=False,
         **kwargs,
     ):
+        from mix_eval.compute_metrics import AVAILABLE_MODELS
+
         # inject model into MultiExpertAdapter
         MultiExpertAdapter.model_context.model = model
 
@@ -173,6 +176,8 @@ class MixEvalEvaluator(GenerativeEvaluator):
             raise ValueError("Output path is required for evaluation.")
 
         eval(self.config)
+
+        AVAILABLE_MODELS[self.config.model_name] = "MultiExpertAdapter"
         compute_metrics_p(self.config)
 
         with open(os.path.join(self.config.output_dir, "score.json"), "r") as f:
