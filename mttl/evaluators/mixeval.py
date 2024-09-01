@@ -153,8 +153,6 @@ class MixEvalEvaluator(GenerativeEvaluator):
         self,
         model,
         split=None,
-        shuffle=False,
-        subsample=-1,
         output_path=None,
         verbose=False,
         **kwargs,
@@ -177,12 +175,13 @@ class MixEvalEvaluator(GenerativeEvaluator):
 
         eval(self.config)
 
+        # for some reason, available models is filled by hand rather than by the decorator, /shrug
         AVAILABLE_MODELS[self.config.model_name] = "MultiExpertAdapter"
         compute_metrics_p(self.config)
 
         with open(os.path.join(self.config.output_dir, "score.json"), "r") as f:
             score = json.load(f)
-        return score[self.config.model_name]["overall"]
+        return score[self.config.model_name]["overall score (final score)"]
 
 
 if __name__ == "__main__":
