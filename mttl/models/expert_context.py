@@ -24,7 +24,9 @@ class InfoContainer:
 
     @classmethod
     def get(cls):
-        return cls.local.context
+        if hasattr(cls.local, "context"):
+            return cls.local.context
+        return None
 
     @property
     def routing_infos(self):
