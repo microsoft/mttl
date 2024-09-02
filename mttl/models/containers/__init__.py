@@ -44,9 +44,7 @@ def get_container_class(modifier: str):
     import os
 
     if modifier == "lora":
-        if os.environ.get("COALESCED_LORA_CONTAINER", "False") == "1":
-            return CoalescedLoRAExpertContainer
-        return LoRAExpertContainer
+        return CoalescedLoRAExpertContainer
     elif modifier == "skilled_lora":
         if not os.environ.get("COALESCED_LORA_CONTAINER", "False") == "1":
             warn_once(

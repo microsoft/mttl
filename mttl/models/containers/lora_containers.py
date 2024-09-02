@@ -12,7 +12,13 @@ from mttl.models.containers.selectors.selector_output import (
     SelectorOutput,
 )
 from mttl.models.library.expert import Expert
-from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
+from mttl.models.modifiers.lora import (
+    LoRA,
+    LoRAConfig,
+    SkilledLoRA,
+    SkilledLoRAConfig,
+    SkilledLoRAView,
+)
 from mttl.models.modifiers.modify_model import get_modifier_name
 
 
@@ -249,7 +255,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             )
 
         # create a skilled lora config with 0 skills
-        self.dummy_config = SkilledLoRAConfig(
+        self.skilled_config = SkilledLoRAConfig(
             lora_alpha=config.lora_alpha,
             lora_dropout=config.lora_dropout,
             lora_init_b_random=config.lora_init_b_random,
@@ -262,7 +268,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                 else False
             ),
         )
-        self.experts = SkilledLoRA(self.dummy_config, layer)
+        self.experts = SkilledLoRA(self.skilled_config, layer)
 
     def __getitem__(self, name) -> Union[LoRA, SkilledLoRA]:
         """Returns either a LoRA or a SkilledLoRA module.
@@ -277,7 +283,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         modifier_name = get_modifier_name(config)
 
         if modifier_name == "lora":
-            assert self.dummy_config.n_splits == 1
+            assert self.skilled_config.n_splits == 1
             # squeeze the first dimension and the n_splits dimension
             lora = LoRA(config, self.layer)
             lora.load_lora_weights({n: w.squeeze() for n, w in weights.items()})
@@ -363,22 +369,48 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                         )
                     ).to(selection.weights.device)
 
-                # we need to expand the weights to the full size of the expert set
-                weights = torch.zeros(
-                    (selection.weights.shape[:-1] + (self.experts.n_skills,)),
+                # set of active indices
+                unique_indices, inverse_indices = torch.unique(
+                    selection.experts, return_inverse=True
+                )
+
+                # form a skilled lora for each unique index, we could potentially skip this stack step
+                # to save some memory space, but let's leave it for now
+                view = SkilledLoRAView(
+                    self.skilled_config,
+                    self.layer,
+                    lora_a=self.experts.lora_a[unique_indices],
+                    lora_b=self.experts.lora_b[unique_indices],
+                )
+                experts = [view]
+
+                # express weights in the new basis of unique indices
+                # i.e.
+                # indices          = [[10, 20], [15, 5]]
+                # weights          = [[0.2, 0.8], [0.9, 0.1]]
+                # unique indices   = [5, 10, 15, 20]
+                # inverse_indices  = [[1, 3], [2, 0]]
+                # inverse_weights  = [[0, 0.2, 0, 0.8], [0.1, 0, 0.9, 0.]]
+                inverse_weights = torch.zeros(
+                    *(selection.weights.shape[:-1] + (len(unique_indices),)),
                     device=selection.weights.device,
                     dtype=selection.weights.dtype,
-                ).scatter_add(
-                    selection.weights.ndim - 1, selection.experts, selection.weights
+                )
+                weights = torch.scatter_add(
+                    inverse_weights,
+                    selection.weights.ndim - 1,
+                    inverse_indices,
+                    selection.weights,
                 )
             else:
                 # we select all experts, weight have already the right shape
                 weights = selection.weights
                 assert weights.shape[-1] == self.experts.n_skills
+                experts = [self.experts]
 
             module_output = SkilledLoRA.parallel_linear_weighted_forward(
                 input,
-                [self.experts],
+                experts,
                 weights,
                 dim_names=selection.dim_names,
                 merge_after=self.lora_merge_after,
