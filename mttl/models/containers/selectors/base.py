@@ -42,7 +42,7 @@ class SelectorConfig(Serializable):
     # the granularity of the selector (which layers use the same selectors)
     router_granularity: str = "*"
     lora_merge_after: bool = False
-    selector_logging: bool = True
+    selector_logging: bool = False
     num_experts: int = 0
 
     def __eq__(self, other):
