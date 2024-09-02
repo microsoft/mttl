@@ -79,6 +79,10 @@ class BaseExpertModel(torch.nn.Module, Registrable):
         self.loading_kwargs = loading_kwargs
 
     @property
+    def device(self) -> torch.device:
+        return self.model.device
+
+    @property
     def base_model_name_or_path(self) -> str:
         return self.config.base_model
 
