@@ -1,6 +1,9 @@
 import json
 import os
+import shutil
 import threading
+
+from mttl.models.base_model import BaseExpertModel
 
 try:
     from mix_eval.api.registry import register_model
@@ -28,7 +31,7 @@ from mttl.models.library.expert_library import ExpertLibrary
 
 @dataclass
 class MixEvalConfig:
-    batch_size: int = 16
+    batch_size: int = 8
     model_name: str = "mix_eval_expert_adapter"
     benchmark: str = "mixeval_hard"
     data_path: str = None
@@ -84,7 +87,7 @@ class MultiExpertAdapter(ChatModel):
     def __init__(self, args):
         super().__init__(args)
 
-        self.model = self.model_context.model
+        self.model: BaseExpertModel = self.model_context.model
         self.tokenizer = get_tokenizer_with_args(
             model_name=self.model.base_model_name_or_path,
             model_family="gpt",
@@ -123,7 +126,6 @@ class MixEvalEvaluator(GenerativeEvaluator):
         self.download_data()
 
     def download_data(self):
-        import shutil
         import subprocess
 
         import mix_eval
@@ -155,6 +157,7 @@ class MixEvalEvaluator(GenerativeEvaluator):
         split=None,
         output_path=None,
         verbose=False,
+        recompute=False,
         **kwargs,
     ):
         from mix_eval.compute_metrics import AVAILABLE_MODELS
@@ -173,6 +176,9 @@ class MixEvalEvaluator(GenerativeEvaluator):
         else:
             raise ValueError("Output path is required for evaluation.")
 
+        if recompute:
+            shutil.rmtree(self.config.output_dir, ignore_errors=True)
+
         eval(self.config)
 
         # for some reason, available models is filled by hand rather than by the decorator, /shrug
@@ -185,9 +191,15 @@ class MixEvalEvaluator(GenerativeEvaluator):
 
 
 if __name__ == "__main__":
-    evaluator = MixEvalEvaluator()
-    model = MultiExpertModel(
-        MultiExpertModelConfig(base_model="microsoft/Phi-3-mini-4k-instruct"),
+    from mttl.models.containers.selectors import ArrowSelector, ArrowSelectorConfig
+    from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
+
+    model = MultiExpertModel.from_pretrained_library(
+        "sordonia/Phi-3.5-mini-instruct-28Aug",
         device_map="cuda:0",
+        attn_implementation="flash_attention_2",
+        selector_config=ArrowSelectorConfig(top_k=2),
     )
-    evaluator.evaluate(model, output_path="/tmp/mixeval/")
+    MixEvalEvaluator().evaluate(
+        model, output_path="/tmp/mixeval_phi_3.5_arrow/", verbose=True, recompute=True
+    )
