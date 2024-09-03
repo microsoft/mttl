@@ -1,19 +1,15 @@
 import functools
-import math
 import threading
 from abc import ABC
 from collections import defaultdict
-from dataclasses import dataclass
-from typing import Dict, List, Optional, Union
+from dataclasses import dataclass, field
+from typing import Dict, Union
 
-import numpy as np
 import torch
-import torch.nn.functional as F
 from pyparsing import abstractmethod
 from torch import nn
-from torch.distributions import Categorical
 
-from mttl.logging import logger, warn_once
+from mttl.logging import logger
 from mttl.models.containers.selectors.selector_output import (
     BatchExpertsAndWeightsSelectorOutput,
     BatchExpertsSelectorOutput,
@@ -29,6 +25,7 @@ from mttl.models.ranker.adapter_ranker import AdapterRankerHelper
 from mttl.models.ranker.classifier_ranker import ClusterPredictor
 from mttl.models.utils import MetricLogger
 from mttl.registrable import Registrable
+from mttl.serializable import AutoSerializable, Serializable
 
 EPS = 1e-8
 
@@ -41,7 +38,7 @@ def get_selector(selector_config: "SelectorConfig", **kwargs):
 
 
 @dataclass
-class SelectorConfig:
+class SelectorConfig(Serializable):
     # the granularity of the selector (which layers use the same selectors)
     router_granularity: str = "*"
     lora_merge_after: bool = False
@@ -51,24 +48,6 @@ class SelectorConfig:
     def __eq__(self, other):
         # compare all the attributes
         return self.__dict__ == other.__dict__
-
-    def asdict(self) -> Dict:
-        """Dump the config to a string."""
-        from dataclasses import asdict
-
-        data = asdict(self)
-        # store the model modifier for easy loading
-        data["__selector_name__"] = self.selector_name
-        return data
-
-    @classmethod
-    def fromdict(cls, dumped: Dict) -> "SelectorConfig":
-        if "__selector_name__" not in dumped:
-            raise ValueError(
-                "Cannot load SelectorConfig from dict, missing '__selector_name__' key."
-            )
-        name = dumped.pop("__selector_name__")
-        return Selector.get_config_class_by_name(name)(**dumped)
 
     @property
     def selector_name(self):
@@ -83,7 +62,7 @@ class SelectorConfig:
 
         Returns None if no modifier is set.
         """
-        from mttl.config import create_config_class_from_args
+        from mttl.arguments import create_config_class_from_args
 
         if isinstance(training_config, SelectorConfig):
             # nothing to do here
@@ -108,12 +87,37 @@ class SelectorConfig:
         return create_config_class_from_args(config_klass, training_config)
 
 
-class MultiSelectorConfig(dict):
+class AutoSelectorConfig(AutoSerializable):
+    pass
+
+
+@dataclass
+class MultiSelectorConfig(SelectorConfig):
+    selectors: Dict[str, SelectorConfig] = field(default_factory=dict)
+
+    def __len__(self):
+        return len(self.selectors)
+
+    def __getitem__(self, key):
+        return self.selectors[key]
+
+    def __keys__(self):
+        return self.selectors.keys()
+
+    def __values__(self):
+        return self.selectors.values()
+
+    def __items__(self):
+        return self.selectors.items()
+
+    def __setitem__(self, key, value):
+        self.selectors[key] = value
+
     @property
     def selector_name(self):
         import json
 
-        return json.dumps({k: v.selector_name for k, v in self.items()})
+        return json.dumps({k: v.selector_name for k, v in self.selectors.items()})
 
     @classmethod
     def from_training_config(
@@ -137,8 +141,8 @@ class MultiSelectorConfig(dict):
             config_clone = copy.deepcopy(training_config)
             config_clone.router_selector = selector_name
 
-            selector_configs[modifier_name] = SelectorConfig.from_training_config(
-                config_clone
+            selector_configs.selectors[modifier_name] = (
+                SelectorConfig.from_training_config(config_clone)
             )
         return selector_configs
 
@@ -319,7 +323,6 @@ class Selector(nn.Module, Registrable):
 
     @property
     def routing_infos(self):
-        from mttl.models.expert_context import InfoContainer
 
         info_container = self.info_container
         if not info_container:

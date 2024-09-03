@@ -29,12 +29,11 @@ def save_merged_model(model, model_path, hf_path="/tmp/merged"):
     """
 
     if model_path:
-        # TODO: REMOVE this
-        from mttl.models.expert_model import ExpertModel
+        from mttl.models.lightning.expert_module import ExpertModule
 
         logger.info("Model path is given. Loading model from: %s" % model_path)
 
-        model = ExpertModel.from_pretrained(
+        model = ExpertModule.from_pretrained(
             model_path,
             load_in_8bit=False,
             device_map={"": "cpu"},
@@ -110,42 +109,6 @@ class LLMEngine(LLM):
     @property
     def model_name(self):
         return self.llm_engine.model_config.model
-
-
-class LLMEngineRouge(LLMEngine):
-    def eval(
-        self,
-        dataloader: DataLoader,
-        generation_config,
-        max_tokens,
-        **kwargs,
-    ):
-        raise NotImplementedError("This is not finished yet.")
-        all_references = {}
-        all_task_names = {}
-        sampling_params = SamplingParams(
-            temperature=generation_config.temperature,
-            top_p=generation_config.top_p,
-            max_tokens=max_tokens,
-        )
-
-        # we explicitly add requests here, so that we can keep track of the request id
-        for request_id, batch in enumerate(
-            tqdm.tqdm(dataloader, total=len(dataloader))
-        ):
-            for context, label in zip(batch["sources_texts"], batch["labels_texts"]):
-                self.llm_engine.add_request(str(request_id), context, sampling_params)
-                all_references[str(request_id)] = label
-
-        responses = self._run_engine(use_tqdm=True)
-        responses_dict = {r.request_id: r for r in responses}
-
-        _all_predictions = []
-        _all_references = []
-        for request_id, response in responses_dict.items():
-            _all_references.append(all_references[request_id])
-
-        return _all_predictions, _all_references
 
 
 class LLMEngineMMLU(LLMEngine):

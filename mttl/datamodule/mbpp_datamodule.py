@@ -6,7 +6,7 @@ import numpy
 
 from mttl.datamodule.base import DataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.models.library.dataset_library import DatasetLibrary
 
 
 @dataclass
@@ -89,6 +89,8 @@ def completion_template(for_generation, example):
 
 @DataModule.register("mbpp", config_cls=MBPPDataConfig)
 class MBPPDataModule(DataModule):
+    collate_extra_fields = ["code_prefix", "code_tests"]
+
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
         dataset = DatasetLibrary.pull_dataset("mbpp", name=self.config.name)

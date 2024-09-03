@@ -1,20 +1,18 @@
 import os
 import urllib.request
-from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from typing import Union
 
 import pytest
 import torch
 from transformers.models.llama.configuration_llama import LlamaConfig
 from transformers.models.llama.modeling_llama import LlamaForCausalLM
 
-from mttl.config import ExpertConfig, MoEExpertConfig, MultiExpertConfig
+from mttl.arguments import ExpertConfig
 from mttl.dataloader.flan_utils import download_flan
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
-from mttl.models.expert_model import MultiExpertModel
-from mttl.models.library.expert import Expert
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.models.library.dataset_library import DatasetLibrary
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.modifiers.lora import LoRAConfig
 
@@ -137,6 +135,8 @@ def tmp_lora_config(tmp_path: Path):
 
 @pytest.fixture
 def tmp_exp_config(tmp_path: Path):
+    from mttl.arguments import ExpertConfig
+
     return ExpertConfig(
         model="EleutherAI/gpt-neo-125m",
         library_id=None,
@@ -152,6 +152,8 @@ def tmp_exp_config(tmp_path: Path):
 
 @pytest.fixture
 def tmp_multi_exp_config(tmp_path: Path):
+    from mttl.arguments import MultiExpertConfig
+
     return MultiExpertConfig(
         model="EleutherAI/gpt-neo-125m",
         library_id=None,
@@ -170,6 +172,8 @@ def tmp_multi_exp_config(tmp_path: Path):
 
 @pytest.fixture
 def tmp_peer_moe_config(tmp_path: Path):
+    from mttl.arguments import MoEExpertConfig
+
     return MoEExpertConfig(
         model="EleutherAI/gpt-neo-125m",
         library_id=None,
@@ -186,7 +190,7 @@ def tmp_peer_moe_config(tmp_path: Path):
 
 @pytest.fixture
 def tmp_moe_exp_config(tmp_path):
-    from mttl.config import MoEExpertConfig
+    from mttl.arguments import MoEExpertConfig
 
     return MoEExpertConfig(
         model="EleutherAI/gpt-neo-125m",
@@ -207,17 +211,47 @@ def tmp_moe_exp_config(tmp_path):
 
 @pytest.fixture
 def create_dummy_expert(make_tiny_llama):
-    def _create_dummy_expert(config: MultiExpertConfig, exp_name, **kwargs) -> Expert:
+    from mttl.arguments import MultiExpertConfig
+    from mttl.models.expert_model import (
+        ExpertModel,
+        ExpertModelConfig,
+        MultiExpertModel,
+        MultiExpertModelConfig,
+    )
+    from mttl.models.library.expert import Expert
+
+    def _create_dummy_expert(
+        config: Union[MultiExpertConfig, ExpertConfig], exp_name, **kwargs
+    ) -> Expert:
         if "model_object" not in kwargs and (
             config.model is None or config.model == ""
         ):
             # use tiny llama by default
-            kwargs["model_object"] = make_tiny_llama()
+            model_object = make_tiny_llama()
+        else:
+            model_object = None
 
-        model = MultiExpertModel(**config.asdict(), **kwargs)
-        expert = model.add_empty_expert(
-            exp_name, ModifierConfig.from_training_config(config)
-        )
+        if type(config) is ExpertConfig:
+            model = ExpertModel(
+                ExpertModelConfig(
+                    base_model=config.model,
+                    modifier_config=config.modifier_config,
+                    expert_name=exp_name,
+                    task_name=config.finetune_task_name,
+                ),
+                model_object=model_object,
+                device_map="cpu",
+            )
+            expert = model.as_expert(config)
+        else:
+            config = MultiExpertModelConfig(
+                base_model=config.model,
+                selector_config=config.selector_config,
+            )
+            model = MultiExpertModel(
+                config, model_object=model_object, device_map="cpu"
+            )
+            expert = model.add_empty_expert(exp_name, config.modifier_config)
         return expert
 
     return _create_dummy_expert

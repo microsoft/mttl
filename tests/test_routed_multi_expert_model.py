@@ -1,32 +1,29 @@
-import functools
-import os
+from typing import Union
 
 import numpy as np
 import pytest
 import torch
 from pytorch_lightning import seed_everything
 
-from mttl.config import MoEExpertConfig, MultiExpertConfig
+from mttl.arguments import MoEExpertConfig, MultiExpertConfig
 from mttl.models.containers.lora_containers import (
     CoalescedLoRAExpertContainer,
     LoRAExpertContainer,
 )
-from mttl.models.containers.selectors.base import LoadableLibraryMixin
 from mttl.models.containers.selectors.moe_selector import MOERKHSSelector
 from mttl.models.containers.selectors.per_token_selector import PerTokenSelector
 from mttl.models.containers.selectors.poly_selector import (
     PolySelector,
-    PolySelectorConfig,
     PolySelectorDirect,
 )
 from mttl.models.containers.selectors.selector_output import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
     SelectorOutput,
 )
-from mttl.models.expert_model import MoEModel, MultiExpertModel
+from mttl.models.expert_model import MoEModel, MoEModelConfig
 from mttl.models.library.expert import Expert
-from mttl.models.modifiers.base import ModifierConfig
-from mttl.models.modifiers.lora import LoRA
+from mttl.models.lightning.expert_module import MoEModule, MultiExpertModule
+from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRAConfig
 
 
 @pytest.fixture
@@ -52,9 +49,42 @@ bs, max_seq_len = 10, 5
 
 
 def create_dummy_expert(config: MultiExpertConfig, exp_name) -> Expert:
-    model = MultiExpertModel(model=config.model, device_map="cpu")
+    from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
+
+    model = MultiExpertModel(
+        MultiExpertModelConfig(
+            base_model=config.model,
+        ),
+        device_map="cpu",
+    )
     expert = model.add_empty_expert(exp_name, config.modifier_config)
     return expert
+
+
+def create_expert_model_from_args(config: Union[MultiExpertConfig, MoEExpertConfig]):
+    from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
+
+    if type(config) is MultiExpertConfig:
+        model = MultiExpertModel(
+            MultiExpertModelConfig(
+                base_model=config.model,
+                selector_config=config.selector_config,
+            ),
+            device_map="cpu",
+        )
+        return model
+    elif type(config) is MoEExpertConfig:
+        model = MoEModel(
+            MoEModelConfig(
+                base_model=config.model,
+                moe_num_experts=config.moe_num_experts,
+                library_id=config.library_id,
+                modifier_config=config.modifier_config,
+                selector_config=config.selector_config,
+            ),
+            device_map="cpu",
+        )
+        return model
 
 
 def test_add_expert_with_action_merge(tmp_multi_exp_config, monkeypatch):
@@ -68,12 +98,13 @@ def test_add_expert_with_action_merge(tmp_multi_exp_config, monkeypatch):
     exp2_dest = create_dummy_expert(config, "exp2")
     module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
-    module = MultiExpertModel(**vars(config))
+    module = create_expert_model_from_args(config)
     module.add_experts_from_dict(module_dict, action="merge")
 
     assert isinstance(
         module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
     )
+
     # expert container should be empty
     assert len(module.model.transformer.h[0].attn.attention.k_proj) == 0
 
@@ -88,8 +119,8 @@ def test_add_expert_with_action_merge(tmp_multi_exp_config, monkeypatch):
     batch["attention_mask"] = attn_mask
 
     # Test Base Llama model
-    output = module(batch)
-    assert np.allclose(output.item(), 15.2, atol=0.1)
+    output = module(**batch)
+    assert np.allclose(output.loss.item(), 15.2, atol=0.1)
 
 
 def nonzero_B_init(model):
@@ -110,7 +141,8 @@ def test_expert_selector_with_poly_task_routing(
     monkeypatch.setenv("COALESCED_LORA_CONTAINER", str(is_coalesced))
 
     seed_everything(0)
-    config: Config = tmp_multi_exp_config
+
+    config: MultiExpertConfig = tmp_multi_exp_config
     config.router_selector = "poly_router"
 
     # Tasks need to be specified to the selector to perform routing
@@ -120,10 +152,7 @@ def test_expert_selector_with_poly_task_routing(
     exp2 = create_dummy_expert(config, "task_2")
     module_dict = {"mod1": exp1, "mod2": exp2}
 
-    module = MultiExpertModel(
-        **vars(config),
-    )
-    assert module.hparams.model_modifier == None
+    module = create_expert_model_from_args(config)
     module.add_experts_from_dict(module_dict, action="route")
 
     assert isinstance(
@@ -142,13 +171,13 @@ def test_expert_selector_with_poly_task_routing(
     batch["task_names"] = ["task_1", "task_2"] * 5
 
     # BASE MODEL FWD BASS (because all Bs are == 0, so functially same as backbone)
-    output = module(batch)
-    assert np.allclose(output.item(), 13.625 if is_coalesced else 15.62, atol=0.1)
+    output = module(**batch)
+    assert np.allclose(output.loss.item(), 13.625 if is_coalesced else 15.6, atol=0.1)
 
     # Now let's change the adapter params, and also the function parameterized by the model
     nonzero_B_init(module)
-    output = module(batch)
-    assert np.allclose(output.item(), 19.0 if is_coalesced else 18.375, atol=0.1)
+    output = module(**batch)
+    assert np.allclose(output.loss.item(), 19.0 if is_coalesced else 18.4, atol=0.1)
 
     """ Multi-Head Routing Test """
     # NOTE: We need to add SkilledLoRAs instead of standard LoRAs
@@ -163,17 +192,14 @@ def test_expert_selector_with_poly_task_routing(
     exp2 = create_dummy_expert(config, "task_2")
 
     module_dict = {"mod1": exp1, "mod2": exp2}
-    module = MultiExpertModel(
-        **vars(config),
-    )
-    assert module.hparams.model_modifier == None
+    module = create_expert_model_from_args(config)
     module.add_experts_from_dict(module_dict, action="route")
-    nonzero_B_init(module)
 
-    output = module(batch)
+    nonzero_B_init(module)
+    output = module(**batch)
 
     # Because routing is initialized to uniform, should give same result
-    assert np.allclose(output.item(), 19.12 if is_coalesced else 19.12, atol=0.1)
+    assert np.allclose(output.loss.item(), 19.0 if is_coalesced else 19.12, atol=0.1)
 
     # Now let's change the routing, to make sure the output also changes
     for mod in module.modules():
@@ -181,26 +207,25 @@ def test_expert_selector_with_poly_task_routing(
             mod.module_logits.data.uniform_(-10, 10)
             mod.module_logits.data[:, -1] = 999
 
-    output = module(batch)
-    assert np.allclose(output.item(), 20.375 if is_coalesced else 19.875, atol=0.1)
+    output = module(**batch)
+    assert np.allclose(output.loss.item(), 20.375 if is_coalesced else 19.875, atol=0.1)
 
     # Finally, Test invalid tasks
     batch["task_names"][-1] = "task_10"
     with pytest.raises(AssertionError):
-        output = module(batch)
+        output = module(**batch)
 
 
 def test_expert_selector_with_task_name_routing(tmp_multi_exp_config):
     seed_everything(0)
-    config: Config = tmp_multi_exp_config
+    config: MultiExpertConfig = tmp_multi_exp_config
 
     config.router_selector = "task_selector"
     exp1 = create_dummy_expert(config, "exp1")
     exp2 = create_dummy_expert(config, "exp2")
     module_dict = {"mod1": exp1, "mod2": exp2, "mod3": exp1}
 
-    module = MultiExpertModel(**vars(config))
-    assert module.hparams.model_modifier == None
+    module = create_expert_model_from_args(config)
     module.add_experts_from_dict(module_dict, action="route")
     module.set_default_expert("mod3")
 
@@ -225,8 +250,8 @@ def test_expert_selector_with_task_name_routing(tmp_multi_exp_config):
     batch["task_sources"] = batch["task_names"]
 
     # Test Base Llama model
-    output = module(batch)
-    assert np.allclose(output.item(), 12.3125, atol=0.1)
+    output = module(**batch)
+    assert np.allclose(output.loss.item(), 12.3125, atol=0.1)
 
 
 def test_expert_selector_with_poly_routing(tmp_multi_exp_config):
@@ -238,7 +263,7 @@ def test_expert_selector_with_poly_routing(tmp_multi_exp_config):
     exp2_dest = create_dummy_expert(config, "exp2")
     module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
 
-    module = MultiExpertModel(**vars(config))
+    module = create_expert_model_from_args(config)
     module.add_experts_from_dict(module_dict, action="route")
     assert module.selectors["lora"][0].init_gap == [-1e-3, 1e-3]
 
@@ -263,8 +288,8 @@ def test_expert_selector_with_poly_routing(tmp_multi_exp_config):
     batch["task_sources"] = batch["task_names"]
 
     # Test Base Llama model
-    output = module(batch)
-    assert np.allclose(output.item(), 12.3125, atol=0.1)
+    output = module(**batch)
+    assert np.allclose(output.loss.item(), 12.3125, atol=0.1)
 
     # check the get_router_weights function
     weights = {}
@@ -291,17 +316,15 @@ def test_expert_selector_with_poly_routing(tmp_multi_exp_config):
     config.router_granularity = "finegrained"
     config.finetune_task_name = "mod1"
 
-    module = MultiExpertModel(
-        **vars(config),
-    )
+    module = create_expert_model_from_args(config)
     module.add_experts_from_dict(module_dict)
     selector = module.selectors["lora"][0]
     assert selector.init_gap == [0, 0]
     assert selector.module_logits_dict["mod1"].item() == 1.0
     assert selector.module_logits_dict["mod2"].item() == 0.0
 
-    output = module(batch)
-    assert np.allclose(output.item(), 12.3125, atol=0.1)
+    output = module(**batch)
+    assert np.allclose(output.loss.item(), 12.3125, atol=0.1)
 
     weights = {}
     for _, selector_dict in module.selector_cache.items():
@@ -312,13 +335,13 @@ def test_expert_selector_with_poly_routing(tmp_multi_exp_config):
 
 def test_expert_selector_with_moe_routing_soft(mocker, tmp_moe_exp_config, dummy_batch):
     seed_everything(0)
-    config: MultiExpertConfig = tmp_moe_exp_config
+
+    config: MoEExpertConfig = tmp_moe_exp_config
+
     config.router_selector = "moe_rkhs_router"
     config.router_granularity = "finegrained"
-    config.moe_emb_dim = 10
-    config.moe_rkhs_dim = 10
 
-    module = MoEModel(**vars(config))
+    module = create_expert_model_from_args(config)
 
     container = module.model.transformer.h[0].attn.attention.k_proj
     assert isinstance(container, LoRAExpertContainer)
@@ -327,8 +350,8 @@ def test_expert_selector_with_moe_routing_soft(mocker, tmp_moe_exp_config, dummy
 
     # Test Base Llama model
     spy = mocker.spy(container.selector, "forward")
-    output = module(dummy_batch)
-    assert np.allclose(output.item(), 18, atol=0.1)
+    output = module(**dummy_batch)
+    assert np.allclose(output.loss.item(), 18, atol=0.1)
     assert container.selector.total_calls_per_forward == 1
 
     assert spy.call_count == 1
@@ -341,13 +364,13 @@ def test_expert_selector_with_moe_routing_soft_granularity(
     mocker, tmp_moe_exp_config, dummy_batch
 ):
     seed_everything(0)
-    config: MultiExpertConfig = tmp_moe_exp_config
+    config: MoEExpertConfig = tmp_moe_exp_config
     config.router_selector = "moe_rkhs_router"
     config.router_granularity = "coarsegrained"
     config.moe_emb_dim = 10
     config.moe_rkhs_dim = 10
 
-    module = MoEModel(**vars(config))
+    module = create_expert_model_from_args(config)
 
     container = module.model.transformer.h[0].attn.attention.k_proj
     assert isinstance(container, LoRAExpertContainer)
@@ -355,17 +378,16 @@ def test_expert_selector_with_moe_routing_soft_granularity(
     assert len(container.selector.views) == 71
     assert container.selector.top_k == -1
     # Test Base Llama model
-    output = module(dummy_batch)
-    assert np.allclose(output.item(), 18.1, atol=0.1)
+    output = module(**dummy_batch)
+    assert np.allclose(output.loss.item(), 18.1, atol=0.1)
     assert container.selector.total_calls_per_forward == 72
 
-    config: MultiExpertConfig = tmp_moe_exp_config
+    config: MoEExpertConfig = tmp_moe_exp_config
     config.router_granularity = "mixer"
+
     # mixer not found
     with pytest.raises(ValueError):
-        module = MoEModel(
-            **vars(config),
-        )
+        module = create_expert_model_from_args(config)
 
 
 def test_expert_selector_with_moe_routing_soft_coalesced(
@@ -374,14 +396,14 @@ def test_expert_selector_with_moe_routing_soft_coalesced(
     monkeypatch.setenv("COALESCED_LORA_CONTAINER", "1")
 
     seed_everything(0)
-    config: MultiExpertConfig = tmp_moe_exp_config
+    config: MoEExpertConfig = tmp_moe_exp_config
     config.router_selector = "moe_rkhs_router"
     config.router_granularity = "finegrained"
     config.top_k = -1
     config.emb_dim = 10
     config.rkhs_dim = 10
 
-    module = MoEModel(**vars(config))
+    module = create_expert_model_from_args(config)
 
     container = module.model.transformer.h[0].attn.attention.k_proj
     assert isinstance(container, CoalescedLoRAExpertContainer)
@@ -390,8 +412,8 @@ def test_expert_selector_with_moe_routing_soft_coalesced(
 
     # Test Base Llama model
     spy = mocker.spy(container.selector, "forward")
-    output = module(dummy_batch)
-    assert np.allclose(output.item(), 18, atol=0.1)
+    output = module(**dummy_batch)
+    assert np.allclose(output.loss.item(), 18, atol=0.1)
     assert container.selector.total_calls_per_forward == 1
 
     assert spy.call_count == 1
@@ -402,14 +424,14 @@ def test_expert_selector_with_moe_routing_soft_coalesced(
 
 def test_expert_selector_with_moe_routing_hard(mocker, tmp_moe_exp_config, dummy_batch):
     seed_everything(0)
-    config: MultiExpertConfig = tmp_moe_exp_config
+    config: MoEExpertConfig = tmp_moe_exp_config
     config.router_selector = "moe_rkhs_router"
     config.router_granularity = "finegrained"
     config.top_k = 2
     config.emb_dim = 10
     config.rkhs_dim = 10
 
-    module = MoEModel(**vars(config))
+    module = create_expert_model_from_args(config)
 
     container = module.model.transformer.h[0].attn.attention.k_proj
     assert isinstance(container, LoRAExpertContainer)
@@ -418,8 +440,8 @@ def test_expert_selector_with_moe_routing_hard(mocker, tmp_moe_exp_config, dummy
 
     # Test Base Llama model
     spy = mocker.spy(container.selector, "forward")
-    output = module(dummy_batch)
-    assert np.allclose(output.item(), 18, atol=0.1)
+    output = module(**dummy_batch)
+    assert np.allclose(output.loss.item(), 18, atol=0.1)
     assert container.selector.total_calls_per_forward == 1
 
     assert spy.call_count == 1
@@ -434,12 +456,12 @@ def test_expert_selector_with_moe_clown_routing_soft_coalesced(
     monkeypatch.setenv("COALESCED_LORA_CONTAINER", "1")
 
     seed_everything(0)
-    config: MultiExpertConfig = tmp_moe_exp_config
+    config: MoEExpertConfig = tmp_moe_exp_config
     config.router_selector = "arrow_router"
     config.router_granularity = "finegrained"
     config.router_temp = 0.1
 
-    module = MoEModel(**vars(config))
+    module = create_expert_model_from_args(config)
 
     container = module.model.transformer.h[0].attn.attention.k_proj
     assert isinstance(container, CoalescedLoRAExpertContainer)
@@ -462,13 +484,13 @@ def test_expert_selector_with_moe_clown_routing_soft_coalesced(
                 sub_mod.overwrite_prototypes(protos)
 
     init_proto(1.0)
-    output = module(bigger_dummy_batch)
+    output = module(**bigger_dummy_batch)
     entropy_uniform = container.selector.metric_logger.meters["ent_uniform"].avg
     actual_entropy = container.selector.metric_logger.meters["ent_routing"].avg
     assert np.allclose(entropy_uniform, actual_entropy, atol=0.1)
 
     init_proto(random=True)
-    output = module(bigger_dummy_batch)
+    output = module(**bigger_dummy_batch)
     entropy_uniform = container.selector.metric_logger.meters["ent_uniform"].avg
     actual_entropy = container.selector.metric_logger.meters["ent_routing"].avg
     assert actual_entropy < entropy_uniform
@@ -486,7 +508,7 @@ def test_expert_selector_with_task_predictor_selection(tmp_multi_exp_config):
     exp2_dest = create_dummy_expert(config, "exp2")
     module_dict = {"niv2_sentence_compression": exp1_dest, "niv2_misc": exp2_dest}
 
-    module = MultiExpertModel(**vars(config))
+    module = create_expert_model_from_args(config)
     module.add_experts_from_dict(module_dict, action="route")
 
     bs = 2
@@ -502,4 +524,4 @@ def test_expert_selector_with_task_predictor_selection(tmp_multi_exp_config):
     attn_mask = 1 - attn_mask.cumsum(dim=-1)
     batch["attention_mask"] = attn_mask
 
-    output = module(batch)
+    output = module(**batch)

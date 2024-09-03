@@ -1,7 +1,8 @@
+import dataclasses
 import itertools
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import numpy as np
 import torch
@@ -98,8 +99,91 @@ class DatasetConfig:
     max_seq_per_pack: int = 4
 
 
+class PackedMixin:
+    @classmethod
+    def pad_sequence_wrapper(
+        cls, tensor_list, batch_first, padding_value, side="right"
+    ):
+        """Padding Sequence Fn that supports left padding"""
+        if side == "left":
+            tensor_list = [x.flip(0) for x in tensor_list]
+
+        padded = pad_sequence(
+            tensor_list, batch_first=batch_first, padding_value=padding_value
+        )
+
+        if side == "left":
+            padded = padded.flip(1)
+
+        return padded
+
+    def _get_nested_type(self, item):
+        while isinstance(item, (list, tuple)):
+            item = item[0]
+        return type(item)
+
+    def _tensor_dtype(self, item):
+        dtype = self._get_nested_type(item)
+        return {"int": torch.int64, "float": torch.float32, "bool": torch.bool}.get(
+            dtype.__name__, None
+        )
+
+    def packed_collate(self, batch):
+        output_batch = defaultdict(list)
+
+        for batch_item in batch:
+            for key, value in batch_item.items():
+                dtype = self._tensor_dtype(value)
+
+                if dtype:
+                    output_batch[key].append(torch.Tensor(value).to(dtype))
+                else:
+                    output_batch[key].append(value)
+
+        # create proper containers
+        for key, value in output_batch.items():
+            if isinstance(value[0], torch.Tensor):
+                pad_token = {
+                    "input_ids": self.tokenizer.pad_token_id,
+                    "labels": self.label_pad_token_id,
+                }.get(key, 0)
+
+                value = self.pad_sequence_wrapper(
+                    value,
+                    batch_first=True,
+                    padding_value=pad_token,
+                    side=self.tokenizer.padding_side,
+                )
+                output_batch[key] = value
+
+        packed_seq_lens = output_batch["seq_lens"].flatten().cumsum(0)
+        output_batch["packed_seq_lens"] = F.pad(packed_seq_lens, (1, 0)).to(torch.int32)
+
+        # build the appropriate "block"-lower triangular mask for sdpa attention
+        bs, seq_len = output_batch["input_ids"].shape
+        packed_attn_mask = torch.zeros(bs, 1, seq_len, seq_len, dtype=torch.bool)
+        for i in range(bs):
+            start_idx = 0
+            for seq_len in output_batch["seq_lens"][i]:
+                packed_attn_mask[
+                    i,
+                    :,
+                    start_idx : start_idx + seq_len,
+                    start_idx : start_idx + seq_len,
+                ] = True
+                start_idx += seq_len
+
+            # For whatever reason, we need to let padding tokens attend the previous context ¯\_(ツ)_/¯
+            # Otherwise SDPA has nans
+            packed_attn_mask[i, :, start_idx:, :start_idx] = True
+
+        packed_attn_mask = packed_attn_mask.tril()
+        output_batch["packed_attn_mask"] = packed_attn_mask
+        return dict(output_batch)
+
+
 @dataclass
-class DefaultCollator:
+class DefaultCollator(PackedMixin):
     """Simple collator
 
     Converts a batch of examples into a batch of inputs and labels for a sequence to sequence task.
@@ -119,6 +203,7 @@ class DefaultCollator:
     train_on_inputs: bool = False
     task_to_id: dict = None
     add_eos_to_targets: bool = True
+    collate_extra_fields: Optional[List] = None
 
     def enforce_eos(self, targets):
         # simulate the default behaviour of LLamatokenizer, when adding eos token and truncating: the last token must always be eos
@@ -322,88 +407,9 @@ class DefaultCollator:
         output_batch["labels"] = targets
         return output_batch
 
-    def _get_nested_type(self, item):
-        while isinstance(item, (list, tuple)):
-            item = item[0]
-        return type(item)
-
-    def _tensor_dtype(self, item):
-        dtype = self._get_nested_type(item)
-        return {"int": torch.int64, "float": torch.float32, "bool": torch.bool}.get(
-            dtype.__name__, None
-        )
-
-    def __call__(self, batch: Dict):
-        # is our input already tokenized ?
-        # trim according to the attention mask and return
-
-        def pad_sequence_wrapper(tensor_list, batch_first, padding_value, side="right"):
-            """Padding Sequence Fn that supports left padding"""
-            if side == "left":
-                tensor_list = [x.flip(0) for x in tensor_list]
-
-            padded = pad_sequence(
-                tensor_list, batch_first=batch_first, padding_value=padding_value
-            )
-
-            if side == "left":
-                padded = padded.flip(1)
-
-            return padded
-
+    def __call__(self, batch):
         if "input_ids" in batch[0]:
-            output_batch = defaultdict(list)
-            for batch_item in batch:
-                for key, value in batch_item.items():
-                    dtype = self._tensor_dtype(value)
-
-                    if dtype:
-                        output_batch[key].append(torch.Tensor(value).to(dtype))
-                    else:
-                        output_batch[key].append(value)
-
-            # create proper containers
-            for key, value in output_batch.items():
-                if isinstance(value[0], torch.Tensor):
-                    pad_token = {
-                        "input_ids": self.tokenizer.pad_token_id,
-                        "labels": self.label_pad_token_id,
-                    }.get(key, 0)
-                    value = pad_sequence_wrapper(
-                        value,
-                        batch_first=True,
-                        padding_value=pad_token,
-                        side=self.tokenizer.padding_side,
-                    )
-                    output_batch[key] = value
-
-            packed_seq_lens = output_batch["seq_lens"].flatten().cumsum(0)
-            output_batch["packed_seq_lens"] = F.pad(packed_seq_lens, (1, 0)).to(
-                torch.int32
-            )
-
-            # build the appropriate "block"-lower triangular mask for sdpa attention
-            bs, seq_len = output_batch["input_ids"].shape
-            packed_attn_mask = torch.zeros(bs, 1, seq_len, seq_len, dtype=torch.bool)
-            for i in range(bs):
-                start_idx = 0
-                for seq_len in output_batch["seq_lens"][i]:
-                    packed_attn_mask[
-                        i,
-                        :,
-                        start_idx : start_idx + seq_len,
-                        start_idx : start_idx + seq_len,
-                    ] = True
-                    start_idx += seq_len
-
-                # For whatever reason, we need to let padding tokens attend the previous context ¯\_(ツ)_/¯
-                # Otherwise SDPA has nans
-                packed_attn_mask[i, :, start_idx:, :start_idx] = True
-
-            packed_attn_mask = packed_attn_mask.tril()
-            output_batch["packed_attn_mask"] = packed_attn_mask
-
-            return dict(output_batch)
+            return self.packed_collate(batch)
 
         # Otherwise process as expected
         sources = [b["source"] for b in batch]
@@ -437,10 +443,11 @@ class DefaultCollator:
         output_batch["labels_texts"] = labels
         output_batch["task_sources"] = task_sources
 
-        # append other fields that might be available
-        for key in batch[0].keys():
-            if key not in output_batch:
-                output_batch[key] = [b[key] for b in batch]
+        # integrate extra fields in the batch if required
+        if self.collate_extra_fields:
+            for field in self.collate_extra_fields:
+                output_batch[field] = [b[field] for b in batch]
+
         return output_batch
 
 
@@ -521,6 +528,9 @@ def subsample_dst(dataset, subsample: int, rng: torch.Generator = None):
 
 
 class DataModule(LightningDataModule, Registrable):
+    # if you want the default collator to return extra fields, you can set this to the list of fields
+    collate_extra_fields: List[str] = None
+
     def train_dataloader(self, subsample=None):
         subsample = subsample or self.config.subsample
         train_dataset = self.train_dataset
@@ -583,6 +593,7 @@ class DataModule(LightningDataModule, Registrable):
             train_on_inputs=self.config.train_on_inputs,
             add_eos_to_targets=self.config.add_eos_to_targets,
             task_to_id=self.task_to_id,
+            collate_extra_fields=self.collate_extra_fields,
         )
 
     def print_infos(self):
@@ -707,26 +718,29 @@ class DataModule(LightningDataModule, Registrable):
     def setup_dataset(self):
         pass
 
-    def tokenize_dataset(self, dataset):
+    def tokenize_dataset(self, dataset: ArrowDataset):
+        """Tokenize the full dataset in preparation for packing.
 
+        We call collate_fn and copy it to not disrupt the behavior of the collate_fn
+        for this dataset.
+        """
         # NOTE: padding is hardcoded to `longest` already.
         # return tensors is harcoded to `pt`, but tokenizer in dataset.map overwrites this
-        # TODO: write a test for this
-        pad_to_multiple = self.config.pad_to_multiple_of
-        self.config.pad_to_multiple_of = 1
-
-        # remove `rng` before mapping, as it's not pickleable
-        rng = self.rng
-        self.rng = None
+        collate_fn_ = dataclasses.replace(self.collate_fn)
+        collate_fn_.pad_to_multiple_of = 1
+        collate_fn_.padding = "longest"
+        dataset_columns = dataset.column_names
 
         def collate_fn_wrapper(batch):
-            out = self.collate_fn([batch])
+            out = collate_fn_([batch])
             return {k: v[0] for k, v in out.items()}
 
-        dataset = dataset.map(collate_fn_wrapper, batched=False, num_proc=20)
-        self.rng = rng
-        self.collate_fn.pad_to_multiple_of = pad_to_multiple
-
+        dataset = dataset.map(
+            collate_fn_wrapper,
+            batched=False,
+            num_proc=20,
+            remove_columns=dataset_columns,
+        )
         return dataset
 
     def pack_sequences(self, dataset, max_sequences=4, shuffle=True):
@@ -737,16 +751,12 @@ class DataModule(LightningDataModule, Registrable):
         if shuffle:
             dataset = dataset.shuffle(seed=42)
 
-        # TODO: first partition dataset according to `task_name`, and
-        # pack each task individually to ensure that we don't mix tasks
-
         # Very basic code that will iterate over sequences one by one,
         # and merge together until the max_input_length is reached
         # This is not optimal, but it's a start
         max_length = self.config.max_input_length
 
         def group(examples):
-
             def new_container():
                 # for when starting a new packed batch
                 return {k: [] for k in list(examples.keys()) + ["seq_lens"]}
@@ -762,7 +772,6 @@ class DataModule(LightningDataModule, Registrable):
                     else:
                         raise ValueError(f"Unknown type {type(v)}")
 
-                # TODO: THis is SOMEHOW WRONG. CHECK.
                 container["seq_lens"] += [len(example["input_ids"])]
 
             def add_finished_sequence(container, example):
@@ -794,6 +803,7 @@ class DataModule(LightningDataModule, Registrable):
                 else:
                     if len(current_lens) > 0:
                         add_finished_sequence(grouped_samples, packed)
+
                     packed = new_container()
                     current_lens = []
                     trim_ex(ex)
@@ -812,6 +822,7 @@ class DataModule(LightningDataModule, Registrable):
             batch_size=10_000,
             remove_columns=list(dataset.features),
         )
+
         return dataset
 
     def post_setup_dataset(self):
@@ -831,6 +842,7 @@ class DataModule(LightningDataModule, Registrable):
 
             if self.config.pack_sequences and split == "train":
                 dataset = getattr(self, f"{split}_dataset")
+
                 logger.info(f"Packing sequences for {split} dataset")
                 dataset = self.tokenize_dataset(dataset)
                 dataset = self.pack_sequences(

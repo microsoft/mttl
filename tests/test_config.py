@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from mttl.config import Args, ModifierArgs
+from mttl.arguments import Args, ModifierArgs
 
 
 @pytest.fixture
@@ -90,7 +90,7 @@ def test_config_to_json(InheritFromModifierArgs):
     assert data["optimizer"] == "adafactor"
     assert data["dataset"] == "t0"
     assert data["model"] == "t5-large"
-    assert data["args_class"] == "TestConfig"
+    assert data["class_name"] == "test_config.TestConfig"
 
 
 def test_config_was_override_from_file(tmp_path, SimpleArgs):
@@ -128,7 +128,7 @@ def test_config_was_default_from_file(tmp_path, SimpleArgs):
 
 
 def test_auto_modifier_config():
-    from mttl.config import ModifierArgs
+    from mttl.arguments import ModifierArgs
     from mttl.models.modifiers.base import ModifierConfig
 
     config = ModifierArgs()
@@ -148,14 +148,14 @@ def test_auto_modifier_config():
 
 
 def test_dump_load_lora_config():
-    from mttl.models.modifiers.base import ModifierConfig
+    from mttl.models.modifiers.base import AutoModifierConfig
+    from mttl.models.modifiers.lora import LoRAConfig
 
     data = {
-        "__model_modifier__": "lora",
         "lora_rank": 12,
         "lora_dropout": 0.52,
     }
-    lora_config = ModifierConfig.fromdict(data)
+    lora_config = LoRAConfig.fromdict(data)
 
     from mttl.models.modifiers.lora import LoRAConfig
 
@@ -163,12 +163,65 @@ def test_dump_load_lora_config():
     assert lora_config.lora_rank == 12
     assert lora_config.lora_dropout == 0.52
 
+    load_config = AutoModifierConfig.fromdict(lora_config.asdict())
+    assert type(load_config) == LoRAConfig
+
+    load_config = AutoModifierConfig.fromdict(
+        lora_config.asdict(skip_fields=["lora_dropout"])
+    )
+    assert type(load_config) == LoRAConfig
+    assert load_config.lora_dropout != 0.52
+
 
 def test_dump_load_selector_config():
-    from mttl.models.containers.selectors.base import SelectorConfig
+    from mttl.models.containers.selectors.base import AutoSelectorConfig
     from mttl.models.containers.selectors.moe_selector import MOERKHSSelectorConfig
 
     dump = MOERKHSSelectorConfig(emb_dim=12345).asdict()
-    test = SelectorConfig.fromdict(dump)
+    test = AutoSelectorConfig.fromdict(dump)
     assert test.emb_dim == 12345
     assert type(test) == MOERKHSSelectorConfig
+
+
+def test_dump_load_multi_selector_config():
+    from mttl.models.containers.selectors.base import (
+        AutoSelectorConfig,
+        MultiSelectorConfig,
+        TaskNameSelectorConfig,
+    )
+    from mttl.models.containers.selectors.moe_selector import MOERKHSSelectorConfig
+
+    dump = MultiSelectorConfig(
+        selectors={
+            "lora": MOERKHSSelectorConfig(emb_dim=12345),
+            "hard_prompts": TaskNameSelectorConfig(),
+        }
+    ).asdict()
+    test = AutoSelectorConfig.fromdict(dump)
+    assert isinstance(test, MultiSelectorConfig)
+    assert len(test) == 2
+
+
+def test_asdict_list(tmp_path):
+    """Test dumping config with a list of Serializable."""
+    from mttl.models.expert_model import MultiExpertModelConfig
+    from mttl.models.library.expert import ExpertInfo
+
+    e1 = ExpertInfo(
+        expert_name="a",
+        expert_config=None,
+        training_config=None,
+    )
+    e2 = ExpertInfo(
+        expert_name="b",
+        expert_config=None,
+        training_config=None,
+    )
+    MultiExpertModelConfig(
+        selector_config=None,
+        expert_infos=[e1, e2],
+    ).save_pretrained(tmp_path)
+
+    config = MultiExpertModelConfig.from_pretrained(tmp_path)
+    assert config.expert_infos[0].expert_name == "a"
+    assert config.expert_infos[1].expert_name == "b"

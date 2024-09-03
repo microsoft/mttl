@@ -1,22 +1,17 @@
 import json
 import os
-import sys
 from copy import deepcopy
 
 import torch
 import wandb
 from pytorch_lightning import seed_everything
 
-sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
-
-from mttl.callbacks import LossCallback
-from mttl.config import EvaluationConfig, ExpertConfig
+from mttl.arguments import EvaluationConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 from mttl.logging import TableLogger, logger, setup_logging
 from mttl.models.containers.selectors.base import Selector, SelectorConfig
-from mttl.models.expert_model import ExpertModel, MultiExpertModel
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.library.library_transforms import (
     TiesMerge,
@@ -24,6 +19,8 @@ from mttl.models.library.library_transforms import (
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
 )
+from mttl.models.lightning.callbacks import LossCallback
+from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.utils import remote_login
 
@@ -186,8 +183,9 @@ def run_eval(args: EvaluationConfig):
             cfg = TiesMergeConfig(top_k=args.transform_sparsity)
             expert = TiesMerge(cfg).transform(library)
 
-        module = MultiExpertModel(**vars(expert.training_config)).to("cuda")
+        module = MultiExpertModule(**vars(expert.training_config)).to("cuda")
         module.add_expert_instance(expert, is_default=True)
+
     elif args.merge_or_route == "uniform_lora_after_op":
         # Here we merge the LoRA experts after the outer product we cannot really do it
         # with the lib transform, cause this would require storing large matrices in memory
@@ -195,10 +193,11 @@ def run_eval(args: EvaluationConfig):
         assert type(an_expert.expert_info.expert_config) == LoRAConfig
         train_cfg.router_selector = "uniform"
         train_cfg.lora_merge_after = True
-        module = MultiExpertModel(**vars(train_cfg)).to("cuda")
+        module = MultiExpertModule(**vars(train_cfg)).to("cuda")
         module.add_experts_from_library(library)
+
     elif args.merge_or_route == "base":
-        module = ExpertModel(**vars(train_cfg))
+        module = ExpertModule(**vars(train_cfg))
 
     elif args.merge_or_route in ["phatgoose", "arrow", "avg_act"]:
         """Routing Approaches"""
@@ -208,7 +207,7 @@ def run_eval(args: EvaluationConfig):
         if not args.selector_data_id:
             args.selector_data_id = fetch_prototypes(args, library)
 
-        module = MultiExpertModel(
+        module = MultiExpertModule(
             **vars(train_cfg), selector_config=selector_config
         ).to("cuda")
 
@@ -219,7 +218,7 @@ def run_eval(args: EvaluationConfig):
         args.router_selector = "task_selector"
         selector_config = SelectorConfig.from_training_config(args)
 
-        module = MultiExpertModel(
+        module = MultiExpertModule(
             **vars(train_cfg), selector_config=selector_config
         ).to("cuda")
         module.add_experts_from_library(library)

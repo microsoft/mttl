@@ -3,13 +3,10 @@ import re
 from pathlib import Path
 
 import numpy as np
-import pytorch_lightning as pl
-import torch
 import tqdm
 
 from mttl.dataloader.ni_metrics import compute_grouped_metrics, compute_metrics
 from mttl.evaluators.base import GenerativeEvaluator, mean_stderr, switch_to_eval_mode
-from mttl.models.utils import transfer_batch_to_device
 
 
 def compute_aggregation_and_maybe_save(

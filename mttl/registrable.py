@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import Any, Callable, ClassVar, DefaultDict, List, Optional, Type
+from typing import Any, Callable, List, Optional, Type
 
 from mttl.logging import logger
 

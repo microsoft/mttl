@@ -5,7 +5,7 @@ from datasets import concatenate_datasets, get_dataset_config_names
 
 from mttl.datamodule.base import DataModule, DatasetConfig
 from mttl.datamodule.mt_seq_to_seq_module import augment_few_shot_task
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.models.library.dataset_library import DatasetLibrary
 
 
 @dataclass

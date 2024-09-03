@@ -1,10 +1,8 @@
-import copy
 from abc import ABC, abstractmethod
-from functools import partial
 
 import torch
 
-from mttl.datamodule.base import DataModule, get_datamodule
+from mttl.datamodule.base import DataModule
 from mttl.evaluators import MMLUEvaluator, RougeEvaluator
 
 

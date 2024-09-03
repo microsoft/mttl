@@ -1,42 +1,28 @@
-import asyncio
-import datetime
 import glob
 import io
-import logging
 import os
 import sys
-import time
-from abc import ABC, abstractmethod
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
-from fnmatch import fnmatch
-from functools import total_ordering, wraps
-from pathlib import Path
+from functools import total_ordering
 from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 import numpy as np
 import torch
-from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
-from azure.storage.blob import BlobServiceClient
-from azure.storage.blob.aio import BlobServiceClient as AsyncBlobServiceClient
-from datasets import Dataset, DatasetDict, load_dataset, load_from_disk
 from huggingface_hub import (
     CommitOperationAdd,
     CommitOperationCopy,
     CommitOperationDelete,
-    HfApi,
-    create_commit,
-    create_repo,
-    delete_repo,
-    hf_hub_download,
-    preupload_lfs_files,
-    snapshot_download,
 )
 from huggingface_hub.utils._errors import RepositoryNotFoundError
 
 from mttl.logging import logger
+from mttl.models.library.backend_engine import (
+    BlobStorageEngine,
+    HuggingfaceHubEngine,
+    LocalFSEngine,
+)
 from mttl.models.library.expert import Expert, ExpertInfo, load_expert
-from mttl.utils import remote_login
 
 
 @total_ordering
@@ -74,541 +60,9 @@ class Score:
         return self.value == other.value
 
 
+@dataclass
 class MetadataEntry(ExpertInfo):
     expert_deleted: bool = False
-
-    @classmethod
-    def fromdict(cls, data):
-        metadata_entry = super(MetadataEntry, cls).fromdict(data)
-        metadata_entry.expert_deleted = data.get("expert_deleted", False)
-        return metadata_entry
-
-    def asdict(self):
-        data = super().asdict()
-        data.update({"expert_deleted": self.expert_deleted})
-        return data
-
-
-def retry(max_retries=10, wait_seconds=60):
-    def decorator(func):
-        @wraps(func)
-        def wrapper(*args, **kwargs):
-            for attempt in range(1, max_retries + 1):
-                try:
-                    result = func(*args, **kwargs)
-                    return result
-                except Exception as e:  # requests.exceptions.HTTPError as e:
-                    print(e, type(e), "retrying...")
-                    if attempt < max_retries:
-                        print(f"Waiting {wait_seconds} seconds before retrying...")
-                        time.sleep(wait_seconds)
-            raise RuntimeError(
-                f"Function {wrapper.__name__} failed after {max_retries} attempts."
-            )
-
-        return wrapper
-
-    return decorator
-
-
-class BackendEngine(ABC):
-    """The backend engine classes implement the methods for
-    interacting with the different storage backends. It should
-    NOT be used directly. Use the ExpertLibrary classes instead.
-    The parameter `repo_id` in BackendEngine is the repository ID
-    without any prefix (az://, hf://, etc.).
-    """
-
-    @abstractmethod
-    def snapshot_download(self, repo_id, allow_patterns=None):
-        raise NotImplementedError
-
-    @abstractmethod
-    def create_repo(self, repo_id, repo_type, exist_ok, private=True):
-        raise NotImplementedError
-
-    @abstractmethod
-    def delete_repo(self, repo_id, repo_type=None):
-        raise NotImplementedError
-
-    @abstractmethod
-    def create_commit(self, repo_id, operations, commit_message):
-        raise NotImplementedError
-
-    @abstractmethod
-    def preupload_lfs_files(self, repo_id, additions):
-        raise NotImplementedError
-
-    @abstractmethod
-    def hf_hub_download(self, repo_id, filename):
-        raise NotImplementedError
-
-    @abstractmethod
-    def login(self, token: Optional[str] = None):
-        raise NotImplementedError
-
-    @abstractmethod
-    def repo_info(self, repo_id):
-        raise NotImplementedError
-
-    @abstractmethod
-    def list_repo_files(self, repo_id):
-        raise NotImplementedError
-
-
-class HuggingfaceHubEngine(BackendEngine):
-    def snapshot_download(self, repo_id, allow_patterns=None):
-        return snapshot_download(repo_id, allow_patterns=allow_patterns)
-
-    def create_repo(self, repo_id, repo_type, exist_ok, private=True):
-        return create_repo(
-            repo_id, repo_type=repo_type, exist_ok=exist_ok, private=private
-        )
-
-    def delete_repo(self, repo_id, repo_type=None):
-        delete_repo(repo_id=repo_id, repo_type=repo_type)
-
-    def create_commit(self, repo_id, operations, commit_message):
-        return create_commit(
-            repo_id, operations=operations, commit_message=commit_message
-        )
-
-    def preupload_lfs_files(self, repo_id, additions):
-        return preupload_lfs_files(repo_id, additions=additions)
-
-    def hf_hub_download(self, repo_id, filename):
-        return hf_hub_download(repo_id, filename=filename)
-
-    def repo_info(self, repo_id):
-        return HfApi().repo_info(repo_id)
-
-    def login(self, token: Optional[str] = None):
-        remote_login(token=token)
-
-    def list_repo_files(self, repo_id):
-        return HfApi().list_repo_files(repo_id)
-
-
-class BlobStorageEngine(BackendEngine):
-    def __init__(self, token: Optional[str] = None, cache_dir: Optional[str] = None):
-        """Initialize the blob storage engine. The cache directory can be
-        provided as an argument or through the environment variable BLOB_CACHE_DIR.
-        If no cache directory is provided, the default cache directory ~/.cache/mttl is used.
-        You can provide a SAS Token as an argument when login or set the environment variable BLOB_SAS_TOKEN.
-
-        IMPORTANT: Some special characters such as underscore "_" are not allowed in the repo_id.
-        Please use dashes "-" instead. For more information on the naming recommendation, see:
-        https://learn.microsoft.com/en-us/rest/api/storageservices/naming-and-referencing-containers--blobs--and-metadata
-        """
-        super().__init__()
-        self._token: str = token
-        self.cache_dir = cache_dir
-        # Quiet down the azure logging
-        logging.getLogger("azure").setLevel(logging.WARNING)
-
-    @property
-    def cache_dir(self):
-        return self._cache_dir
-
-    @cache_dir.setter
-    def cache_dir(self, _cache_dir: Optional[str] = None) -> None:
-        """If cache_dir is not provided, get it from envvar BLOB_CACHE_DIR.
-        Use the default cache directory ~/.cache/mttl if not provided."""
-        if _cache_dir is not None:
-            self._cache_dir = Path(_cache_dir)
-        if "BLOB_CACHE_DIR" in os.environ:
-            self._cache_dir = os.environ["BLOB_CACHE_DIR"]
-        else:
-            self._cache_dir = Path.home() / ".cache" / "mttl"
-
-    @property
-    def token(self):
-        if self._token is None:
-            self.login()
-        return self._token
-
-    def login(self, token: Optional[str] = None):
-        """Set the SAS token to use for authentication."""
-        if token is None:
-            token = os.environ.get("BLOB_SAS_TOKEN", None)
-        if token is None:
-            raise ValueError(
-                "No token provided. Please provide a token when initializing "
-                "the engine or set the BLOB_SAS_TOKEN environment variable."
-            )
-        self._token = token
-
-    def _last_modified(self, repo_id: str) -> datetime.datetime:
-        """Get the last modified date of a repository."""
-        try:
-            connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
-            container_client = BlobServiceClient(
-                connection_string
-            ).get_container_client(container)
-            return container_client.get_container_properties().last_modified
-        except ResourceNotFoundError as error:
-            raise ValueError(f"Repository {repo_id} not found") from error
-
-    def get_repository_cache_dir(self, repo_id: str) -> Path:
-        """Get the cache directory for a repository. If it doesn't exist, create it.
-        The directory is based on the last modified date, a snapshot of the repository.
-        """
-        last_modified = self._last_modified(repo_id)
-        repo_cache_dir = self.cache_dir / repo_id / last_modified.isoformat()
-        os.makedirs(repo_cache_dir, exist_ok=True)
-        return repo_cache_dir
-
-    def _get_local_filepath(self, repo_id, filename) -> Path:
-        repo_cache_dir = self.get_repository_cache_dir(repo_id)
-        return repo_cache_dir / filename
-
-    def _parse_repo_id_to_storage_info(self, repo_id: str) -> Tuple[str, str]:
-        """Extracts storage account and container from repo_id.
-        Returns the container and its connection string (with SAS token)."""
-        storage_account, container = repo_id.split("/", 1)  # split at first "/"
-        # The connection string is in the format:
-        # https://<storage_account>.blob.core.windows.net/?<token>
-        connection_string = (
-            f"https://{storage_account}.blob.core.windows.net/?{self.token}"
-        )
-        return connection_string, container
-
-    def snapshot_download(
-        self, repo_id, allow_patterns: Optional[Union[List[str], str]] = None
-    ) -> str:
-        """Downloads the entire repository, or a subset of files if allow_patterns is provided.
-        If allow_patterns is provided, paths must match at least one pattern from the allow_patterns.
-
-        Downloads are made concurrently to speed-up the process.
-        """
-        repo_files = self.list_repo_files(repo_id)
-
-        if isinstance(allow_patterns, str):
-            allow_patterns = [allow_patterns]
-
-        if allow_patterns is None:
-            filtered_files = repo_files
-        else:
-            filtered_files = [
-                repo_file
-                for repo_file in repo_files
-                if any(fnmatch(repo_file, r) for r in allow_patterns)
-            ]
-
-        local_filenames = asyncio.run(
-            self.async_download_blobs(repo_id, filtered_files)
-        )
-        return str(self.get_repository_cache_dir(repo_id))
-
-    def create_repo(self, repo_id, repo_type=None, exist_ok=True, private=True):
-        """Creates a new repository. repo_type and private are ignored for blob storage."""
-        try:
-            connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
-            BlobServiceClient(connection_string).create_container(name=container)
-        except ResourceExistsError as error:
-            error_message = "A container with this name already exists"
-            if exist_ok:
-                logger.warning(error_message)
-            else:
-                raise ValueError(error_message) from error
-
-    def delete_repo(self, repo_id, repo_type=None):
-        """Deletes a repository."""
-        connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
-        container_client = BlobServiceClient(connection_string).get_container_client(
-            container=container
-        )
-        try:
-            container_client.delete_container()
-        except ResourceNotFoundError:
-            print(f"Container {repo_id} not found.")
-
-    def create_commit(self, repo_id, operations, commit_message="", async_mode=False):
-        asyncio.run(
-            self.async_create_commit(repo_id, operations, async_mode=async_mode)
-        )
-
-    async def async_create_commit(self, repo_id, operations, async_mode=False):
-        tasks = []
-        for op in operations:
-            if isinstance(op, CommitOperationAdd):
-                tasks.append(
-                    self._async_upload_blob(
-                        repo_id=repo_id,
-                        filename=op.path_in_repo,
-                        buffer=op.path_or_fileobj,
-                        overwrite=True,
-                    )
-                )
-            elif isinstance(op, CommitOperationCopy):
-                tasks.append(
-                    self._async_copy_blob(
-                        source_repo_id=repo_id,
-                        source_filename=op.src_path_in_repo,
-                        destination_repo_id=repo_id,
-                        destination_filename=op.path_in_repo,
-                        overwrite=True,
-                    )
-                )
-            elif isinstance(op, CommitOperationDelete):
-                tasks.append(
-                    self._async_delete_blob(
-                        repo_id=repo_id,
-                        filename=op.path_in_repo,
-                    )
-                )
-        if async_mode:
-            await asyncio.gather(*tasks)
-        else:
-            for task in tasks:
-                await task
-
-    def preupload_lfs_files(self, repo_id, additions):
-        # for blob storage, these operations are done in create_commit
-        pass
-
-    def hf_hub_download(self, repo_id, filename):
-        local_filename = asyncio.run(self.async_download_blobs(repo_id, filename))
-        return str(local_filename)
-
-    def repo_info(self, repo_id):
-        class RepoInfo:
-            pass
-
-        repo_info = RepoInfo()
-        repo_info.lastModified = self._last_modified(repo_id).strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
-        return repo_info
-
-    def list_repo_files(self, repo_id):
-        """List all files in a repository. The files might not be downloaded locally."""
-        try:
-            connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
-            container_client = BlobServiceClient(
-                connection_string
-            ).get_container_client(container)
-            return [b.name for b in container_client.list_blobs()]
-        except ResourceNotFoundError as error:
-            raise ValueError(f"Repository {repo_id} not found") from error
-
-    async def async_upload_folder(
-        self,
-        repo_id: str,
-        folder: str,
-        recursive=True,
-    ):
-        """Uploads a folder to the repository. The folder structure is preserved.
-        If recursive is True, all files in the folder and subfolders are uploaded.
-        Only works for empty repositories.
-        """
-        if self.list_repo_files(repo_id):
-            logger.warning(
-                "Pushing a folder and its content to "
-                f"a non empty repository. Repository ID: {repo_id}"
-            )
-        folder_content = glob.glob(folder + "**/**", recursive=recursive)
-        relative_file_paths = []
-        buffers = []
-        for content in folder_content:
-            if os.path.isfile(content):
-                relative_file_paths.append(os.path.relpath(content, folder))
-                with open(content, "rb") as f:
-                    buffers.append(f.read())
-
-        await asyncio.gather(
-            self.async_upload_blobs(repo_id, relative_file_paths, buffers)
-        )
-        return folder
-
-    async def async_upload_blobs(
-        self,
-        repo_id: str,
-        filenames: Union[List[str], str],
-        buffers=None,
-        overwrite=False,
-    ):
-        is_str = isinstance(filenames, str)
-        if is_str:
-            filenames = [filenames]
-        if buffers is None:
-            buffers = [None] * len(filenames)
-        else:
-            if len(buffers) != len(filenames):
-                raise ValueError("Filenames and buffers must have the same length.")
-        tasks = [
-            self._async_upload_blob(repo_id, filename, buffer, overwrite)
-            for filename, buffer in zip(filenames, buffers)
-        ]
-        await asyncio.gather(*tasks)
-        return filenames[0] if is_str else filenames
-
-    async def _async_upload_blob(self, repo_id, filename, buffer=None, overwrite=False):
-        connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
-        async with AsyncBlobServiceClient(connection_string) as blob_service_client:
-            blob_client = blob_service_client.get_blob_client(
-                container=container, blob=filename
-            )
-            if buffer is not None:
-                await blob_client.upload_blob(buffer, overwrite=overwrite)
-            else:
-                local_cache = self._get_local_filepath(repo_id, filename)
-                with open(file=local_cache, mode="rb") as blob_file:
-                    await blob_client.upload_blob(blob_file, overwrite=overwrite)
-
-    async def async_download_blobs(
-        self, repo_id: str, filesnames: Union[List[str], str]
-    ) -> str:
-        is_str = isinstance(filesnames, str)
-        if is_str:
-            filesnames = [filesnames]
-        tasks = [
-            self._async_download_blob(repo_id, filename) for filename in filesnames
-        ]
-        local_filenames = await asyncio.gather(*tasks)
-        return local_filenames[0] if is_str else local_filenames
-
-    async def _async_download_blob(self, repo_id, filename):
-        connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
-        async with AsyncBlobServiceClient(connection_string) as blob_service_client:
-            blob_client = blob_service_client.get_blob_client(
-                container=container, blob=filename
-            )
-            local_filename = self._get_local_filepath(repo_id, filename)
-            os.makedirs(os.path.dirname(local_filename), exist_ok=True)
-            with open(file=local_filename, mode="wb") as blob_file:
-                download_stream = await blob_client.download_blob()
-                data = await download_stream.readall()
-                blob_file.write(data)
-            return local_filename
-
-    async def async_copy_blobs(
-        self,
-        source_repo_ids,
-        source_filenames,
-        destination_repo_ids,
-        destination_filenames,
-        overwrite=True,
-    ):
-        inputs = [
-            source_repo_ids,
-            source_filenames,
-            destination_repo_ids,
-            destination_filenames,
-        ]
-        # if any input is a string, convert it to a list
-        inputs = [[i] if isinstance(i, str) else i for i in inputs]
-
-        # Check that all lists have the same length
-        if not all(len(i) == len(inputs[0]) for i in inputs):
-            raise ValueError("All lists must have the same length.")
-
-        tasks = [
-            self._async_copy_blob(
-                source_repo_id,
-                source_filename,
-                destination_repo_id,
-                destination_filename,
-                overwrite=overwrite,
-            )
-            for source_repo_id, source_filename, destination_repo_id, destination_filename in zip(
-                inputs[0], inputs[1], inputs[2], inputs[3]
-            )
-        ]
-        await asyncio.gather(*tasks)
-
-    async def _async_copy_blob(
-        self,
-        source_repo_id,
-        source_filename,
-        destination_repo_id,
-        destination_filename,
-        overwrite=True,
-    ):
-        (
-            source_connection_string,
-            source_container,
-        ) = self._parse_repo_id_to_storage_info(source_repo_id)
-        async with AsyncBlobServiceClient(
-            source_connection_string
-        ) as blob_service_client:
-            source_blob_client = blob_service_client.get_blob_client(
-                container=source_container, blob=source_filename
-            )
-            _, destination_container = self._parse_repo_id_to_storage_info(
-                destination_repo_id
-            )
-            destination_blob_client = blob_service_client.get_blob_client(
-                container=destination_container, blob=destination_filename
-            )
-            await destination_blob_client.upload_blob_from_url(
-                source_url=source_blob_client.url, overwrite=overwrite
-            )
-
-    async def async_delete_blobs(self, repo_id: str, filesnames: Union[List[str], str]):
-        if isinstance(filesnames, str):
-            filesnames = [filesnames]
-        tasks = [self._async_delete_blob(repo_id, filename) for filename in filesnames]
-        await asyncio.gather(*tasks)
-
-    async def _async_delete_blob(self, repo_id, filename):
-        connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
-        async with AsyncBlobServiceClient(connection_string) as blob_service_client:
-            blob_client = blob_service_client.get_blob_client(
-                container=container, blob=filename
-            )
-            await blob_client.delete_blob()
-
-
-class LocalFSEngine(BackendEngine):
-    def snapshot_download(self, repo_id, allow_patterns=None):
-        return repo_id
-
-    def create_repo(self, repo_id, repo_type, exist_ok, private=True):
-        os.makedirs(repo_id, exist_ok=exist_ok)
-
-    def delete_repo(self, repo_id, repo_type=None):
-        import shutil
-
-        shutil.rmtree(repo_id)
-
-    def create_commit(self, repo_id, operations, commit_message):
-        for op in operations:
-            if type(op) == CommitOperationAdd:
-                with open(os.path.join(repo_id, op.path_in_repo), "wb") as f:
-                    f.write(op.path_or_fileobj.read())
-            elif type(op) == CommitOperationCopy:
-                import shutil
-
-                shutil.copyfile(
-                    os.path.join(repo_id, op.src_path_in_repo),
-                    os.path.join(repo_id, op.path_in_repo),
-                )
-            elif type(op) == CommitOperationDelete:
-                os.remove(os.path.join(repo_id, op.path_in_repo))
-
-    def preupload_lfs_files(self, repo_id, additions):
-        pass
-
-    def hf_hub_download(self, repo_id, filename):
-        return os.path.join(repo_id, filename)
-
-    def login(self, token: Optional[str] = None):
-        pass
-
-    def repo_info(self, repo_id):
-        # return the current time into string format
-        class RepoInfo:
-            pass
-
-        repo_info = RepoInfo()
-        repo_info.lastModified = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        return repo_info
-
-    def list_repo_files(self, repo_id):
-        import glob
-
-        return list(glob.glob(os.path.join(repo_id, "*")))
 
 
 class ExpertLibrary:
@@ -685,7 +139,9 @@ class ExpertLibrary:
             raise e
 
         metadata = [
-            MetadataEntry.fromdict(torch.load(file, map_location="cpu"))
+            MetadataEntry.fromdict(
+                torch.load(file, map_location="cpu", weights_only=False)
+            )
             for file in glob.glob(f"{metadata_dir}/**/*.meta", recursive=True)
         ]
 
@@ -792,7 +248,8 @@ class ExpertLibrary:
 
         model = self._download_model(expert_name)
         # Load the model from the downloaded file
-        model = torch.load(model, map_location="cpu")
+        model = torch.load(model, map_location="cpu", weights_only=True)
+
         return Expert(
             expert_info=self.data[expert_name],
             expert_weights=model,
@@ -845,7 +302,7 @@ class ExpertLibrary:
             else:
                 path = self.hf_hub_download(self.repo_id, filename=file)
                 try:
-                    config = repr(torch.load(path)["config"])
+                    config = repr(torch.load(path, weights_only=False)["config"])
                 except:
                     # old format
                     config = "N/A"
@@ -880,7 +337,7 @@ class ExpertLibrary:
                 raise ValueError(
                     f"Data of type {data_type} for expert {expert_name} not found in repository. Did you compute it?"
                 )
-            payload = torch.load(filename)
+            payload = torch.load(filename, weights_only=False)
             if return_config and "config" in payload:
                 return payload["config"], payload["data"]
             if "data" in payload:
@@ -891,7 +348,7 @@ class ExpertLibrary:
             for key in self.keys():
                 filename = os.path.join(path, f"{key}.{data_type}.bin")
                 if os.path.isfile(filename):
-                    payload = torch.load(filename)
+                    payload = torch.load(filename, weights_only=False)
                     if return_config and "config" in payload:
                         auxiliary_data[f"{key}"] = payload["config"], payload["data"]
                     elif "data" in payload:
@@ -959,7 +416,9 @@ class ExpertLibrary:
             raise ValueError(f"Expert {expert_name} not found in repository.")
 
         path = self.hf_hub_download(self.repo_id, filename=f"{expert_name}.meta")
-        metadata = MetadataEntry.fromdict(torch.load(path, map_location="cpu"))
+        metadata = MetadataEntry.fromdict(
+            torch.load(path, weights_only=False, map_location="cpu")
+        )
         metadata.expert_deleted = False
 
         self._upload_metadata(metadata)
@@ -1019,7 +478,7 @@ class ExpertLibrary:
         scores = self.list_repo_files(self.repo_id)
         if scores_file in scores:
             path = self.hf_hub_download(self.repo_id, filename=scores_file)
-            scores = torch.load(path, map_location="cpu")
+            scores = torch.load(path, weights_only=False, map_location="cpu")
         else:
             scores = {}
 
@@ -1125,7 +584,7 @@ class ExpertLibrary:
         buffer.write(f"| --- | --- | --- | --- |\n".encode("utf-8"))
         for expert_name, metadata in self.data.items():
             buffer.write(
-                f"| {expert_name} | {metadata.model} | {metadata.dataset}/{metadata.expert_task_name} | {metadata.model_modifier} |\n".encode(
+                f"| {expert_name} | {metadata.model} | {metadata.dataset}/{metadata.expert_task_name} | {metadata.modifier_name} |\n".encode(
                     "utf-8"
                 )
             )
@@ -1180,7 +639,12 @@ class ExpertLibrary:
         self, ckpt_path: str, expert_name: str = None, force: bool = False
     ):
         expert_dump = load_expert(ckpt_path, expert_name=expert_name)
-        self.add_expert(expert_dump, expert_name=expert_name, force=force)
+        if expert_dump.name is None:
+            raise ValueError(
+                "Expert name not found in checkpoint. Need to explicitly provide one as argument."
+            )
+
+        self.add_expert(expert_dump, force=force)
 
     def rename_expert(self, old_name, new_name):
         if self.sliced:
@@ -1525,201 +989,3 @@ def get_task_expert(task, expert_lib, default_score):
     if parent_exp is None and task in expert_lib.tasks:
         parent_exp = get_best_expert_for_task(expert_lib, task, default_score.hash)
     return parent_exp
-
-
-class DatasetEngine(ABC):
-    def __init__(self, dataset_id: str, token: Optional[str] = None):
-        self.dataset_id = dataset_id
-        self.token = token
-
-    @property
-    def backend_engine(self) -> BackendEngine:
-        backend_engine: BackendEngine = self._backend_engine()
-        backend_engine.login(self.token)
-        return backend_engine
-
-    @property
-    @abstractmethod
-    def _backend_engine(self) -> Type[BackendEngine]:
-        pass
-
-    @abstractmethod
-    def pull_dataset(
-        self,
-        name: Optional[str] = None,
-        split: Optional[str] = None,
-    ) -> Dataset:
-        pass
-
-    @abstractmethod
-    def push_dataset(
-        self,
-        dataset: Union[DatasetDict, Dataset],
-        name: Optional[str] = None,
-    ) -> None:
-        pass
-
-    def delete_dataset(self) -> None:
-        self.backend_engine.delete_repo(self.dataset_id, repo_type="dataset")
-
-    def _concat_paths(self, *args) -> str:
-        """Concatenate paths ordered as received. Ignore None values."""
-        results_path = Path()
-        for p in args:
-            if p is not None:
-                results_path /= p
-        return str(results_path)
-
-
-class HuggingfaceHubDatasetEngine(DatasetEngine):
-    @property
-    def _backend_engine(self) -> Type[BackendEngine]:
-        return HuggingfaceHubEngine
-
-    def pull_dataset(
-        self,
-        name: Optional[str] = None,
-        split: Optional[str] = None,
-        **kwargs,
-    ) -> Dataset:
-        return load_dataset(
-            self.dataset_id, name, split=split, trust_remote_code=True, **kwargs
-        )
-
-    def push_dataset(
-        self,
-        dataset: Union[DatasetDict, Dataset],
-        name: Optional[str] = None,
-        **kwargs,
-    ) -> None:
-        dataset.push_to_hub(self.dataset_id, name, **kwargs)
-
-
-class LocalDatasetEngine(DatasetEngine):
-    @property
-    def _backend_engine(self) -> Type[BackendEngine]:
-        return LocalFSEngine
-
-    def pull_dataset(
-        self,
-        name: Optional[str] = None,
-        split: Optional[str] = None,
-    ) -> Dataset:
-        # Saves the dataset subset and split as subdirectories if provided
-        dataset_path = self._concat_paths(self.dataset_id, name, split)
-        dataset = load_from_disk(dataset_path)
-        return dataset
-
-    def push_dataset(
-        self,
-        dataset: Union[DatasetDict, Dataset],
-        name: Optional[str] = None,
-    ) -> None:
-        dataset_path = self._concat_paths(self.dataset_id, name)
-        self.backend_engine.create_repo(
-            repo_id=self.dataset_id, repo_type="dataset", exist_ok=True
-        )
-        # HF push_to_hub sets the split to "train" if it's None
-        if isinstance(dataset, Dataset):
-            dataset = DatasetDict({"train": dataset})
-        dataset.save_to_disk(dataset_path)
-
-
-class BlobStorageDatasetEngine(DatasetEngine):
-    @property
-    def _backend_engine(self) -> Type[BackendEngine]:
-        return BlobStorageEngine
-
-    def pull_dataset(
-        self,
-        name: Optional[str] = None,
-        split: Optional[str] = None,
-    ) -> Dataset:
-        local_path = self._concat_paths(self.dataset_id, name, split)
-        download_filter = self._concat_paths(local_path, "*")
-        self.backend_engine.snapshot_download(self.dataset_id, download_filter)
-        dataset_cache_dir = str(
-            self.backend_engine.get_repository_cache_dir(self.dataset_id)
-        )
-        dataset_cache_dir = self._concat_paths(dataset_cache_dir, name, split)
-        dataset = load_from_disk(dataset_cache_dir)
-        return dataset
-
-    def push_dataset(
-        self,
-        dataset: Union[DatasetDict, Dataset],
-        name: Optional[str] = None,
-    ) -> None:
-        self.backend_engine.create_repo(
-            repo_id=self.dataset_id, repo_type="dataset", exist_ok=True
-        )
-        # HF push_to_hub sets the split to "train" if it's None
-        if isinstance(dataset, Dataset):
-            dataset = DatasetDict({"train": dataset})
-        dataset_cache_dir = str(
-            self.backend_engine.get_repository_cache_dir(self.dataset_id)
-        )
-        # Name is a subset of the dataset. Save in its own directory
-        dataset_path = self._concat_paths(dataset_cache_dir, name)
-        dataset.save_to_disk(dataset_path)
-
-        asyncio.run(
-            self.backend_engine.async_upload_folder(
-                self.dataset_id, dataset_cache_dir, recursive=True
-            )
-        )
-
-
-class DatasetLibrary:
-    @classmethod
-    def pull_dataset(
-        cls, dataset_id: str, token: Optional[str] = None, **kwargs
-    ) -> Dataset:
-        dataset_engine = cls._get_dataset_engine(dataset_id, token)
-        dataset = dataset_engine.pull_dataset(**kwargs)
-        return dataset
-
-    @classmethod
-    @retry(max_retries=5, wait_seconds=60)
-    def pull_dataset_with_retry(
-        cls, dataset_id: str, token: Optional[str] = None, **kwargs
-    ) -> Union[DatasetDict, Dataset]:
-        return cls.pull_dataset(dataset_id, token, **kwargs)
-
-    @classmethod
-    def push_dataset(
-        cls,
-        dataset: Union[DatasetDict, Dataset],
-        dataset_id: str,
-        token: Optional[str] = None,
-        **kwargs,
-    ) -> None:
-        dataset_engine = cls._get_dataset_engine(dataset_id, token)
-        dataset_engine.push_dataset(dataset, **kwargs)
-
-    @classmethod
-    def delete_dataset(cls, dataset_id: str, token: Optional[str] = None) -> None:
-        dataset_engine = cls._get_dataset_engine(dataset_id, token)
-        dataset_engine.delete_dataset()
-
-    @staticmethod
-    def _get_dataset_engine(dataset_id: str, token: Optional[str]) -> DatasetEngine:
-        engines = {
-            "local": LocalDatasetEngine,
-            "az": BlobStorageDatasetEngine,
-            "hf": HuggingfaceHubDatasetEngine,
-        }
-        prefix = dataset_id.split("://")
-        if prefix[0] in engines:
-            engine_id = prefix[0]
-            dataset_id = prefix[1]
-        else:
-            engine_id = "hf"
-        try:
-            engine = engines[engine_id](dataset_id=dataset_id, token=token)
-            return engine
-        except KeyError:
-            raise ValueError(
-                f"Unknown dataset engine type {engine_id}. "
-                f"Available engines: {list(engines.keys())}"
-            )

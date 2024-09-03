@@ -1,29 +1,25 @@
-import os
-import shutil
-import sys
-from tempfile import TemporaryDirectory
 from typing import Type
 
 import torch
 from pytorch_lightning import Trainer, seed_everything
 
-from mttl.callbacks import (
+from mttl.arguments import Args, ExpertConfig
+from mttl.datamodule.base import get_datamodule
+from mttl.logging import logger, setup_logging
+from mttl.models.library.expert_library import ExpertLibrary
+from mttl.models.lightning.callbacks import (
     DownstreamEvalCallback,
     LiveCheckpointCallback,
     NanoMMLUCallback,
     RougeCallback,
 )
-from mttl.config import Args, ExpertConfig
-from mttl.datamodule.base import get_datamodule
-from mttl.logging import get_pl_loggers, logger, setup_logging
-from mttl.models.expert_model import ExpertModel, MoEModel
-from mttl.models.library.expert import Expert, load_expert
-from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
+from mttl.models.lightning.expert_module import ExpertModule, MoEModule
+from mttl.models.lightning.loggers import get_pl_loggers
 from mttl.models.monitors import get_monitors
 from mttl.utils import generate_random_string, rank_zero_only_and_wait, remote_login
 
 
-def train_experts(args: Args, model_class: Type[ExpertModel]):
+def train_experts(args: Args, model_class: Type[ExpertModule]):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
@@ -52,7 +48,7 @@ def train_experts(args: Args, model_class: Type[ExpertModel]):
     args.n_tasks = len(dm._task_names)
     args.task_names = dm._task_names
 
-    module = model_class(**args.asdict())
+    module = model_class(**vars(args))
 
     # get metric monitors for models
     callbacks = get_monitors(args)
@@ -161,9 +157,9 @@ def train_experts(args: Args, model_class: Type[ExpertModel]):
                 convert_zero_checkpoint_to_fp32_state_dict(path, new_path)
 
             convert_ckpt(checkpoint, new_path)
-            checkpoint = torch.load(new_path)
+            checkpoint = torch.load(new_path, weights_only=False)
         else:
-            checkpoint = torch.load(checkpoint)["state_dict"]
+            checkpoint = torch.load(checkpoint, weights_only=False)["state_dict"]
 
         module.load_state_dict(checkpoint)
         trainer.test(module, dm)
@@ -174,12 +170,12 @@ def train_experts(args: Args, model_class: Type[ExpertModel]):
                 # refresh expert library: so we dont overwrite the readme if the remote has changed.
                 expert_library.refresh_from_remote()
 
-                if isinstance(module, MoEModel):
+                if isinstance(module, MoEModule):
                     with expert_library.batched_commit():
                         for expert_name in module.experts_names:
                             expert = module.get_expert_instance(expert_name)
                             expert_library.add_expert(expert, expert_name)
-                elif isinstance(module, ExpertModel):
+                elif isinstance(module, ExpertModule):
                     expert = module.as_expert()
                     expert_name = (
                         args.expert_name
@@ -194,4 +190,4 @@ def train_experts(args: Args, model_class: Type[ExpertModel]):
 
 
 if __name__ == "__main__":
-    train_experts(ExpertConfig.parse(), ExpertModel)
+    train_experts(ExpertConfig.parse(), ExpertModule)
