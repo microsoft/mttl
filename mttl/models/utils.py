@@ -450,7 +450,7 @@ def model_loader_helper(
     logger.info(f"Attention Implementation: {attn_implementation}")
 
     if isinstance(model_name, PreTrainedModel):
-        return model_name
+        return model_name.train()
 
     if "llama" in model_name:
         model_object = LlamaForCausalLM.from_pretrained(
@@ -493,7 +493,7 @@ def model_loader_helper(
     if load_in_8bit or load_in_4bit:
         model_object = prepare_model_for_kbit_training(model_object)
 
-    return model_object
+    return model_object.train()
 
 
 # https://github.com/facebookresearch/dino/blob/main/utils.py
