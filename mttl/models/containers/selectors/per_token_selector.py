@@ -226,7 +226,7 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
             ).view(1, -1)
         else:
             warn_once(
-                f"Library artifacts not loaded for {self.__class__}, using zero initialization."
+                f"Library artifacts not loaded for {self.__class__.__name__}, using zero initialization."
             )
             proto = torch.zeros(
                 1,
