@@ -35,27 +35,21 @@ class PolySelector(Selector):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
-        self.n_tasks = (
-            len(self.config.task_names) if self.config.task_names else 0
-        )
+        self.n_tasks = len(self.config.task_names) if self.config.task_names else 0
 
         # We add an extra task for the default (average) expert if not found
         shape = (
             self.n_tasks + 1,
             self.config.n_splits,
         )
-        self.module_logits = nn.Parameter(
-            torch.empty(*shape).uniform_(-1e-3, 1e-3)
-        )
+        self.module_logits = nn.Parameter(torch.empty(*shape).uniform_(-1e-3, 1e-3))
 
         if self.n_tasks == 0:
             logger.warning(
                 "No task names found in the config. Using a single task for PolySelector."
             )
 
-    def _convert_task_names_to_ids(
-        self, task_names: List[str]
-    ) -> torch.LongTensor:
+    def _convert_task_names_to_ids(self, task_names: List[str]) -> torch.LongTensor:
         """Converts task names to task ids (indices in the module_logits routing tensor)."""
         return torch.LongTensor(
             [
@@ -86,9 +80,7 @@ class PolySelector(Selector):
                 if hasattr(routing_info, "task_ids_from_name"):
                     task_ids = routing_info.task_ids_from_name
                 else:
-                    task_ids = self._convert_task_names_to_ids(
-                        routing_info.task_names
-                    )
+                    task_ids = self._convert_task_names_to_ids(routing_info.task_names)
                     # cache the computation for future use
                     self.routing_infos.task_ids_from_name = task_ids
 
@@ -119,15 +111,11 @@ class PolySelector(Selector):
         module_logits = module_logits.view(
             module_logits.size(0), self.config.n_splits, self.n_experts
         )
-        module_weights = module_logits / (
-            module_logits.sum(dim=-1, keepdim=True) + EPS
-        )
+        module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
         return module_weights
 
     @forward_with_cache
-    def forward(
-        self, input, **kwargs
-    ) -> Union[
+    def forward(self, input, **kwargs) -> Union[
         BatchExpertsSplitsAndWeightsSelectorOutput,
         ExpertsSplitsAndWeightsSelectorOutput,
     ]:
@@ -151,14 +139,9 @@ class PolySelector(Selector):
         return self.get_routing_weights(**selector_kwargs)
 
     def get_routing_weights(self, task_name, **selector_kwargs) -> Dict:
-        assert (
-            task_name in self.config.task_names
-        ), f"Task {task_name} not found."
+        assert task_name in self.config.task_names, f"Task {task_name} not found."
         weights = self._get_weights(task_names=[task_name])
-        return {
-            k: v.detach().item()
-            for k, v in zip(self.expert_names, weights[0][0])
-        }
+        return {k: v.detach().item() for k, v in zip(self.expert_names, weights[0][0])}
 
     def on_add_expert(
         self, expert_name: str, expert_info: ExpertInfo, is_default=False
@@ -198,9 +181,7 @@ class PolySelectorDirect(PolySelector):
         return self.get_routing_weights(**selector_kwargs)
 
     def get_routing_weights(self):
-        return {
-            k: v.detach().item() for k, v in self.module_logits_dict.items()
-        }
+        return {k: v.detach().item() for k, v in self.module_logits_dict.items()}
 
     def on_add_expert(
         self, expert_name: str, expert_info: ExpertInfo, is_default=False
@@ -273,13 +254,8 @@ class PolyUniform(PolySelectorDirect):
                 torch.ones(1).to(self.device)
             )
             for name in self.module_logits_dict.keys():
-                self.module_logits_dict[name].data = torch.ones(1).to(
-                    self.device
-                )
-                self.module_logits_dict[name].data /= len(
-                    self.module_logits_dict
-                )
-
+                self.module_logits_dict[name].data = torch.ones(1).to(self.device)
+                self.module_logits_dict[name].data /= len(self.module_logits_dict)
 
 @dataclass
 class VectorSelectorConfig(SelectorConfig):
