@@ -23,7 +23,7 @@ def is_openai_format(messages: Any) -> bool:
 
 
 @dataclass
-class UltrafeedbackCollator(DefaultCollator):
+class UltrafeedbackDPOCollator(DefaultCollator):
     def __call__(self, batch):
 
         # For DPO/ORPO, the inputs are triples of (prompt, chosen, rejected), where `chosen` and `rejected` are the final turn of a dialogue
@@ -121,7 +121,58 @@ class UltrafeedbackDPOmodule(DefaultDataModule):
 
     @property
     def collate_fn(self):
-        return UltrafeedbackCollator(
+        return UltrafeedbackDPOCollator(
+            tokenizer=self.tokenizer,
+            padding="longest",
+            max_input_length=self.config.max_input_length,
+            max_output_length=self.config.max_output_length,
+            return_tensors="pt",
+            model_family=self.config.model_family,
+            for_generation=self.for_generation,
+        )
+
+
+@dataclass
+class UltrafeedbackSFTCollator(DefaultCollator):
+    def __call__(self, batch):
+
+        # For SFT, the inputs are triples of (prompt, message), where `chosen` and `rejected` are the final turn of a dialogue
+        # We therefore need to extract the N-1 turns to form the prompt
+        prompts = []
+        messages = []
+        for example in batch:
+            prompt_messages = example["prompt"]
+            chosen_messages = example["messages"]
+            prompts.append(prompt_messages)
+            messages.append(
+                self.tokenizer.apply_chat_template(chosen_messages, tokenize=False)
+            )
+
+        return {
+            "sources_texts": prompts,
+            "labels_texts": messages,
+        }
+
+
+@dataclass
+class UltrafeedbackSFTmodule(DefaultDataModule):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def setup_dataset(self):
+        dataset = DatasetLibrary.pull_dataset_with_retry("HuggingFaceH4/ultrachat_200k")
+
+        # format the ultrafeedback dataset to chatbot format
+        self.train_dataset = dataset["train_sft"]
+        self.test_dataset = dataset["test_sft"]
+        self.dev_dataset = self.test_dataset
+
+        self.print_infos()
+
+    @property
+    def collate_fn(self):
+        return UltrafeedbackSFTCollator(
             tokenizer=self.tokenizer,
             padding="longest",
             max_input_length=self.config.max_input_length,
@@ -134,15 +185,15 @@ class UltrafeedbackDPOmodule(DefaultDataModule):
 
 if __name__ == "__main__":
     config = DatasetConfig(model="microsoft/Phi-3-mini-4k-instruct")
-    datamodule = UltrafeedbackDPOmodule(config)
+    datamodule = UltrafeedbackSFTmodule(config)
     train_dataloader = datamodule.train_dataloader()
     val_dataloder = datamodule.val_dataloader()
     for batch in val_dataloder:
-        prompt_prefered_mask = batch["prompt_prefered_mask"]
-        prompt_disprefered_mask = batch["prompt_disprefered_mask"]
+        # prompt_prefered_mask = batch["prompt_prefered_mask"]
+        # prompt_disprefered_mask = batch["prompt_disprefered_mask"]
 
         # get the length of the response
-        prefered_y_len = batch["prefered_y_len"]
-        disprefered_y_len = batch["disprefered_y_len"]
-        print(prefered_y_len, disprefered_y_len)
+        # prefered_y_len = batch["prefered_y_len"]
+        # disprefered_y_len = batch["disprefered_y_len"]
+        print(batch)
         breakpoint()
