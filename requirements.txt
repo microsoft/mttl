@@ -25,3 +25,4 @@ azure-storage-blob
 azure-identity
 einops
 nltk
+git+https://github.com/IST-DASLab/spops.git
