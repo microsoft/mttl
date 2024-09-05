@@ -114,16 +114,7 @@ def train_experts(args: Args, model_class: Type[ExpertModel]):
             val_check_interval = len(dm.train_dataloader())
         elif val_check_interval > args.total_steps and args.total_steps != -1:
             val_check_interval = args.total_steps
-    
-    
-    # -=============== Iterative masking using Callback ====================
-    if args.model_modifier=="sparse_mask_adapter":
-        from mttl.callbacks import UpdateSparseMask
-        maskCallback = UpdateSparseMask(update_interval=100, 
-                                        save_mask_dir=args.output_dir)
-        callbacks.append(maskCallback)
-    
-    
+
     trainer = Trainer(
         devices=-1,
         accelerator="gpu",
