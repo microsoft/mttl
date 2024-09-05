@@ -24,6 +24,50 @@ from mttl.models.utils import transfer_batch_to_device
 DEBUG = False
 
 
+class UpdateSparseMask(pl.Callback):
+    def __init__(self, update_interval=5, dm=None, save_mask_dir=None):
+        super().__init__()
+        self.update_interval = update_interval
+        self.update_counter = 0
+
+        #
+        self.dm = dm
+        self.save_mask_dir = save_mask_dir
+
+    def update_mask(self, pl_module, batch):
+
+        from mttl.models.modifiers.sparse_mask import (
+            make_sparse_model_during_training,
+            save_mask,
+        )
+
+        # make_sparse_model(pl_module, self.dm, keep_ratio=self.keep_ratio)
+        make_sparse_model_during_training(pl_module, batch)
+        # save mask
+        # f_name = f"{self.save_mask_dir}/mask"
+        # save_mask(pl_module, f_name)
+
+    def on_train_batch_start(
+        self,
+        trainer: Trainer,
+        pl_module: LightningModule,
+        batch: torch.Tensor,
+        batch_idx: int,
+    ) -> None:
+        """
+        only updates the mask on epoch=0
+        """
+        if trainer.current_epoch == 0:
+            self.update_counter += 1
+            if (
+                self.update_counter % self.update_interval == 0
+                or self.update_counter == 1  # to set mask at the beginning
+            ):
+                # Update mask
+                self.update_mask(pl_module, batch)
+                self.update_counter = 0  # Reset counter for next interval
+
+
 class LiveCheckpointCallback(pl.Callback):
     """A better model checkpoint callback, that works in synchrony with LiveLogMixin."""
 
