@@ -15,6 +15,9 @@ from mttl.models.containers.selectors.base import (
     SelectorOutput,
     forward_with_cache,
 )
+from mttl.models.containers.selectors.selector_output import (
+   BatchSequenceExpertsSplitsAndWeightsSelectorOutput
+) 
 from mttl.models.library.expert import ExpertInfo
 
 
@@ -42,6 +45,7 @@ class PolySelector(Selector):
             self.n_tasks + 1,
             self.config.n_splits,
         )
+        self.module_logits_leading_dims = shape[:-1]
         self.module_logits = nn.Parameter(torch.empty(*shape).uniform_(-1e-3, 1e-3))
 
         if self.n_tasks == 0:
@@ -62,11 +66,12 @@ class PolySelector(Selector):
             ],
         ).to(self.module_logits.device)
 
-    def _get_weights(self, task_names: List[str] = None) -> torch.Tensor:
-        """Gets the routing weights for the corresponding task names.
+    def _get_task_ids(self, task_names: List[str] = None) -> torch.LongTensor:
+        """Get the task ids for the corresponding task names.
 
         If `task_names` is None, read task names from the routing infos structure.
         """
+        
         # Poly used for finetuning a single task
         if self.n_tasks == 0:
             task_ids = [0]
@@ -107,6 +112,13 @@ class PolySelector(Selector):
 
                 assert not self.training, "Unknown tasks during training"
 
+        return task_ids
+
+    def _get_weights(self, task_names: List[str] = None) -> torch.Tensor:
+        """Gets the routing weights for the corresponding task names.
+
+        """
+        task_ids = self._get_task_ids(task_names)
         module_logits = torch.sigmoid(self.module_logits[task_ids])
         module_logits = module_logits.view(
             module_logits.size(0), self.config.n_splits, self.n_experts
@@ -148,7 +160,7 @@ class PolySelector(Selector):
     ):
         # we need additional space in the routing to accomodate the incoming expert
         self.module_logits.data = torch.empty(
-            self.n_tasks + 1, self.config.n_splits * self.n_experts
+            *self.module_logits_leading_dims, self.config.n_splits * self.n_experts
         ).uniform_(-1e-3, 1e-3)
 
         # Last expert is exactly uniform
@@ -289,3 +301,89 @@ class VectorSelector(Selector):
         return ExpertsSplitsAndWeightsSelectorOutput(
             SelectorOutput.ALL_EXPERTS, mixing_coefs
         )
+
+@dataclass
+class MultimodalPolySelectorConfig(PolySelectorConfig):
+    modality_names: List[str] = None
+
+@Selector.register("multimodal_poly_router", MultimodalPolySelectorConfig)
+class MultimodalPolySelector(PolySelector):
+    pass
+    
+    """
+    Implements routing at a per-layer or per-model level
+    """
+
+    avg_selector_warned: bool = False
+
+    def __init__(self, **kwargs) -> None:
+        # Call the grandparent constructor
+        Selector.__init__(self, **kwargs)
+
+        self.n_modalities = len(self.config.modality_names)
+        self.n_tasks = len(self.config.task_names) if self.config.task_names else 0
+        
+        assert self.n_modalities > 1, "MultimodalPolySelector requires n_modalities > 1"
+
+        # We add an extra task for the default (average) expert if not found
+        shape = (
+            self.n_tasks + 1,
+            self.n_modalities,
+            self.config.n_splits,
+        )
+        self.module_logits_leading_dims = shape[:-1]
+        self.module_logits = nn.Parameter(torch.empty(*shape).uniform_(-1e-3, 1e-3))
+
+        assert self.n_tasks >  0, "No task names found in the config"
+
+    def _get_mod_ids(self) -> torch.LongTensor:
+        """Converts modality names to modality ids (indices in the module_logits routing tensor)."""
+        # we fetch the info from RoutingInfos
+        routing_info = self.routing_infos
+        if hasattr(routing_info, "mod_ids_from_name"):
+            mod_ids = routing_info.mod_ids_from_name
+        else:
+            mod_names = routing_info.modality_names
+            mod_ids = torch.LongTensor(
+                [
+                    self.config.modality_names.index(t)
+                    for t in mod_names
+                ],
+            ).to(self.module_logits.device)
+            # cache the computation for future use
+            self.routing_infos.mod_ids_from_name = mod_ids
+
+        return mod_ids
+
+    def _get_weights(self, task_names: List[str] = None) -> torch.Tensor:
+        """Gets the routing weights for the corresponding task names.
+
+        """
+        task_ids = self._get_task_ids(task_names)
+        mod_ids = self._get_mod_ids()
+        module_logits = torch.sigmoid(self.module_logits[task_ids]) # [bs, n_modalities, n_splits]
+        module_logits = module_logits.view(
+            *module_logits.shape[:2], self.config.n_splits, self.n_experts
+        )
+        module_weights = module_logits / (module_logits.sum(dim=-1, keepdim=True) + EPS)
+
+        # after normalization, we index over the modality dimension to recover seq len dim
+        module_weights = module_weights[:, mod_ids]
+
+        return module_weights
+
+    @forward_with_cache
+    def forward(self, input, **kwargs) -> Union[
+        BatchExpertsSplitsAndWeightsSelectorOutput,
+        BatchSequenceExpertsSplitsAndWeightsSelectorOutput
+    ]:
+        """Returns the experts and weights for the task names used in the current batch.
+
+        If there is only one task, we return a SequenceExpertsAndWeightsSelectorOutput. This is to show that the weights are shared across the batch,
+        and therefore can allow speedups in the forward pass.
+        """
+        weights = self._get_weights()
+
+        return BatchSequenceExpertsSplitsAndWeightsSelectorOutput(
+            SelectorOutput.ALL_EXPERTS, weights
+        ) 
