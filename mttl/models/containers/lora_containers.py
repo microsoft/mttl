@@ -10,6 +10,7 @@ from mttl.models.containers.selectors.selector_output import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
     ExpertsAndWeightsSelectorOutput,
     SelectorOutput,
+    SelectorOutputsContainer,
 )
 from mttl.models.library.expert import Expert
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
@@ -318,6 +319,35 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         self.experts.add_skill(modifier_module)
 
     def route(self, input, selection, **kwargs):
+        if isinstance(selection, SelectorOutputsContainer):
+            # we have multiple outputs, we need to route them separately
+            # build output tensor
+            out_dim = self.experts.layer.out_features
+            output = torch.zeros(
+                size=(*input.shape[:-1], out_dim),
+                dtype=input.dtype,
+                device=input.device,
+            )
+
+            # we have already checked that indices don't overlap across different selector outputs
+            # make sure that all indices cover the full range of the output
+            n_seen = 0
+
+            for selector_output, selector_idx in zip(
+                selection.selector_outputs, selection.selector_indices
+            ):
+                selector_route_input = input.index_select(
+                    selection.dim_index, selector_idx
+                )
+                out = self.route(selector_route_input, selector_output, **kwargs)
+
+                # add the output to the right place
+                output = output.index_add(selection.dim_index, selector_idx, out)
+                n_seen += selector_idx.size(0)
+
+            assert n_seen == input.size(selection.dim_index)
+            return output
+
         if isinstance(selection, BatchExpertsSelectorOutput):
             # in order to use this container, we need to create one-hot weights for the experts
             batch_size = len(selection.experts)
