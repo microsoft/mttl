@@ -235,7 +235,7 @@ class LossCallback(cb.Callback):
                 desc=f"Test {self.name}",
             ):
                 batch = transfer_batch_to_device(batch, pl_module.device)
-                loss = pl_module.forward(batch, reduction="none")
+                loss = pl_module.forward(**batch, reduction="none")
                 outputs += [(loss.detach().cpu(),)]
         losses = torch.cat([out[0] for out in outputs], 0)
 

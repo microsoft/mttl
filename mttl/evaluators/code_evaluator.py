@@ -81,8 +81,8 @@ class CodeEvaluator(GenerativeEvaluator):
         metric = load("code_eval")
         for num_batch, batch in pbar:
             # we assume code prefixes are available and these are "completion" tasks
-            sources_texts = batch["code_prefix"]
-            tests = batch["code_tests"]
+            sources_texts = batch.pop("code_prefix")
+            tests = batch.pop("code_tests")
 
             predictions = self.generate_for_batch(model, batch)
             generated = list(

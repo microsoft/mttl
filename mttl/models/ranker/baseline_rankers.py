@@ -12,7 +12,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.utils.extmath import safe_sparse_dot
 
 from mttl.logging import logger
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.models.library.dataset_library import DatasetLibrary
 from mttl.models.ranker.adapter_ranker import AdapterRanker
 from mttl.utils import remote_login
 
@@ -24,7 +24,6 @@ except:
 
 
 def upload_checkpoint(repo_id, filename, path_in_repo):
-    import os
 
     remote_login()
     create_repo(repo_id, repo_type="model", exist_ok=True)
@@ -108,7 +107,7 @@ class TFIDFRanker(AdapterRanker):
         else:
             ckpt_file = repo_id + "/model.ckpt"
 
-        ckpt = torch.load(ckpt_file)
+        ckpt = torch.load(ckpt_file, weights_only=False)
 
         ranker = cls(**ckpt["config"])
         ranker.load_state_dict(ckpt["state_dict"])
@@ -234,7 +233,7 @@ class KATERanker(AdapterRanker):
             ckpt_file = path + "/model.ckpt"
             index_file = path + "/index.faiss"
 
-        ckpt = torch.load(ckpt_file)
+        ckpt = torch.load(ckpt_file, weights_only=False)
         index = read_index(index_file)
 
         ranker = cls(**ckpt["config"])

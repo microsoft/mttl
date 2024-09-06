@@ -1,7 +1,7 @@
 import click
 
 from mttl.dataloader.flan_utils import download_flan
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.models.library.dataset_library import DatasetLibrary
 
 
 @click.command()

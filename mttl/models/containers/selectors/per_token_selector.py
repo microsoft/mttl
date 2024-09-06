@@ -106,7 +106,8 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
         else:
             mean_angle = angle.mean()
 
-        task = self.routing_infos.task_sources[0]
+        task = self.routing_infos.task_names[0]
+
         to_store = {"angle": mean_angle.item()}
         self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)
         self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
@@ -125,7 +126,8 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
         else:
             mean_entropy = entropy.mean()
 
-        task = self.routing_infos.task_sources[0]
+        task = self.routing_infos.task_names[0]
+
         to_store = {"ent_routing": mean_entropy.item()}
         self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)
         self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
@@ -224,7 +226,7 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
             ).view(1, -1)
         else:
             warn_once(
-                f"Library artifacts not loaded for {self.__class__}, using zero initialization."
+                f"Library artifacts not loaded for {self.__class__.__name__}, using zero initialization."
             )
             proto = torch.zeros(
                 1,

@@ -32,6 +32,7 @@ def translate_lib_to_hf_phi(
         raise ValueError(
             f"Library with id {library_id_target} already exists and it is not empty. Please provide a new library id."
         )
+
     with new_library.batched_commit():
         for expert_name in library.keys():
             expert_dump = library[expert_name]
@@ -41,6 +42,7 @@ def translate_lib_to_hf_phi(
             expert_dump.training_config.modify_layers = (
                 ".*k_proj.*|.*v_proj.*|.*q_proj.*|.*dense.*"
             )
+
             # 1. split Wqkv into k_proj, v_proj, q_proj
             expert_weights = expert_dump.expert_weights
             new_expert_weights = {}
@@ -65,11 +67,13 @@ def translate_lib_to_hf_phi(
                 else:
                     new_expert_weights[new_k] = v
             expert_dump.expert_weights = new_expert_weights
+
             if tie_params:
                 # makes sure that params are tied for arrow prototype calculation: q,k and v should get the same prototype.
                 expert_dump.training_config.tie_params = (
-                    "q_proj.*\\.lora_a|k_proj.*\\.lora_a|v_proj.*\\.lora_a"
-                )
+                    expert_dump.expert_config.tie_params
+                ) = "q_proj.*\\.lora_a|k_proj.*\\.lora_a|v_proj.*\\.lora_a"
+
             new_library.add_expert(expert_name=expert_name, expert_dump=expert_dump)
             # make sure arrow routing uses same routing for q, k, v as in older version of phi-2 implementation.
         return new_library

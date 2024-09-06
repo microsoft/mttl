@@ -4,34 +4,7 @@ import tqdm
 
 from mttl.evaluators.base import Evaluator, switch_to_eval_mode
 from mttl.logging import logger
-from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
-
-
-def compute_loglike_loss(logits, labels, reduction="none"):
-    # calculate loss, could also be done inside of the model
-    bs = logits.size(0)
-    vocab_size = logits.size(-1)
-    labels = labels.squeeze(-1)
-    shift_logits = logits[..., :-1, :].contiguous()
-    shift_labels = labels[..., 1:].contiguous()
-
-    # Flatten the tokens
-    loss_fct = torch.nn.CrossEntropyLoss(reduction=reduction)
-    shift_logits = shift_logits.view(-1, vocab_size)
-    shift_labels = shift_labels.view(-1)
-
-    # Enable model parallelism
-    shift_labels = shift_labels.to(shift_logits.device)
-    loss = loss_fct(shift_logits, shift_labels)
-
-    # reshape back
-    if reduction == "none":
-        loss = loss.view((bs, -1))
-        # mean only non-zero
-        non_zero_loss = (loss != 0).sum(dim=-1)
-        non_zero_loss[non_zero_loss == 0] = 1
-        loss = loss.sum(dim=-1) / non_zero_loss
-    return loss
+from mttl.models.utils import compute_loglike_loss
 
 
 class LogLikeEvaluator(Evaluator):
@@ -49,6 +22,10 @@ class LogLikeEvaluator(Evaluator):
         shuffle=False,
         output_path=None,
     ):
+        from mttl.models.expert_model import BaseExpertModel
+        from mttl.models.lightning.expert_module import ExpertModule
+        from mttl.models.utils import transfer_batch_to_device
+
         dataloader = self.get_dataloader(split, subsample, shuffle=shuffle)
 
         if self.use_vllm:
@@ -69,25 +46,28 @@ class LogLikeEvaluator(Evaluator):
             if num_batches is not None and num_batch >= num_batches:
                 break
 
-            batch_size = len(batch["labels_index"])
-            num_options = batch["num_options"]
-            labels_texts = batch["labels_texts"]
-            sources_texts = batch["sources_texts"]
+            labels_index = batch.pop("labels_index", None)
+            num_options = batch.pop("num_options")
+            labels_texts = batch.pop("labels_texts")
+            sources_texts = batch.pop("sources_texts")
+            batch_size = len(labels_index)
 
             batch = transfer_batch_to_device(batch, device)
 
             with torch.no_grad():
-                if isinstance(model, EfficientCheckpointModule):
-                    loss_per_option = model.forward(batch, reduction="none")
+                if isinstance(model, ExpertModule) or isinstance(
+                    model, BaseExpertModel
+                ):
+                    logits = model.forward(**batch).logits
                 else:
                     logits = model.forward(
                         input_ids=batch["input_ids"],
                         attention_mask=batch["attention_mask"],
                     ).logits
-                    loss_per_option = compute_loglike_loss(
-                        logits, batch["labels"], reduction="none"
-                    )
 
+                loss_per_option = compute_loglike_loss(
+                    logits, batch["labels"], reduction="none"
+                )
                 loss_per_option = loss_per_option.cpu().numpy()
                 loss_per_example = [
                     loss_per_option[
@@ -102,16 +82,14 @@ class LogLikeEvaluator(Evaluator):
                 all_predictions.extend(predictions)
                 all_losses.extend(loss_per_option.tolist())
 
-                if "labels_index" in batch:
+                if labels_index is not None:
                     all_accuracies.extend(
-                        (
-                            np.array(predictions) == np.array(batch["labels_index"])
-                        ).tolist()
+                        (np.array(predictions) == np.array(labels_index)).tolist()
                     )
 
             if verbose:
                 logger.info("Sources:\n%s", sources_texts[0])
-                logger.info("Label:\n%s", labels_texts[batch["labels_index"][0]])
+                logger.info("Label:\n%s", labels_texts[labels_index[0]])
                 logger.info("Prediction:\n%s", labels_texts[predictions[0]])
 
             if all_accuracies:

@@ -55,7 +55,7 @@ class MMLUEvaluator(GenerativeEvaluator):
             datamodule, use_vllm=use_vllm, generation_kwargs=generation_kwargs
         )
 
-    def eval_vllm(self, model, generation_config, subsample, shuffle):
+    def evaluate_with_vllm(self, model, generation_config, subsample, shuffle):
         model_hash = hashlib.sha256()
 
         if hasattr(model, "hparams"):
@@ -103,7 +103,7 @@ class MMLUEvaluator(GenerativeEvaluator):
         **kwargs,
     ):
         if self.use_vllm:
-            metrics = self.eval_vllm(
+            metrics = self.evaluate_with_vllm(
                 model,
                 generation_config=model.generation_config,
                 subsample=subsample,

@@ -3,14 +3,16 @@ import ast
 import importlib
 import json
 import os
-from dataclasses import MISSING, Field, dataclass, field, fields, make_dataclass
+from dataclasses import MISSING, dataclass, field, fields, make_dataclass
 from string import Template
-from typing import Any, Dict, List, Type, TypeVar
+from typing import Dict, List, Type, TypeVar
 
 import torch
 
-from mttl.logging import logger, setup_logging, warn_once
+from mttl.logging import logger, warn_once
 from mttl.registrable import Registrable
+from mttl.serializable import AutoSerializable, Serializable
+from mttl.utils import deprecated
 
 # Create a generic type variable that can be any type
 T = TypeVar("T")
@@ -92,7 +94,7 @@ def create_config_class_from_args(config_class, args):
 
 
 @dataclass
-class Args:
+class Args(Serializable):
     @property
     def updated_kwargs(self):
         return {
@@ -101,36 +103,14 @@ class Args:
             if getattr(self, k.name) != k.default
         }
 
-    @classmethod
-    def fromdict(cls, data, strict=False) -> "Args":
-        """
-        Reload a dataclass from a dictionary. We store the class name in the dict to be able to reload it.
-        If the cls is Args, then we try to access the `_class` attribute to get the class name.
-        """
-        cls_name = data.pop("args_class", None)
-        if cls == Args:
-            if not cls_name:
-                raise ValueError("No class name found in the data.")
-            cls = globals()[cls_name]
-
-        if not strict:
-            data_ = {}
-            for f in fields(cls):
-                if f.name in data:
-                    data_[f.name] = data[f.name]
-        else:
-            data_ = data
-
-        return cls(**data_)
-
     def asdict(self) -> Dict:
-        data = {
-            f.name: getattr(self, f.name)
+        """Slightly overloaded asdict to skip MultiDefaultValue fields."""
+        skip_fields = [
+            f.name
             for f in fields(self)
-            if not isinstance(getattr(self, f.name), MultiDefaultValue)
-        }
-
-        return {"args_class": self.__class__.__name__, **data}
+            if isinstance(getattr(self, f.name), MultiDefaultValue)
+        ]
+        return super().asdict(skip_fields=skip_fields)
 
     def was_overridden(self, key):
         return key in self.updated_kwargs
@@ -169,7 +149,6 @@ class Args:
         Converts parameter values in config to json
         :return: json
         """
-        import copy
 
         to_save = self.asdict()
         return json.dumps(to_save, indent=4, sort_keys=False)
@@ -266,9 +245,27 @@ class Args:
         return config
 
 
+class AutoArgs(AutoSerializable):
+    @classmethod
+    @deprecated(
+        message="The config appears to be a legacy config and will be discontinued in the next release."
+    )
+    def fromdict_legacy(cls, data):
+        """Assume the data is ExpertConfig to not break previous loading."""
+        dataclass_cls = ExpertConfig
+        return dataclass_cls.fromdict(data)
+
+    @classmethod
+    def fromdict(cls, data: Dict):
+        try:
+            return AutoSerializable.fromdict(data)
+        except ValueError:
+            return cls.fromdict_legacy(data)
+
+
 class MetaRegistrable(type):
     """
-    Meta class that creates a new dataclass containing all the configs
+    Meta class that creates a new dataclass containing fields all the config dataclasses
     in this registrable.
     """
 
@@ -352,12 +349,13 @@ class TrainingArgs(DataArgs):
     backbone_checkpoint: str = None  # load the backbone from here
     learning_rate: float = 1e-3
     warmup_proportion: float = 0.06
-    trainable_param_names: str = ".*"
+    trainable_param_names: str = (
+        ".*"  # trainable param names are those set by the experts
+    )
     non_trainable_param_names: str = None
     weight_decay: float = 0.01
     adam_epsilon: float = 1e-8
     max_grad_norm: float = 0.1
-    gradient_accumulation_steps: int = 1
     optimizer: str = "adamw"
     adafactor_scale_parameter: bool = True
     adafactor_warmup_init: bool = False
@@ -378,6 +376,7 @@ class TrainingArgs(DataArgs):
 
     # logging
     wandb_project: str = None
+    wandb_run_name: str = None
     tensorboard: bool = False
     remote_token: str = None
     library_id: str = None
@@ -424,6 +423,9 @@ class TrainingArgs(DataArgs):
             )
 
     def __post_init__(self):
+        if not self.compute_strategy:
+            self.compute_strategy = "auto"
+
         if self.model is not None and self.model_family is None:
             # attempt to infer the model family from the model name
             if "t5" in self.model or "T0" in self.model:
@@ -448,6 +450,11 @@ class TrainingArgs(DataArgs):
         if self.micro_batch_size is None:
             self.micro_batch_size = self.train_batch_size
 
+        if self.train_batch_size % self.micro_batch_size != 0:
+            raise ValueError(
+                "The training batch size must be divisible by the micro batch size."
+            )
+
         self.gradient_accumulation_steps = (
             self.train_batch_size // self.micro_batch_size
         )
@@ -459,6 +466,35 @@ class TrainingArgs(DataArgs):
                 "You have multiple GPUs, but your device count is not being taken "
                 + "into account when computing `gradient_accumulation_steps`."
             )
+
+    def to_hf_training_args(self) -> "TrainingArguments":
+        from transformers import TrainingArguments
+
+        return TrainingArguments(
+            run_name=self.wandb_run_name or self.expert_name or self.finetune_task_name,
+            use_cpu=self.compute_strategy == "cpu",
+            overwrite_output_dir=True,
+            output_dir=self.output_dir,
+            per_device_train_batch_size=self.train_batch_size,
+            per_device_eval_batch_size=self.predict_batch_size,
+            gradient_accumulation_steps=self.gradient_accumulation_steps,
+            logging_steps=1,
+            bf16=self.precision == "bf16",
+            fp16=self.precision == 16,
+            learning_rate=self.learning_rate,
+            weight_decay=self.weight_decay,
+            load_best_model_at_end=True,
+            warmup_steps=self.warmup_steps if self.warmup_steps > 0 else 0,
+            warmup_ratio=self.warmup_proportion if self.warmup_proportion > 0 else 0,
+            num_train_epochs=self.num_train_epochs,
+            max_steps=self.total_steps,
+            remove_unused_columns=False,
+            save_strategy="epoch" if not self.save_every else "steps",
+            eval_strategy="epoch" if not self.eval_every else "steps",
+            save_steps=self.save_every,
+            eval_steps=self.eval_every,
+            ddp_find_unused_parameters=False,
+        )
 
 
 @dataclass

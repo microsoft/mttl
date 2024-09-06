@@ -5,73 +5,31 @@ import torch
 
 from mttl.logging import logger
 from mttl.models.modifiers.base import (
-    Modifier,
+    AutoModifierConfig,
     ModifierConfig,
     get_target_2_source_param_mapping,
 )
-from mttl.models.utils import download_from_hub
+from mttl.serializable import Serializable
 from mttl.utils import get_checkpoint_path
 
 
 @dataclass
-class ExpertInfo:
-    """
-    Stuff that we want to save about experts but will never be passed from command line
-    """
-
+class ExpertInfo(Serializable):
     expert_name: str
     expert_task_name: str = None
     parent_node: str = None
     # configuration for this expert, i.e. a modifier config
-    expert_config: ModifierConfig = None
+    expert_config: AutoModifierConfig = None
     # arguments with which the expert was trained, i.e. the full training config
-    training_config: "Args" = None
+    training_config: "mttl.arguments.AutoArgs" = None
     expert_model: str = None
-
-    @classmethod
-    def fromdict(cls, data):
-        from mttl.arguments import Args, MultiExpertConfig
-
-        try:
-            # if we cannot infer the training class automatically, we assume it is a MultiExpertConfig
-            training_config = Args.fromdict(data["training_config"])
-        except:
-            training_config = MultiExpertConfig.fromdict(data["training_config"])
-
-        if "expert_config" in data:
-            expert_config = ModifierConfig.fromdict(data["expert_config"])
-        else:
-            expert_config = ModifierConfig.from_training_config(training_config)
-
-        kwargs = {}
-        for key in cls.__dataclass_fields__.keys():
-            kwargs[key] = data.get(key, None)
-
-        kwargs["expert_config"] = expert_config
-        kwargs["training_config"] = training_config
-        return cls(**kwargs)
-
-    def asdict(self) -> Dict:
-        data = {
-            "expert_name": self.expert_name,
-            "expert_task_name": self.expert_task_name,
-            "parent_node": self.parent_node,
-            "expert_model": self.expert_model,
-        }
-        if self.expert_config:
-            data["expert_config"] = self.expert_config.asdict()
-        if self.training_config:
-            data["training_config"] = self.training_config.asdict()
-        return data
 
     @property
     def model(self):
         """Returns the expert model associated with the expert. Tries to get it
         from training_config if expert_model is None for back-compatibility.
         """
-        if self.expert_model is not None:
-            return self.expert_model
-        return self.training_config.model
+        return self.expert_model or getattr(self.training_config, "model", None)
 
     @property
     def dataset(self):
@@ -79,13 +37,17 @@ class ExpertInfo:
         return getattr(getattr(self, "training_config", {}), "dataset", "")
 
     @property
-    def model_modifier(self):
-        if self.expert_config is not None:
-            return Modifier.get_name_by_config_class(type(self.expert_config))
-        return self.training_config.model_modifier
+    def modifier_name(self):
+        if self.expert_config is None:
+            # fallback in the training config
+            logger.warning(
+                "No expert config found for this expert, this is probably a legacy checkpoint, and will be deprecated."
+            )
+
+            return getattr(self.training_config, "modifier_name", None)
+        return self.expert_config.modifier_name
 
 
-@dataclass
 class Expert:
     def __init__(
         self,
@@ -176,12 +138,49 @@ def load_expert(
     expert_name: str = None,
     **kwargs,
 ):
-    """Transforms a potentially lightning checkpoint into an Expert object."""
-    # load the expert weights
+    """Load expert directly from the checkpoint.
+
+    Supports pytorch lightning and huggingface checkpoints.
+    """
     import os
+
+    from huggingface_hub import list_repo_files
+
+    from mttl.models.base_model import WEIGHTS_NAME
+    from mttl.models.lightning.base_module import CHECKPOINT_PATH_IN_HUB
 
     if expert_library is not None and expert_path in expert_library:
         return expert_library[expert_path]
+
+    if os.path.isdir(expert_path) and os.path.isfile(
+        os.path.join(expert_path, WEIGHTS_NAME)
+    ):
+        return load_expert_from_hf_checkpoint(expert_path, expert_name)
+    elif os.path.isdir(expert_path) and os.path.isfile(expert_path):
+        return load_expert_from_pl_checkpoint(expert_path, expert_name)
+
+    # this is not a local path, try to download from hub
+    try:
+        files = list_repo_files(expert_path)
+    except:
+        raise ValueError(
+            f"Could not find expert at {expert_path}, are you sure it's a huggingface repository?"
+        )
+
+    if WEIGHTS_NAME in files:
+        return load_expert_from_hf_checkpoint(expert_path, expert_name)
+    elif CHECKPOINT_PATH_IN_HUB in files:
+        return load_expert_from_pl_checkpoint(expert_path, expert_name)
+
+
+def load_expert_from_pl_checkpoint(
+    expert_path: str,
+    expert_name: str = None,
+    **kwargs,
+):
+    import os
+
+    from mttl.models.lightning.utils import download_from_hub
 
     if os.path.isfile(expert_path) or os.path.isdir(expert_path):
         expert_checkpoint = get_checkpoint_path(expert_path)
@@ -189,7 +188,9 @@ def load_expert(
         expert_checkpoint = download_from_hub(expert_path)
 
     logger.info(f"Loading expert from {expert_checkpoint}...")
-    expert_checkpoint = torch.load(expert_checkpoint, map_location="cpu")
+    expert_checkpoint = torch.load(
+        expert_checkpoint, weights_only=False, map_location="cpu"
+    )
 
     if "hyper_parameters" in expert_checkpoint:
         # this is a PL checkpoint
@@ -237,6 +238,38 @@ def load_expert(
         )
     else:
         expert = Expert.fromdict(expert_checkpoint)
+
+    # override expert name
+    if expert_name is not None:
+        expert.name = expert_name
+    return expert
+
+
+def load_expert_from_hf_checkpoint(
+    expert_path: str,
+    expert_name: str = None,
+    **kwargs,
+):
+    """Transforms a potentially lightning checkpoint into an Expert object."""
+    # load the expert weights
+    import os
+
+    from mttl.models.expert_model import ExpertModel
+    from mttl.models.hf.trainer import MTTL_ARGS_NAME
+
+    logger.info(f"Loading expert from {expert_path}...")
+
+    # gather mttl training arguments from the checkpoint if available
+    mttl_args_file = os.path.join(expert_path, MTTL_ARGS_NAME)
+    if os.path.isfile(mttl_args_file):
+        training_config = torch.load(mttl_args_file, weights_only=False)
+    else:
+        training_config = None
+
+    # we assume it's an expert model, which is used to train single experts
+    expert: Expert = ExpertModel.from_pretrained(
+        expert_path, device_map="cpu"
+    ).as_expert(training_config=training_config)
 
     # override expert name
     if expert_name is not None:

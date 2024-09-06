@@ -2,7 +2,7 @@ import os
 from dataclasses import dataclass
 
 from mttl.datamodule.base import DataModule, DatasetConfig, MultiChoiceSourceDataModule
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.models.library.dataset_library import DatasetLibrary
 
 
 def doc_to_text(doc):
