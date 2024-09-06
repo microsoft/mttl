@@ -107,7 +107,13 @@ class LoRAExpertContainer(ExpertContainer):
                 indices.append(index)
         return indices
 
-    def route(self, input, selection, **kwargs):
+    def route(self, input, selection, add_base_forward=True, **kwargs):
+
+        # We compute the base model's forward pass here, to leverage the
+        # contiguity of the current input (which might be split later)
+        if add_base_forward:
+            base_out = self.experts.layer(input).to(input.dtype)
+
         """Depending on the selection output, we and merge differently."""
         from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRAView
 
@@ -117,7 +123,7 @@ class LoRAExpertContainer(ExpertContainer):
             skilled_lora = SkilledLoRAView.from_loras(
                 [self.get(module) for module in selection.experts]
             )
-            return SkilledLoRA.parallel_linear_weighted_forward(
+            module_output = SkilledLoRA.parallel_linear_weighted_forward(
                 input,
                 [skilled_lora],
                 selection.weights,
@@ -126,7 +132,7 @@ class LoRAExpertContainer(ExpertContainer):
             )
         elif isinstance(selection, BatchExpertsSelectorOutput):
             # In this case, we have exactly one expert per example in the batch with no weights
-            return LoRA.parallel_linear_forward(
+            module_output = LoRA.parallel_linear_forward(
                 input, [self.get(module) for module in selection.experts]
             )
         elif isinstance(
@@ -213,7 +219,15 @@ class LoRAExpertContainer(ExpertContainer):
                     dim_names=selection.dim_names,
                     merge_after=self.lora_merge_after,
                 )
-            return module_output.view(input.shape[0], input.shape[1], -1)
+            module_output = module_output.view(input.shape[0], input.shape[1], -1)
+
+        if add_base_forward:
+            if base_out.ndim == 2:
+                module_output = module_output.squeeze(1)
+
+            module_output = base_out + module_output
+
+        return module_output
 
     def forward(self, input, **kwargs):
         if len(self.experts) > 0:
@@ -318,20 +332,20 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
 
         self.experts.add_skill(modifier_module)
 
-    def route(self, input, selection, **kwargs):
-        if isinstance(selection, SelectorOutputsContainer):
-            # we have multiple outputs, we need to route them separately
-            # build output tensor
-            out_dim = self.experts.layer.out_features
-            output = torch.zeros(
-                size=(*input.shape[:-1], out_dim),
-                dtype=input.dtype,
-                device=input.device,
-            )
+    def route(self, input, selection, add_base_forward=True, **kwargs):
 
-            # we have already checked that indices don't overlap across different selector outputs
-            # make sure that all indices cover the full range of the output
-            n_seen = 0
+        # We compute the base model's forward pass here, to leverage the
+        # contiguity of the current input (which might be split later)
+        if add_base_forward:
+            base_out = self.experts.layer(input).to(input.dtype)
+        else:
+            base_out = 0.0
+
+        if isinstance(selection, SelectorOutputsContainer):
+            assert add_base_forward
+            assert base_out.ndim == 3
+
+            output = base_out
 
             for selector_output, selector_idx in zip(
                 selection.selector_outputs, selection.selector_indices
@@ -339,13 +353,16 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                 selector_route_input = input.index_select(
                     selection.dim_index, selector_idx
                 )
-                out = self.route(selector_route_input, selector_output, **kwargs)
+                mod_out = self.route(
+                    selector_route_input,
+                    selector_output,
+                    add_base_forward=False,
+                    **kwargs,
+                )
 
                 # add the output to the right place
-                output = output.index_add(selection.dim_index, selector_idx, out)
-                n_seen += selector_idx.size(0)
+                output = output.index_add(selection.dim_index, selector_idx, mod_out)
 
-            assert n_seen == input.size(selection.dim_index)
             return output
 
         if isinstance(selection, BatchExpertsSelectorOutput):
@@ -377,7 +394,6 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                 dim_names=["batch", "experts"],
                 merge_after=self.lora_merge_after,
             )
-            return module_output
         elif (
             isinstance(selection, BatchSequenceExpertsAndWeightsSelectorOutput)
             or isinstance(selection, BatchExpertsAndWeightsSelectorOutput)
@@ -413,9 +429,16 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                 dim_names=selection.dim_names,
                 merge_after=self.lora_merge_after,
             )
-            return module_output
         else:
             raise ValueError("Unknown selection type.")
+
+        if add_base_forward:
+            if base_out.ndim == 2:
+                module_output = module_output.squeeze(1)
+
+            module_output = base_out + module_output
+
+        return module_output
 
     def forward(self, input, **kwargs):
         if len(self.experts) > 0:

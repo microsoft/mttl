@@ -325,7 +325,9 @@ class MultimodalPolySelector(PolySelector):
         self.n_modalities = len(self.config.modality_names)
         self.n_tasks = len(self.config.task_names) if self.config.task_names else 0
 
-        assert self.n_modalities > 1, "MultimodalPolySelector requires n_modalities > 1"
+        assert (
+            self.n_modalities > 0
+        ), "MultimodalPolySelector requires n_modalities >= 1"
 
         # We add an extra task for the default (average) expert if not found
         shape = (
@@ -348,8 +350,9 @@ class MultimodalPolySelector(PolySelector):
             mod_names = routing_info.modality_names
             mod_idxs = defaultdict(list)
             for i, mod_name in enumerate(mod_names):
-                mod_id = self.config.modality_names.index(mod_name)
-                mod_idxs[mod_id].append(i)
+                if mod_name:  # skip None
+                    mod_id = self.config.modality_names.index(mod_name)
+                    mod_idxs[mod_id].append(i)
 
             for mod_id in mod_idxs.keys():
                 mod_idxs[mod_id] = torch.LongTensor(mod_idxs[mod_id]).to(

@@ -193,7 +193,8 @@ class LoRA(Modifier, MergeableModifierMixin, ModifyMixin):
                 * scaling[:, None, None]
             )
 
-        return layer_out + adapter_out.to(dtype=input.dtype)
+        # return layer_out + adapter_out.to(dtype=input.dtype)
+        return adapter_out.to(dtype=input.dtype)
 
     def reset_parameters(self):
         gain = nn.init.calculate_gain(nonlinearity="leaky_relu", param=math.sqrt(5))
@@ -437,7 +438,7 @@ class SkilledLoRA(LoRA):
         weights = weights.to(dtype=skilled_loras[0].lora_a.dtype)
 
         # (n_examples, seq_len, out_features)
-        layer_out = skilled_loras[0].layer(input)
+        # layer_out = skilled_loras[0].layer(input)
         phi_2_align_heads = skilled_loras[0].config.phi_2_align_heads
 
         input_lora = input.to(skilled_loras[0].lora_a.dtype)
@@ -491,11 +492,12 @@ class SkilledLoRA(LoRA):
         adapter_out = adapter_out * scaling
 
         # squeeze again sequence dimension ("l") if needed
-        if layer_out.ndim == 2:
-            adapter_out = adapter_out.squeeze(1)
+        # if layer_out.ndim == 2:
+        #     adapter_out = adapter_out.squeeze(1)
 
         # adapter out is float32
-        return layer_out + adapter_out.to(dtype=input.dtype)
+        # return layer_out + adapter_out.to(dtype=input.dtype)
+        return adapter_out.to(dtype=input.dtype)
 
 
 class LoRAView(LoRA):
