@@ -88,7 +88,7 @@ def test_skilled_lora_parallel_merge_with_weights():
     output = SkilledLoRA.parallel_linear_weighted_forward(
         input, [ada1], torch.tensor([0.5, 0.5]), dim_names=["experts"]
     )
-    assert output[0, 0].item() == 1.5
+    assert output[0, 0, 0].item() == 1.5
     assert output.shape == (2, 2)
 
     output = SkilledLoRA.parallel_linear_weighted_forward(
@@ -97,8 +97,8 @@ def test_skilled_lora_parallel_merge_with_weights():
         torch.tensor([[0.5, 0.5], [0.0, 1.0]]),
         dim_names=["batch", "experts"],
     )
-    assert output[0, 0].item() == 1.5
-    assert output[1, 0].item() == 4.0
+    assert output[0, 0, 0].item() == 1.5
+    assert output[0, 1, 0].item() == 4.0
     assert output.shape == (2, 2)
 
     input = torch.ones(2, 3, 1)
