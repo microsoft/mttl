@@ -71,7 +71,7 @@ class ModifierConfig(object):
 
         Returns None if no modifier is set.
         """
-        from mttl.config import create_config_class_from_args
+        from mttl.arguments import create_config_class_from_args
 
         if isinstance(training_config, ModifierConfig):
             # nothing to do here

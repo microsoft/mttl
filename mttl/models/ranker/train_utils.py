@@ -5,7 +5,7 @@ import torch
 from pytorch_lightning import seed_everything
 
 from mttl.callbacks import LiveCheckpointCallback
-from mttl.config import RankerConfig
+from mttl.arguments import RankerConfig
 from mttl.datamodule.clip_data_module import (
     CLIPExpertsConfig,
     CLIPExpertsDatamodule,

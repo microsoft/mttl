@@ -83,7 +83,7 @@ class SelectorConfig:
 
         Returns None if no modifier is set.
         """
-        from mttl.config import create_config_class_from_args
+        from mttl.arguments import create_config_class_from_args
 
         if isinstance(training_config, SelectorConfig):
             # nothing to do here

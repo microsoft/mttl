@@ -10,7 +10,7 @@ import wandb
 from matplotlib import pyplot as plt
 from pytorch_lightning import seed_everything
 
-from mttl.config import Args, EvaluationConfig, ExpertConfig
+from mttl.arguments import Args, EvaluationConfig, ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.evaluators import (
     Evaluator,

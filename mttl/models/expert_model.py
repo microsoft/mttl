@@ -9,7 +9,7 @@ import torch
 from torch.optim.optimizer import Optimizer
 from transformers import PreTrainedModel
 
-from mttl.config import Args, ExpertConfig, MoEExpertConfig, MultiExpertConfig
+from mttl.arguments import Args, ExpertConfig, MoEExpertConfig, MultiExpertConfig
 from mttl.logging import logger
 from mttl.models.containers import add_expert_to_transformer
 from mttl.models.containers.base import ContainerFullException, ExpertContainer
@@ -163,6 +163,12 @@ class ExpertModel(EfficientCheckpointModule):
 
     def on_test_epoch_end(self) -> None:
         self.log_loss(split="test")
+        
+    def on_before_optimizer_step(self, optimizer: Optimizer) -> None:
+        return super().on_before_optimizer_step(optimizer)
+    
+    def on_before_zero_grad(self, optimizer: Optimizer) -> None:
+        return super().on_before_zero_grad(optimizer)
 
     def test_step(self, batch, batch_idx):
         if "num_options" in batch:

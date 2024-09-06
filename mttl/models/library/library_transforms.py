@@ -624,7 +624,7 @@ class PhatgooseTransform(HiddenStateComputer):
         expert_names: list = None,
         default_args=None,
     ):
-        from mttl.config import ExpertConfig
+        from mttl.arguments import ExpertConfig
         from mttl.models.expert_model import MultiExpertModel
         from mttl.models.library.utils import train_module
 

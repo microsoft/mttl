@@ -3,7 +3,7 @@ import sys
 
 from pytorch_lightning import seed_everything
 
-from mttl.config import EvaluationConfig, ExpertConfig
+from mttl.arguments import EvaluationConfig, ExpertConfig
 from mttl.models.library.expert_library import ExpertLibrary
 
 

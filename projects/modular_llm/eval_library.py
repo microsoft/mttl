@@ -10,7 +10,7 @@ from pytorch_lightning import seed_everything
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.callbacks import LossCallback
-from mttl.config import EvaluationConfig, ExpertConfig
+from mttl.arguments import EvaluationConfig, ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.rouge_evaluator import RougeEvaluator

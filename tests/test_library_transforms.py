@@ -8,7 +8,7 @@ import pytest
 import torch
 from pytorch_lightning import seed_everything
 
-from mttl.config import ExpertConfig
+from mttl.arguments import ExpertConfig
 from mttl.logging import logger
 from mttl.models.library.expert_library import HFExpertLibrary, LocalExpertLibrary
 from mttl.models.library.library_transforms import (

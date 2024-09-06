@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from mttl.config import MoEExpertConfig
+from mttl.arguments import MoEExpertConfig
 from mttl.models.expert_model import MoEModel
 
 

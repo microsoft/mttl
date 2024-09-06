@@ -1,7 +1,7 @@
 import os
 
 if __name__ == "__main__":
-    from mttl.config import RankerConfig
+    from mttl.arguments import RankerConfig
     from mttl.models.ranker.train_utils import (
         train_classifier,
         train_clip,

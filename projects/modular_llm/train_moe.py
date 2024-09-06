@@ -1,4 +1,4 @@
-from mttl.config import MoEExpertConfig
+from mttl.arguments import MoEExpertConfig
 from mttl.models.expert_model import MoEModel
 from projects.modular_llm.train_experts import train_experts
 

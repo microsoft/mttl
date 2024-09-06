@@ -13,7 +13,7 @@ from mttl.callbacks import (
     NanoMMLUCallback,
     RougeCallback,
 )
-from mttl.config import Args, ExpertConfig
+from mttl.arguments import Args, ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
 from mttl.models.expert_model import ExpertModel, MoEModel

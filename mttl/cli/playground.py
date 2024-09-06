@@ -87,7 +87,7 @@ class ConversationNoTemplate(Conversation):
 
 
 def main():
-    from mttl.config import ExpertConfig
+    from mttl.arguments import ExpertConfig
     from mttl.datamodule.utils import get_tokenizer_with_args
     from mttl.models.expert_model import MultiExpertModel
 

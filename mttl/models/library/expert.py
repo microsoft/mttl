@@ -30,7 +30,7 @@ class ExpertInfo:
 
     @classmethod
     def fromdict(cls, data):
-        from mttl.config import Args, MultiExpertConfig
+        from mttl.arguments import Args, MultiExpertConfig
 
         try:
             # if we cannot infer the training class automatically, we assume it is a MultiExpertConfig

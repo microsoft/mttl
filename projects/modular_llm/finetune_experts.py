@@ -10,7 +10,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 from typing import Callable
 
 from mttl.callbacks import DownstreamEvalCallback, LiveCheckpointCallback, RougeCallback
-from mttl.config import FinetuneConfig
+from mttl.arguments import FinetuneConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import get_pl_loggers, logger, setup_logging
 from mttl.models.expert_model import ExpertModel as ExpertTrainer
