@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from sentence_transformers import SentenceTransformer
 from transformers import T5ForConditionalGeneration, T5Tokenizer
 
-from mttl.models.lightning.base_module import EfficientCheckpointModule
+from mttl.models.lightning.base_module import LightningEfficientCheckpoint
 from mttl.models.ranker.adapter_ranker import AdapterRanker
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -103,7 +103,7 @@ class ProjectionHead(nn.Module):
         return x
 
 
-class CLIPRanker(AdapterRanker, EfficientCheckpointModule):
+class CLIPRanker(AdapterRanker, LightningEfficientCheckpoint):
     def __init__(
         self,
         task_names,

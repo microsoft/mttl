@@ -90,13 +90,14 @@ def prepare_model_for_kbit_training(model, use_gradient_checkpointing=True):
         torch.utils.checkpoint.checkpoint = notfailing_checkpoint
         model.gradient_checkpointing_enable()
         # FIX for enabling gradient of the auxiliary loss
-
     return model
 
 
 def model_loader_helper(
     model_name,
     device_map="auto",
+    bf16=True,
+    fp16=False,
     load_in_4bit=False,
     load_in_8bit=False,
     attn_implementation=None,
@@ -104,53 +105,61 @@ def model_loader_helper(
     if load_in_4bit and load_in_8bit:
         raise ValueError("Specify either 'load_in_4bit' or 'load_in_8bit' or neither.")
 
-    from transformers import AutoModelForCausalLM, LlamaForCausalLM, PreTrainedModel
+    from transformers import (
+        AutoModelForCausalLM,
+        BitsAndBytesConfig,
+        LlamaForCausalLM,
+        PreTrainedModel,
+    )
+
+    if load_in_8bit:
+        bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+    elif load_in_4bit:
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_use_double_quant=True,
+        )
+    else:
+        bnb_config = None
 
     logger.info(f"Attention Implementation: {attn_implementation}")
+
+    # set dtype
+    if bf16:
+        torch_dtype = torch.bfloat16
+    elif fp16:
+        torch_dtype = torch.float16
+    else:
+        torch_dtype = torch.float32
 
     if isinstance(model_name, PreTrainedModel):
         return model_name.train()
 
-    if "llama" in model_name:
-        model_object = LlamaForCausalLM.from_pretrained(
-            model_name,
-            load_in_4bit=load_in_4bit,
-            load_in_8bit=load_in_8bit,
-            torch_dtype=torch.bfloat16,
-            device_map=device_map,
-            attn_implementation=attn_implementation,
-        )
-    elif "phi-2" == model_name:
+    if "phi-2" == model_name:
         # local phi-2 version. use `microsoft/phi-2 for the official hf version`
         if "PHI_PATH" not in os.environ:
             raise ValueError("PHI_PATH is not set in the environment variables.")
 
+        model_name = os.environ["PHI_PATH"]
         logger.info(f"Loading phi-2 model from {os.environ['PHI_PATH']}")
-        model_object = AutoModelForCausalLM.from_pretrained(
-            os.environ["PHI_PATH"],
-            load_in_8bit=load_in_8bit,
-            torch_dtype=torch.bfloat16,
-            device_map=device_map,
-            trust_remote_code=True,
-        )
-    elif "stabilityai" in model_name:
-        model_object = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            trust_remote_code=True,
-        )
-    else:
-        model_object = AutoModelForCausalLM.from_pretrained(
-            model_name,
-            device_map=device_map,
-            load_in_4bit=load_in_4bit,
-            load_in_8bit=load_in_8bit,
-            trust_remote_code=True,
-            attn_implementation=attn_implementation,
-            torch_dtype=torch.bfloat16,
-        )
 
-    if load_in_8bit or load_in_4bit:
+    model_object = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        device_map=device_map,
+        trust_remote_code=True,
+        attn_implementation=attn_implementation,
+        quantization_config=bnb_config,
+        torch_dtype=torch_dtype,
+    )
+
+    if bnb_config is not None:
         model_object = prepare_model_for_kbit_training(model_object)
+
+    logger.info("Freezing parameters of the base model by default.")
+    for n, p in model_object.named_parameters():
+        p.requires_grad = False
 
     return model_object.train()
 
