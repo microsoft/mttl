@@ -21,7 +21,7 @@ from mttl.models.containers.selectors.base import (
 from mttl.models.expert_config import BaseExpertModelConfig
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.library.expert_library import ExpertLibrary
-from mttl.models.modifiers.base import AutoModifierConfig
+from mttl.models.modifiers.base import AutoModifierConfig, Modifier
 from mttl.models.modifiers.modify_model import modify_transformer
 
 
@@ -44,6 +44,16 @@ class ExpertModel(BaseExpertModel):
 
         if config.modifier_config is not None:
             modify_transformer(self.model, config.modifier_config)
+
+    def disable_adapter(self):
+        for name, module in self.model.named_modules():
+            if isinstance(module, Modifier):
+                module.disable()
+
+    def enable_adapter(self):
+        for name, module in self.model.named_modules():
+            if isinstance(module, Modifier):
+                module.enable()
 
     def as_expert(self, training_config=None):
         state_dict = self.state_dict()

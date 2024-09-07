@@ -60,6 +60,7 @@ class LoRA(Modifier, MergeableModifierMixin, ModifyMixin):
 
         self.create_for_layer(layer)
         self.reset_parameters()
+
         self.merged_with_layer = False
 
     def state_dict(self, *args, destination=None, prefix="", keep_vars=False):
@@ -144,7 +145,8 @@ class LoRA(Modifier, MergeableModifierMixin, ModifyMixin):
 
     def forward_linear_(self, input, **kwargs):
         output = self.layer(input)
-        if self.merged_with_layer:
+
+        if self.merged_with_layer or not self.enabled:
             return output
         else:
             input_lora = input.to(self.lora_a.dtype)
@@ -302,49 +304,39 @@ class SkilledLoRA(LoRA):
 
     def forward_linear_(self, input, weights):
         layer_out = self.layer(input)
+
+        if not self.enabled:
+            return layer_out
+
         input_lora = input.to(self.lora_a.dtype)
         input_lora = self.dropout_layer(input_lora)
 
         bs = input.size(0)
+        if weights.ndim == 1:
+            wrm_steps = 0
+            if self.training_steps < wrm_steps:
+                A = self.lora_a[torch.zeros_like(weights).long()]
+                B = self.lora_b[torch.zeros_like(weights).long()]
+            else:
+                if self.training_steps == wrm_steps:
+                    self.lora_a.data.copy_(
+                        self.lora_a.data[:1].repeat(self.n_skills, 1, 1, 1)
+                    )
+                    self.lora_b.data.copy_(
+                        self.lora_b.data[:1].repeat(self.n_skills, 1, 1, 1)
+                    )
+                A = self.lora_a[weights.long(), :, :, :]
+                B = self.lora_b[weights.long(), :, :, :]
 
         # Standard polytropon routing : (batch_size, dim_in, dim_out)
-        if weights.ndim < 4:
-            # these are task ids
-            if weights.ndim == 1:
-                # use indexing!
-                wrm_steps = 0
-                if self.training_steps < wrm_steps:
-                    A = self.lora_a[torch.zeros_like(weights).long()]
-                    B = self.lora_b[torch.zeros_like(weights).long()]
-                else:
-                    if self.training_steps == wrm_steps:
-                        self.lora_a.data.copy_(
-                            self.lora_a.data[:1].repeat(self.n_skills, 1, 1, 1)
-                        )
-                        self.lora_b.data.copy_(
-                            self.lora_b.data[:1].repeat(self.n_skills, 1, 1, 1)
-                        )
-                    A = self.lora_a[weights.long(), :, :, :]
-                    B = self.lora_b[weights.long(), :, :, :]
-            elif weights.ndim == 3:
-                weights = weights.to(self.lora_a.dtype)
-                A = torch.einsum("bqs,sqdr->bqdr", (weights, self.lora_a))
-                B = torch.einsum("bqs,srqd->brqd", (weights, self.lora_b))
-
-            A = A.reshape(bs, self.in_features, self.rank)
-            B = B.reshape(bs, self.rank, self.out_features)
-            adapter_out = input_lora.bmm(A).bmm(B) * self.scaling
-
-        # Per Token Routing : (batch_size, seq_len, dim_in, dim_out)
-        elif weights.ndim == 4:
+        elif weights.ndim == 3:
             weights = weights.to(self.lora_a.dtype)
-            # b: batch, l: seq_len, d: d_in/d_out, r: rank
-            A = torch.einsum("blqs,sqdr->blqdr", (weights, self.lora_a))
-            B = torch.einsum("blqs,srqd->blqrd", (weights, self.lora_b))
-            A = A.reshape(bs, -1, self.in_features, self.rank)
-            B = B.transpose(2, 3).reshape(bs, -1, self.rank, self.out_features)
-            adapter_out = torch.einsum("bld,bldr->blr", (input_lora, A))
-            adapter_out = torch.einsum("blr,blrd->bld", (adapter_out, B)) * self.scaling
+            A = torch.einsum("bqs,sqdr->bqdr", (weights, self.lora_a))
+            B = torch.einsum("bqs,srqd->brqd", (weights, self.lora_b))
+
+        A = A.reshape(bs, self.in_features, self.rank)
+        B = B.reshape(bs, self.rank, self.out_features)
+        adapter_out = input_lora.bmm(A).bmm(B) * self.scaling
 
         return layer_out + adapter_out.to(input.dtype)
 

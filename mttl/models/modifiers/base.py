@@ -15,6 +15,17 @@ class Modifier(nn.Module, Registrable):
     # default modifier
     default = "lora"
 
+    def __init__(self):
+        super().__init__()
+
+        self.enabled = True
+
+    def enable(self):
+        self.enabled = True
+
+    def disable(self):
+        self.enabled = False
+
     @property
     def layer_name(self):
         if not hasattr(self, "__layer_name__"):
