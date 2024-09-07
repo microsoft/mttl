@@ -580,8 +580,12 @@ class DataModule(LightningDataModule, Registrable):
         )
 
     @property
+    def collate_class(self):
+        return DefaultCollator
+
+    @property
     def collate_fn(self):
-        return DefaultCollator(
+        return self.collate_class(
             tokenizer=self.tokenizer,
             padding="longest",
             max_input_length=self.config.max_input_length,
@@ -599,6 +603,7 @@ class DataModule(LightningDataModule, Registrable):
     def print_infos(self):
         logger.info("Dataset name: %s", self.config.dataset)
         logger.info("Reader class: %s", self.__class__.__name__)
+
         if self.train_dataset is not None and len(self.train_dataset) > 0:
             logger.info("Training steps: %s" % len(self.train_dataloader()))
             logger.info("Training samples: %s" % len(self.train_dataset))
@@ -619,7 +624,7 @@ class DataModule(LightningDataModule, Registrable):
     def task_to_id(self):
         return self._task_to_id
 
-    def create_train_valid_split(self, dataset, validation_portion=None):
+    def create_train_valid_split(self, dataset, validation_portion=0.05):
         # always use the same split for the dataset
         validation_portion = validation_portion or self.config.validation_portion
 
