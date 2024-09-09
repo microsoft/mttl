@@ -30,11 +30,18 @@ class ExpertContainer(nn.Module, Container):
     def __init__(self, config, layer, selector=None):
         super().__init__()
 
+        self._enabled = True
         self.config = config
         self.layer = layer
         self.selector = selector or TaskNameSelector()
         self._default_expert_name = None
         self.expert_infos = {}
+
+    def disable(self):
+        self._enabled = False
+
+    def enable(self):
+        self._enabled = True
 
     @property
     def default_expert_name(self):

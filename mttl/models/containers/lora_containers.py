@@ -215,7 +215,7 @@ class LoRAExpertContainer(ExpertContainer):
             return module_output.view(input.shape[0], input.shape[1], -1)
 
     def forward(self, input, **kwargs):
-        if len(self.experts) > 0:
+        if len(self.experts) > 0 and self._enabled:
             selection = self.selector(input, container=self, **kwargs)
             return self.route(input, selection, **kwargs)
         return self.layer(input)
@@ -388,8 +388,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             raise ValueError("Unknown selection type.")
 
     def forward(self, input, **kwargs):
-        if len(self.experts) > 0:
+        if len(self.experts) > 0 and self._enabled:
             selection = self.selector(input, container=self, **kwargs)
             return self.route(input, selection, **kwargs)
-        else:
-            return self.layer(input)
+        return self.layer(input)
