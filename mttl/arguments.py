@@ -406,7 +406,7 @@ class TrainingArgs(DataArgs):
     
     
     keep_ratio: float = 0.05
-    BLOCK_SIZE: int = 16 # used for block-sparsity, decides the size of the block
+    block_size: int = 16 # used for block-sparsity, decides the size of the block
     sps_type: str = "block_sparse" # block_sparse,regular_sparse
     sps_impl: str = "sp_add+sp_mm" #sp_add+sp_mm, scatter+filte
 
