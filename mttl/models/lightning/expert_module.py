@@ -135,11 +135,11 @@ class ExpertModule(LightningTrainingMixin, LightningEfficientCheckpoint):
             load_in_4bit=getattr(self.hparams, "load_in_4bit", False),
             load_in_8bit=getattr(self.hparams, "load_in_8bit", False),
         )
-
+        
     def on_save_checkpoint(self, ckpt):
         super().on_save_checkpoint(ckpt)
 
-        ckpt["expert_info"] = self.as_expert(self.training_config).expert_info.asdict()
+        ckpt["expert_info"] = self.model.as_expert(self.training_config).expert_info.asdict()
 
 
 class MultiExpertModule(LightningTrainingMixin, LightningEfficientCheckpoint):
