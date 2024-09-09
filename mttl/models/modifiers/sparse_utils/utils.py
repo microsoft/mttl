@@ -110,6 +110,7 @@ def init_sparse_weights(sps_type, keep_ratio, shape, block_size):
         raise NotImplementedError
     return keep_params
 
+
 def top_k_block_sparcify(grad, keep_ratio, block_indexer: MatrixBlockIndexer):
     """
     BLOCK-SPARSE mask calculation, returns a mask with the same dtype as the input tensor
