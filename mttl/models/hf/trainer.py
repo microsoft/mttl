@@ -71,4 +71,4 @@ class ExpertModelTrainer(Trainer):
 
         # Good practice: save your training arguments together with the trained model
         torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
-        torch.save(self.mttl_args, os.path.join(output_dir, MTTL_ARGS_NAME))
+        torch.save(self.mttl_args.asdict(), os.path.join(output_dir, MTTL_ARGS_NAME))
