@@ -568,9 +568,7 @@ class SNIPMaskUpdateWrapper(MaskUpdatWrapper):
         if self.updating_the_mask:
             assert self.sparse_layer_weights is not None
             return torch.nn.functional.linear(
-                x,
-                self.sparse_layer_weights.detach() * self.binary_mask,
-                bias
+                x, self.sparse_layer_weights.detach() * self.binary_mask, bias
             )
         return self.sparse_layer(x)
 
