@@ -99,7 +99,11 @@ def top_k_block_sparcify(grad, keep_ratio, block_indexer: MatrixBlockIndexer):
     # get the mask
     len(keep_masks_idx.unique())
     keep_masks = torch.zeros_like(grad, dtype=torch.bool)
-    keep_masks.flatten().scatter_add_(0,keep_masks_idx, torch.ones(len(keep_masks_idx), device=grad.device, dtype=torch.bool))
+    keep_masks.flatten().scatter_add_(
+        0,
+        keep_masks_idx,
+        torch.ones(len(keep_masks_idx), device=grad.device, dtype=torch.bool),
+    )
     # note: if use bfloat in torch.ones(len(keep_masks_idx), device=grad.device, dtype=grad.dtype), then there is this weird behaviour:
     # a = torch.ones(len(keep_masks_idx), device=grad.device, dtype=torch.bfloat16)
     # torch.sum(a) < len(keep_masks_idx), weirdly...
