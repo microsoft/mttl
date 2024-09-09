@@ -403,12 +403,6 @@ class TrainingArgs(DataArgs):
     pipeline_eval_tasks: str = None
     save_if_loaded_from_ckpt: bool = True
     dataset_type: str = None
-    
-    
-    keep_ratio: float = 0.05
-    block_size: int = 16 # used for block-sparsity, decides the size of the block
-    sps_type: str = "block_sparse" # block_sparse,regular_sparse
-    sps_impl: str = "sp_add+sp_mm" #sp_add+sp_mm, scatter+filte
 
     @property
     def dataset_config(self):
