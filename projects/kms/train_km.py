@@ -17,6 +17,12 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 
+def get_original_model(model):
+    if isinstance(model, torch.nn.parallel.DistributedDataParallel):
+        return model.module
+    return model
+
+
 class DeepContextDistillationTrainer(ExpertModelTrainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -32,7 +38,7 @@ class DeepContextDistillationTrainer(ExpertModelTrainer):
         nc_attention_mask = inputs["nc_attention_mask"]
 
         with torch.no_grad():
-            model.disable_adapter()
+            get_original_model(model).disable_adapter()
 
             outputs = model(
                 input_ids=input_ids,
@@ -46,7 +52,7 @@ class DeepContextDistillationTrainer(ExpertModelTrainer):
             ]
             target_logits = outputs.logits[labels != -100, :]
 
-        model.enable_adapter()
+        get_original_model(model).enable_adapter()
 
         outputs = model(
             input_ids=nc_input_ids,
