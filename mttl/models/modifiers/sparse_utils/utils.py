@@ -113,7 +113,7 @@ def init_sparse_weights(sps_type, keep_ratio, shape, block_size):
 
 def top_k_block_sparcify(grad, keep_ratio, block_indexer: MatrixBlockIndexer):
     """
-    BLOCK-SPARSE mask calculation, returns a mask with the same dtype as the input tensor
+    BLOCK-SPARSE mask calculation
     """
     grad = torch.abs(grad)
     num_params_to_keep = int(torch.numel(grad) * keep_ratio)
@@ -141,21 +141,24 @@ def top_k_block_sparcify(grad, keep_ratio, block_indexer: MatrixBlockIndexer):
     # note: if use bfloat in torch.ones(len(keep_masks_idx), device=grad.device, dtype=grad.dtype), then there is this weird behaviour:
     # a = torch.ones(len(keep_masks_idx), device=grad.device, dtype=torch.bfloat16)
     # torch.sum(a) < len(keep_masks_idx), weirdly...
-    return keep_masks
+    return keep_masks.to(grad.dtype)
 
 
 def top_k_sparcify(grad, keep_ratio, **kwargs):
     """
-    parameter-wise sparse calculation, returns a mask with the same dtype as the input tensor
+    parameter-wise sparse calculation
     """
     grad = torch.abs(grad)
     num_params_to_keep = int(torch.numel(grad) * keep_ratio)
-    threshold, _ = torch.topk(grad.flatten(), num_params_to_keep, sorted=True)
-    accepted_score = threshold[-1]
-    keep_masks = torch.zeros_like(grad)
-    keep_masks[grad >= accepted_score] = 1.0
-    assert keep_masks.dtype == grad.dtype
-    return keep_masks
+    _, idxs = torch.topk(grad.flatten(), num_params_to_keep, sorted=True)
+    # accepted_score = threshold[-1]
+    keep_masks = torch.zeros_like(grad, dtype=torch.bool)
+    keep_masks.flatten().scatter_add_(
+        0,
+        idxs,
+        torch.ones(num_params_to_keep, device=grad.device, dtype=torch.bool),
+    )
+    return keep_masks.to(grad.dtype)
 
 
 def make_sparse_model_during_training(module, batch):
