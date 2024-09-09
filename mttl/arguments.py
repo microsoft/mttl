@@ -482,6 +482,7 @@ class TrainingArgs(DataArgs):
             warmup_ratio=self.warmup_proportion if self.warmup_proportion > 0 else 0,
             num_train_epochs=self.num_train_epochs,
             max_steps=self.total_steps,
+            save_total_limit=1,
             remove_unused_columns=False,
             save_strategy="epoch" if not self.save_every else "steps",
             eval_strategy="epoch" if not self.eval_every else "steps",
