@@ -90,8 +90,8 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
         mode=mode,
         save_each_epoch=args.save_each_epoch,
     )
-    if profiler is None:
-        callbacks.append(checkpoint_callback)
+
+    callbacks.append(checkpoint_callback)
 
     if args.eval_rouge_flag:
         rouge = RougeCallback(
