@@ -5,11 +5,11 @@ import numpy as np
 import torch
 from scipy.sparse import csr_matrix
 
+from mttl.logging import logger
+
 try:
     from spops import csr_add
 except ImportError:
-    from mttl.logging import logger
-
     logger.info(
         "spops not available. You can install it with `pip install -e 'git+https://github.com/IST-DASLab/spops.git'"
     )
@@ -20,6 +20,7 @@ from mttl.models.modifiers.base import Modifier, ModifierConfig, ModifyMixin
 from mttl.models.modifiers.sparse_utils.utils import (
     MatrixBlockIndexer,
     SparseLinearFunction_SP_ADD,
+    init_sparse_weights,
     top_k_block_sparcify,
     top_k_sparcify,
 )
@@ -55,8 +56,8 @@ class SparseMaskConfig(ModifierConfig):
         100  # every how many steps to switch to mask update regime
     )
     sps_type: str = "block_sparse"  # ['block_sparse','regular_sparse']
-    sps_impl: str = "sp_add+sp_mm"  # ['sp_add+sp_mm','scatter+filter', 'masked_linear']
-    mask_updated: str = "snip"
+    sps_impl: str = "sp_add+sp_mm"  # ['sp_add+sp_mm','scattered', 'masked_linear']
+    mask_updater: str = "snip"
 
 
 class SparseLinear(ABC):
@@ -72,6 +73,7 @@ class SparseLinear(ABC):
         super().__init__()
         self.parent_name = parent_name
         self.config = config
+        self.keep_ratio = config.keep_ratio
         self.base_weight = base_weight.contiguous()
         self.base_bias = None
         if base_bias is not None:
@@ -186,27 +188,9 @@ class SparseWeights(nn.Module):
 
     @torch.no_grad()
     def _init_sparse_weights(self):
-        """
-        Init sparse weights randomly. This uses CSR representaiton from scipy.
-        """
-        if self.sps_type == "block_sparse":
-            block_indexer = MatrixBlockIndexer(
-                M=self.base_weight.shape[0],
-                N=self.base_weight.shape[1],
-                block_size=self.block_size,
-            )
-            random_grad = torch.randn_like(self.base_weight)
-            keep_params = top_k_block_sparcify(
-                random_grad,
-                self.keep_ratio,
-                block_indexer,
-            )
-        elif self.sps_type == "regular_sparse":
-            random_grad = torch.randn_like(self.base_weight)
-            keep_params = top_k_sparcify(random_grad, self.keep_ratio)
-        else:
-            raise NotImplementedError
-
+        keep_params = init_sparse_weights(
+            self.sps_type, self.keep_ratio, self.shape, self.block_size
+        )
         keep_params = keep_params.contiguous().float()
         sparse_weights = csr_matrix(keep_params.cpu())
         sparse_weights *= 0.0
@@ -256,10 +240,11 @@ class MaskedLinear(SparseLinear, nn.Module):
         self.block_size = config.block_size
         self.keep_ratio = config.keep_ratio
 
-        self.binary_mask = (
-            torch.ones_like(self.base_weight, device=self.device)
-            if mask is None
-            else mask
+        self.binary_mask = init_sparse_weights(
+            self.config.sps_type,
+            self.keep_ratio,
+            self.base_weight.shape,
+            self.block_size,
         )
 
         self.sparse_weights = nn.Parameter(
@@ -575,12 +560,17 @@ class SNIPMaskUpdateWrapper(MaskUpdatWrapper):
 
     def forward(self, x):
         self.prepate_mask_or_weights_learning()
+        bias = (
+            self.sparse_layer_biases.detach()
+            if self.sparse_layer_biases is not None
+            else None
+        )
         if self.updating_the_mask:
             assert self.sparse_layer_weights is not None
             return torch.nn.functional.linear(
                 x,
                 self.sparse_layer_weights.detach() * self.binary_mask,
-                self.sparse_layer_biases.detach(),
+                bias
             )
         return self.sparse_layer(x)
 
@@ -601,7 +591,6 @@ class SparseMaskAdapter(Modifier, ModifyMixin):
         self.name = kwargs.get("layer_name", None)
         super().__init__()
         self.config = config
-        self.masked_layer = None
 
         self.dense_layer_weight = layer.weight
         self.dense_layer_bias = layer.bias
@@ -614,15 +603,15 @@ class SparseMaskAdapter(Modifier, ModifyMixin):
         self.sp_impl = config.sps_impl
         assert self.sp_impl in [
             "sp_add+sp_mm",
-            "scatter+filter",
+            "scattered",
             "masked_linear",
-        ], "Choose `sps_type` from ['sp_add+sp_mm','scatter+filter','masked_linear] "
+        ], "Choose `sps_type` from ['sp_add+sp_mm','scattered','masked_linear] "
 
         if self.sp_impl == "sp_add+sp_mm":
             sparse_layer: SparseLinear = SparseLinearModule(
                 self.dense_layer_weight, self.dense_layer_bias, self.config
             )
-        elif self.sp_impl == "scatter+filter":
+        elif self.sp_impl == "scattered":
             sparse_layer: SparseLinear = ScatteredSparseLinearModule(
                 self.dense_layer_weight, self.dense_layer_bias, self.config
             )
@@ -638,9 +627,15 @@ class SparseMaskAdapter(Modifier, ModifyMixin):
             raise NotImplementedError
 
         # wrap sparse layer into mask updater
-        self.sparse_layer: MaskUpdatWrapper = MaskUpdatWrapper.get_class_by_name(
-            config.mask_updated
-        )(sparse_layer, self.config)
+        if self.config.mask_updater is None:
+            self.sparse_layer = sparse_layer
+            logger.warning(
+                "No mask updater is used, using the sparse layer directly with random maks."
+            )
+        else:
+            self.sparse_layer: MaskUpdatWrapper = MaskUpdatWrapper.get_class_by_name(
+                config.mask_updater
+            )(sparse_layer, self.config)
 
     def forward(self, input):
         return self.sparse_layer(input)

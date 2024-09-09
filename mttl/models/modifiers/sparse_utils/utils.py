@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 
 try:
-    from spops import csr_add
+    from spops import csr_add, sddmm
 except ImportError:
     from mttl.logging import logger
 
@@ -85,6 +85,30 @@ class MatrixBlockIndexer:
         return block_i_indices
         # get_i = lambda i : self.block_offset[i] + self.first_block_idx
 
+
+@torch.no_grad()
+def init_sparse_weights(sps_type, keep_ratio, shape, block_size):
+    """
+    Init sparse weights randomly. This uses CSR representaiton from scipy.
+    """
+    if sps_type == "block_sparse":
+        block_indexer = MatrixBlockIndexer(
+            M=shape[0],
+            N=shape[1],
+            block_size=block_size,
+        )
+        random_grad = torch.randn(shape)
+        keep_params = top_k_block_sparcify(
+            random_grad,
+            keep_ratio,
+            block_indexer,
+        )
+    elif sps_type == "regular_sparse":
+        random_grad = torch.randn(shape)
+        keep_params = top_k_sparcify(random_grad, keep_ratio)
+    else:
+        raise NotImplementedError
+    return keep_params
 
 def top_k_block_sparcify(grad, keep_ratio, block_indexer: MatrixBlockIndexer):
     """
