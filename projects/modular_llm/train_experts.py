@@ -20,16 +20,17 @@ from mttl.utils import generate_random_string, rank_zero_only_and_wait, remote_l
 
 
 def setup_profiler(args: ExpertConfig):
-    '''
+    """
     Creates profiler and re-sets some arguments in args.
-    '''
+    """
     from pytorch_lightning.profilers import PyTorchProfiler
+
     profiler = PyTorchProfiler(
         dirpath=args.output_dir + "/profiler",
         output_filename="profiler_report.txt",
-        line_count_restriction=2 ** 20,
+        line_count_restriction=2**20,
         profile_memory=True,
-        schedule=torch.profiler.schedule(skip_first=5, wait=1, warmup=5, active=20)
+        schedule=torch.profiler.schedule(skip_first=5, wait=1, warmup=5, active=20),
     )
     args.total_steps = 100
     args.eval_every = -1
@@ -45,7 +46,7 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
     setup_logging(args.output_dir)
 
     logger.info("Args: {}".format(args.to_json()))
-    
+
     profiler = None
     if args.profile:
         profiler = setup_profiler(args)
