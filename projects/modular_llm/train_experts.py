@@ -19,6 +19,25 @@ from mttl.models.monitors import get_monitors
 from mttl.utils import generate_random_string, rank_zero_only_and_wait, remote_login
 
 
+def setup_profiler(args: ExpertConfig):
+    '''
+    Creates profiler and re-sets some arguments in args.
+    '''
+    from pytorch_lightning.profilers import PyTorchProfiler
+    profiler = PyTorchProfiler(
+        dirpath=args.output_dir + "/profiler",
+        output_filename="profiler_report.txt",
+        line_count_restriction=2 ** 20,
+        profile_memory=True,
+        schedule=torch.profiler.schedule(skip_first=5, wait=1, warmup=5, active=20)
+    )
+    args.total_steps = 100
+    args.eval_every = -1
+    args.library_id = None
+    args.eval_before_training = False
+    return profiler
+
+
 def train_experts(args: Args, model_class: Type[ExpertModule]):
     seed_everything(args.seed, workers=True)
 
@@ -26,6 +45,10 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
     setup_logging(args.output_dir)
 
     logger.info("Args: {}".format(args.to_json()))
+    
+    profiler = None
+    if args.profile:
+        profiler = setup_profiler(args)
 
     remote_login(args.remote_token)
     expert_library = None
@@ -66,7 +89,8 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
         mode=mode,
         save_each_epoch=args.save_each_epoch,
     )
-    callbacks.append(checkpoint_callback)
+    if profiler is None:
+        callbacks.append(checkpoint_callback)
 
     if args.eval_rouge_flag:
         rouge = RougeCallback(
@@ -113,6 +137,7 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
 
     trainer = Trainer(
         devices=-1,
+        profiler=profiler,
         accelerator="gpu",
         logger=loggers,
         num_sanity_val_steps=0,

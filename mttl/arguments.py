@@ -403,6 +403,8 @@ class TrainingArgs(DataArgs):
     pipeline_eval_tasks: str = None
     save_if_loaded_from_ckpt: bool = True
     dataset_type: str = None
+    
+    profile: bool = False # if 'True' will profile the model training
 
     @property
     def dataset_config(self):
