@@ -201,6 +201,11 @@ class MultiExpertMixin:
 
         import tqdm
 
+        if type(library) == str:
+            from mttl.models.library.expert_library import ExpertLibrary
+
+            library = ExpertLibrary.get_expert_library(library)
+
         def add_module(self, module_name):
             expert_dump = library[module_name]
             self.add_expert_instance(expert_dump)
@@ -316,6 +321,16 @@ class MultiExpertMixin:
                 # reload the expert instance to fill the weights properly if this was an empty expert
                 expert_instance = self.get_expert_instance(expert_instance.name)
             return expert_instance
+
+    def disable_adapters(self):
+        for name, module in self.model.named_modules():
+            if isinstance(module, ExpertContainer):
+                module.disable()
+
+    def enable_adapters(self):
+        for name, module in self.model.named_modules():
+            if isinstance(module, ExpertContainer):
+                module.enable()
 
     def set_selector(
         self,
