@@ -4,7 +4,16 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 from scipy.sparse import csr_matrix
-from spops import csr_add
+
+try:
+    from spops import csr_add
+except ImportError:
+    from mttl.logging import logger
+
+    logger.info(
+        "spops not available. You can install it with `pip install -e 'git+https://github.com/IST-DASLab/spops.git'"
+    )
+
 from torch import nn
 
 from mttl.models.modifiers.base import Modifier, ModifierConfig, ModifyMixin

@@ -4,7 +4,16 @@ import os
 import numpy as np
 import torch
 import torch.nn.functional as F
-from spops import csr_add, sddmm
+
+try:
+    from spops import csr_add
+except ImportError:
+    from mttl.logging import logger
+
+    logger.info(
+        "spops not available. You can install it with `pip install -e 'git+https://github.com/IST-DASLab/spops.git'"
+    )
+
 from torch.autograd import Function
 
 
