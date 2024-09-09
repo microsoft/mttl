@@ -5,7 +5,7 @@ import click
 import torch
 import tqdm
 import vllm
-from datasets import load_dataset
+from datasets import Dataset, DatasetDict, DatasetInfo, load_dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from vllm import LLM, SamplingParams
 
@@ -42,6 +42,7 @@ def chunk_wikipedia(text, tokenizer, block_size):
 @click.option("--num_summaries", type=int, default=16)
 @click.option("--generation_top_p", type=float, default=0.8)
 @click.option("--top_docs_per_subject", type=int, default=50)
+@click.option("--output_path", type=str, default="wiki_summaries")
 def main(
     model,
     block_size,
@@ -49,7 +50,18 @@ def main(
     num_summaries,
     generation_top_p,
     top_docs_per_subject,
+    output_path,
 ):
+    args = {
+        "model": model,
+        "block_size": block_size,
+        "max_continuation_length": max_continuation_length,
+        "num_summaries": num_summaries,
+        "generation_top_p": generation_top_p,
+        "top_docs_per_subject": top_docs_per_subject,
+        "output_path": output_path,
+    }
+
     tokenizer = AutoTokenizer.from_pretrained(model)
     dataset = load_dataset("sordonia/my-wiki-latex_mmlu_from_valid_all", split="train")
 
@@ -66,6 +78,7 @@ def main(
         tensor_parallel_size=torch.cuda.device_count(),
     )
 
+    all_sections = []
     for subject in tqdm.tqdm(
         dataset.unique("subject"), desc=f"Generating summaries for subjects"
     ):
@@ -93,13 +106,22 @@ def main(
             section = {}
             section["text"] = chunk
             section["summaries"] = []
+            section["subject"] = subject
             for i, response in enumerate(output.outputs):
                 section["summaries"].append(response.text)
             sections.append(section)
+        all_sections.extend(sections)
 
-        os.makedirs("wiki_summaries", exist_ok=True)
-        with open(os.path.join("wiki_summaries", f"{subject}.json"), "w") as f:
-            json.dump(sections, f)
+        os.makedirs(output_path, exist_ok=True)
+
+        d = DatasetDict(
+            {
+                "train": Dataset.from_list(
+                    all_sections, info=DatasetInfo(description=json.dumps(args))
+                )
+            }
+        )
+        d.save_to_disk(output_path)
 
 
 if __name__ == "__main__":

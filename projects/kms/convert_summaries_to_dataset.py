@@ -4,7 +4,8 @@ from datasets import Dataset, DatasetDict, load_dataset
 
 @click.command()
 @click.argument("dataset_path", type=str)
-def convert_summaries_to_dataset(dataset_path: str):
+@click.option("--hf_destination", type=str, default=None)
+def convert_summaries_to_dataset(dataset_path: str, hf_destination: str):
     # the directory is a bunch of json files, each file is a summary of a wikipedia article
     # each json file has a "text" field, which is the article
     # we want to create a dataset with the following fields:
@@ -32,6 +33,8 @@ def convert_summaries_to_dataset(dataset_path: str):
 
     # save the dataset to a dataset
     dataset = DatasetDict({"train": Dataset.from_list(dataset)})
+    if hf_destination:
+        dataset.push_to_hub(hf_destination)
     dataset.save_to_disk(dataset_path + "_dataset")
 
 
