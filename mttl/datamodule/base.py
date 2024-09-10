@@ -655,6 +655,10 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         WinograndeMultiChoiceDataModule,
     )
 
+    from mttl.datamodule.ultrafeedback_data_module import (
+        UltrafeedbackSFTmodule,
+    )
+
     # refactor all the common arguments below into a dict common kwargs
     dataset = args.dataset if not dataset_override else dataset_override
 
@@ -737,6 +741,11 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
             augment_few_shot=args.augment_few_shot,
         )
         dm = FlatMultiTaskModule(config, for_generation=for_generation)
+    elif "ultrachat" in dataset:
+        config = DatasetConfig(
+            **common_kwargs,
+        )
+        dm = UltrafeedbackSFTmodule(config, for_generation=for_generation)
     elif "mmlu" in dataset:
         config = MMLUDataConfig(
             **common_kwargs,
