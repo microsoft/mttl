@@ -1,3 +1,4 @@
+import os
 from typing import Type
 
 import torch
@@ -24,13 +25,12 @@ def setup_profiler(args: ExpertConfig):
     Creates profiler and re-sets some arguments in args.
     """
     from pytorch_lightning.profilers import PyTorchProfiler
-
     profiler = PyTorchProfiler(
         dirpath=args.output_dir + "/profiler",
-        output_filename="profiler_report.txt",
+        filename="profiler_output",
         line_count_restriction=2**20,
         profile_memory=True,
-        schedule=torch.profiler.schedule(skip_first=5, wait=1, warmup=5, active=20),
+        schedule=torch.profiler.schedule(skip_first=5, wait=1, warmup=5, active=50),
     )
     args.total_steps = 100
     args.eval_every = -1
