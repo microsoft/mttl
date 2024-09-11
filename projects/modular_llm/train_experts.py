@@ -25,6 +25,7 @@ def setup_profiler(args: ExpertConfig):
     Creates profiler and re-sets some arguments in args.
     """
     from pytorch_lightning.profilers import PyTorchProfiler
+
     profiler = PyTorchProfiler(
         dirpath=args.output_dir + "/profiler",
         filename="profiler_output",
