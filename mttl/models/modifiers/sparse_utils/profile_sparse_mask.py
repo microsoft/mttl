@@ -75,7 +75,7 @@ adapter_config = SparseMaskConfig(
     sps_impl="sp_add+sp_mm",
     sps_type="regular_sparse",
     keep_ratio=0.05,
-    mask_updater="snip",
+    mask_updater=None,
     n_steps_in_mask_update=1,
 )
 model = model_loader_helper(
@@ -102,7 +102,7 @@ adapter_config = SparseMaskConfig(
     sps_impl="sp_add+sp_mm",
     sps_type="block_sparse",
     keep_ratio=0.05,
-    mask_updater="snip",
+    mask_updater=None,
     n_steps_in_mask_update=1,
 )
 model = model_loader_helper(
@@ -127,7 +127,7 @@ adapter_config = SparseMaskConfig(
     sps_impl="scattered",
     sps_type="block_sparse",
     keep_ratio=0.05,
-    mask_updater="snip",
+    mask_updater=None,
     n_steps_in_mask_update=1,
 )
 model = model_loader_helper(
@@ -154,7 +154,7 @@ adapter_config = SparseMaskConfig(
     sps_impl="scattered",
     sps_type="regular_sparse",
     keep_ratio=0.05,
-    mask_updater="snip",
+    mask_updater=None,
     n_steps_in_mask_update=1,
 )
 model = model_loader_helper(
@@ -181,7 +181,7 @@ adapter_config = SparseMaskConfig(
     sps_impl="masked_linear",
     sps_type="regular_sparse",
     keep_ratio=0.05,
-    mask_updater="snip",
+    mask_updater=None,
     n_steps_in_mask_update=1,
 )
 model = model_loader_helper(
@@ -208,7 +208,7 @@ adapter_config = SparseMaskConfig(
     sps_impl="masked_linear",
     sps_type="block_sparse",
     keep_ratio=0.05,
-    mask_updater="snip",
+    mask_updater=None,
     n_steps_in_mask_update=1,
 )
 model = model_loader_helper(

@@ -154,7 +154,7 @@ class SparseWeights(nn.Module):
             sparse_tensor.data.shape == self.sparse_weights.data.shape
         ), "Shape mismatch when resetting sparse weights"
         self.sparse_weights.data = torch.tensor(
-            sparse_tensor.data, dtype=self.dtype, device=self.device
+            sparse_tensor.data, dtype=self.dtype, device=self.base_weight.device
         ).contiguous()
 
     @torch.no_grad()
@@ -256,6 +256,7 @@ class MaskedLinear(SparseLinear, nn.Module):
 
     def forward(self, x):
         base_out = torch.nn.functional.linear(x, self.base_weight, self.base_bias)
+        self.binary_mask = self.binary_mask.to(self.device).to(self.base_weight.dtype)
         sparse_out = torch.nn.functional.linear(
             x, self.sparse_weights * self.binary_mask, self.sparse_bias
         )
@@ -627,9 +628,9 @@ class SparseMaskAdapter(Modifier, ModifyMixin):
         # wrap sparse layer into mask updater
         if self.config.mask_updater is None:
             self.sparse_layer = sparse_layer
-            logger.warning(
-                "No mask updater is used, using the sparse layer directly with random maks."
-            )
+            # logger.warning(
+            #     "No mask updater is used, using the sparse layer directly with random maks."
+            # )
         else:
             self.sparse_layer: MaskUpdatWrapper = MaskUpdatWrapper.get_class_by_name(
                 config.mask_updater
