@@ -50,6 +50,16 @@
             margin-right: 10px;
         }
 
+        .side-panel {
+            width: 250px;
+            background-color: #2c2c2c;
+            padding: 20px;
+            color: white;
+            height: 100vh;
+            box-sizing: border-box;
+            overflow-y: auto;
+        }
+
         /* Bot message */
         .bot-message {
             text-align: left;
@@ -81,7 +91,7 @@
             font-size: 16px;
         }
     
-        #send-btn, #load-btn, #clear-btn {
+        #send-btn, #load-btn, #clear-btn, #new-chat-btn {
             margin-left: 10px;
             padding: 10px 20px;
             border-radius: 4px;
@@ -105,6 +115,7 @@
             border: 1px solid #555; /* Subtle border color */
             padding: 4px; /* Less padding for a compact look */
             border-radius: 4px; /* Rounded corners */
+            width: 150px;
         }
         
         #model-loader {
@@ -138,81 +149,93 @@
         <div id="chatbox" class="chatbox"></div>
         <div id="chatlog"></div>
 
-        <!-- Load Model Section -->
-        <div class="model-container">
-            <label for="knowledge-module">Select Knowledge Module:</label>
-            <select id="knowledge-module">
-                <option value="None">None</option>
-                <option value="global_facts">Global Facts</option>
-                <option value="high_school_microeconomics">High School Microeconomics</option>
-                <option value="professional_law">Professional Law</option>
-                <option value="elementary_mathematics">Elementary Mathematics</option>
-                <option value="professional_psychology">Professional Psychology</option>
-                <option value="medical_genetics">Medical Genetics</option>
-                <option value="high_school_biology">High School Biology</option>
-                <option value="computer_security">Computer Security</option>
-                <option value="astronomy">Astronomy</option>
-                <option value="college_biology">College Biology</option>
-                <option value="high_school_government_and_politics">High School Government and Politics</option>
-                <option value="high_school_physics">High School Physics</option>
-                <option value="high_school_us_history">High School US History</option>
-                <option value="high_school_psychology">High School Psychology</option>
-                <option value="philosophy">Philosophy</option>
-                <option value="formal_logic">Formal Logic</option>
-                <option value="nutrition">Nutrition</option>
-                <option value="high_school_geography">High School Geography</option>
-                <option value="machine_learning">Machine Learning</option>
-                <option value="professional_accounting">Professional Accounting</option>
-                <option value="professional_medicine">Professional Medicine</option>
-                <option value="electrical_engineering">Electrical Engineering</option>
-                <option value="prehistory">Prehistory</option>
-                <option value="clinical_knowledge">Clinical Knowledge</option>
-                <option value="marketing">Marketing</option>
-                <option value="security_studies">Security Studies</option>
-                <option value="world_religions">World Religions</option>
-                <option value="business_ethics">Business Ethics</option>
-                <option value="high_school_macroeconomics">High School Macroeconomics</option>
-                <option value="international_law">International Law</option>
-                <option value="high_school_chemistry">High School Chemistry</option>
-                <option value="anatomy">Anatomy</option>
-                <option value="college_mathematics">College Mathematics</option>
-                <option value="sociology">Sociology</option>
-                <option value="high_school_statistics">High School Statistics</option>
-                <option value="moral_scenarios">Moral Scenarios</option>
-                <option value="college_computer_science">College Computer Science</option>
-                <option value="high_school_european_history">High School European History</option>
-                <option value="us_foreign_policy">US Foreign Policy</option>
-                <option value="human_sexuality">Human Sexuality</option>
-                <option value="high_school_mathematics">High School Mathematics</option>
-                <option value="public_relations">Public Relations</option>
-                <option value="management">Management</option>
-                <option value="high_school_computer_science">High School Computer Science</option>
-                <option value="logical_fallacies">Logical Fallacies</option>
-                <option value="conceptual_physics">Conceptual Physics</option>
-                <option value="jurisprudence">Jurisprudence</option>
-                <option value="moral_disputes">Moral Disputes</option>
-                <option value="college_physics">College Physics</option>
-                <option value="human_aging">Human Aging</option>
-                <option value="college_medicine">College Medicine</option>
-                <option value="college_chemistry">College Chemistry</option>
-                <option value="abstract_algebra">Abstract Algebra</option>
-                <option value="econometrics">Econometrics</option>
-                <option value="high_school_world_history">High School World History</option>
-                <option value="miscellaneous">Miscellaneous</option>
-            </select>
-        </div>
-        
+        <!-- Load Model Section --> 
         <div class="input-container">
             <input type="text" id="entry" placeholder="Type a message..." autocomplete="off">
+            <div class="model-container">
+                <select id="knowledge-module">
+                    <option value="None">None</option>
+                    <option value="global_facts">Global Facts</option>
+                    <option value="high_school_microeconomics">High School Microeconomics</option>
+                    <option value="professional_law">Professional Law</option>
+                    <option value="elementary_mathematics">Elementary Mathematics</option>
+                    <option value="professional_psychology">Professional Psychology</option>
+                    <option value="medical_genetics">Medical Genetics</option>
+                    <option value="high_school_biology">High School Biology</option>
+                    <option value="computer_security">Computer Security</option>
+                    <option value="astronomy">Astronomy</option>
+                    <option value="college_biology">College Biology</option>
+                    <option value="high_school_government_and_politics">High School Government and Politics</option>
+                    <option value="high_school_physics">High School Physics</option>
+                    <option value="high_school_us_history">High School US History</option>
+                    <option value="high_school_psychology">High School Psychology</option>
+                    <option value="philosophy">Philosophy</option>
+                    <option value="formal_logic">Formal Logic</option>
+                    <option value="nutrition">Nutrition</option>
+                    <option value="high_school_geography">High School Geography</option>
+                    <option value="machine_learning">Machine Learning</option>
+                    <option value="professional_accounting">Professional Accounting</option>
+                    <option value="professional_medicine">Professional Medicine</option>
+                    <option value="electrical_engineering">Electrical Engineering</option>
+                    <option value="prehistory">Prehistory</option>
+                    <option value="clinical_knowledge">Clinical Knowledge</option>
+                    <option value="marketing">Marketing</option>
+                    <option value="security_studies">Security Studies</option>
+                    <option value="world_religions">World Religions</option>
+                    <option value="business_ethics">Business Ethics</option>
+                    <option value="high_school_macroeconomics">High School Macroeconomics</option>
+                    <option value="international_law">International Law</option>
+                    <option value="high_school_chemistry">High School Chemistry</option>
+                    <option value="anatomy">Anatomy</option>
+                    <option value="college_mathematics">College Mathematics</option>
+                    <option value="sociology">Sociology</option>
+                    <option value="high_school_statistics">High School Statistics</option>
+                    <option value="moral_scenarios">Moral Scenarios</option>
+                    <option value="college_computer_science">College Computer Science</option>
+                    <option value="high_school_european_history">High School European History</option>
+                    <option value="us_foreign_policy">US Foreign Policy</option>
+                    <option value="human_sexuality">Human Sexuality</option>
+                    <option value="high_school_mathematics">High School Mathematics</option>
+                    <option value="public_relations">Public Relations</option>
+                    <option value="management">Management</option>
+                    <option value="high_school_computer_science">High School Computer Science</option>
+                    <option value="logical_fallacies">Logical Fallacies</option>
+                    <option value="conceptual_physics">Conceptual Physics</option>
+                    <option value="jurisprudence">Jurisprudence</option>
+                    <option value="moral_disputes">Moral Disputes</option>
+                    <option value="college_physics">College Physics</option>
+                    <option value="human_aging">Human Aging</option>
+                    <option value="college_medicine">College Medicine</option>
+                    <option value="college_chemistry">College Chemistry</option>
+                    <option value="abstract_algebra">Abstract Algebra</option>
+                    <option value="econometrics">Econometrics</option>
+                    <option value="high_school_world_history">High School World History</option>
+                    <option value="miscellaneous">Miscellaneous</option>
+                </select>
+            </div>
             <button id="send-btn">Send</button>
             <button id="stop-btn" disabled>Stop</button>
             <button id="clear-btn">Clear</button>
         </div>
     </div>
 
+    <script src="https://cdn.jsdelivr.net/npm/marked@14.1.2/lib/marked.umd.min.js"></script>
     <script>
-        let currentModel = "microsoft/Phi-3-mini-4k-instruct"; // Default model
         let stopRequested = false;  // Variable to track if stop is requested
+
+        function generateUniqueId() {
+            return 'xxxxxx'.replace(/[x]/g, () => 
+                ((Math.random() * 16) | 0).toString(16)
+            );
+        }
+
+        // Check if an ID already exists for this window/tab
+        let windowId = sessionStorage.getItem('windowId');
+        if (!windowId) {
+            // If no ID, generate a new one
+            windowId = generateUniqueId();
+            sessionStorage.setItem('windowId', windowId);
+        }
 
         document.getElementById('knowledge-module').onchange = function() {
             const selectedModule = document.getElementById('knowledge-module').value;
@@ -223,7 +246,10 @@
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ module_name: selectedModule }),
+                body: JSON.stringify({
+                    module_name: selectedModule,
+                    window_id: windowId
+                }),
             })
             .then(response => response.json())
             .then(data => {
@@ -263,7 +289,10 @@
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ message: message }),
+                    body: JSON.stringify({
+                        window_id: windowId,
+                        message: message
+                    }),
                 })
                 .then(response => {
                     const reader = response.body.getReader();
@@ -283,7 +312,12 @@
                                 return;
                             }
                             let chunk = decoder.decode(value, { stream: true });
-                            botMessageElement.innerHTML += chunk;
+                            // Render chunk as Markdown to HTML
+                            let renderedMarkdown = chunk;
+
+                            botMessageElement.innerHTML = marked.marked(chunk);
+
+                            // Scroll to the bottom of the chatbox
                             chatbox.scrollTop = chatbox.scrollHeight;
                             read();
                         });
@@ -304,6 +338,7 @@
                 headers: {
                     'Content-Type': 'application/json',
                 },
+                body: JSON.stringify({window_id: windowId})
             })
             .then(response => {
                 const chatbox = document.getElementById('chatbox');
