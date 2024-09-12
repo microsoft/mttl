@@ -105,6 +105,11 @@ class MultiExpertMixin:
     def experts_names(self):
         return list(self.experts_infos.keys())
 
+    def unset_default_expert(self):
+        """Propagate default expert to all containers that contain it."""
+        for container in self.experts_containers:
+            container.default_expert_name = None
+
     def set_default_expert(self, expert_name):
         """Propagate default expert to all containers that contain it."""
         if expert_name not in self.experts_infos:
@@ -113,6 +118,8 @@ class MultiExpertMixin:
         for container in self.experts_containers:
             if expert_name in container.expert_infos:
                 container.default_expert_name = expert_name
+            else:
+                raise ValueError(f"Expert {expert_name} not found in the container.")
 
     @classmethod
     def from_pretrained_library(
