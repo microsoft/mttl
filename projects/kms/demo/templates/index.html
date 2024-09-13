@@ -15,7 +15,7 @@
             height: 100vh;
             margin: 0;
         }
-    
+
         .chat-container {
             width: 1024px; /* Fixed width for the chat container */
             height: 600px; /* Fixed height for the chat container */
@@ -31,7 +31,7 @@
             padding: 20px;
             overflow-y: auto; /* Enable vertical scrolling */
             font-size: 14px;
-            max-height: 100%; /* Ensure the chatbox doesn't exceed the container height */
+            max-height: 100%;
         }
 
         /* Individual message styling */
@@ -48,24 +48,16 @@
             color: #333;
             float: right;
             margin-right: 10px;
+            padding: 10px;
         }
 
-        .side-panel {
-            width: 250px;
-            background-color: #2c2c2c;
-            padding: 20px;
-            color: white;
-            height: 100vh;
-            box-sizing: border-box;
-            overflow-y: auto;
-        }
-
-        /* Bot message */
         .bot-message {
             text-align: left;
             margin-left: 10px;
+            padding: 10px;
         }
 
+        /* Input and Controls Styling */
         .input-container {
             display: flex;
             padding: 10px;
@@ -79,7 +71,65 @@
             border-top: 1px solid #444;
             background-color: #333;
         }
-    
+
+        /* Side Panel Styling */
+        .side-panel {
+            width: 250px;
+            height: 600px;
+            background-color: #2c2c2c;
+            padding: 20px;
+            box-sizing: border-box;
+            overflow-y: auto;
+            border-right: 1px solid #444;
+        }
+
+        .side-panel h2 {
+            margin-top: 0;
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+
+        .conversation-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .conversation-item {
+            padding: 10px;
+            background-color: #3a3a3a;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .conversation-item:hover {
+            background-color: #505050;
+        }
+
+        .conversation-item.active {
+            background-color: #555;
+        }
+
+        .new-chat-btn {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 20px;
+            border: none;
+            border-radius: 4px;
+            background-color: #555;
+            color: white;
+            cursor: pointer;
+            font-size: 16px;
+            transition: background-color 0.3s;
+        }
+
+        .new-chat-btn:hover {
+            background-color: #666;
+        }
+
+        /* Chat Container Styling */
         #entry {
             flex-grow: 1;
             padding: 10px;
@@ -91,7 +141,7 @@
             font-size: 16px;
         }
     
-        #send-btn, #load-btn, #clear-btn, #new-chat-btn {
+        #send-btn, #load-btn, #clear-btn, #new-chat-btn, #stop-btn {
             margin-left: 10px;
             padding: 10px 20px;
             border-radius: 4px;
@@ -100,6 +150,11 @@
             color: white;
             cursor: pointer;
             font-size: 16px;
+            transition: background-color 0.3s;
+        }
+
+        #send-btn:hover, #load-btn:hover, #new-chat-btn:hover, #clear-btn:hover {
+            background-color: #666;
         }
 
         #model-loader label {
@@ -127,7 +182,7 @@
         #stop-btn:hover {
             background-color: #e31e0e;
         }
-    
+
         #send-btn:hover, #load-btn:hover {
             background-color: #666;
         }
@@ -145,6 +200,13 @@
     </style>
 </head>
 <body>
+    <div class="side-panel">
+        <button id="new-chat-btn" class="new-chat-btn">New Chat</button>
+        <h2>Conversations</h2>
+        <ul id="conversation-list" class="conversation-list">
+            <!-- Conversation items will be appended here -->
+        </ul>
+    </div>
     <div class="chat-container">
         <div id="chatbox" class="chatbox"></div>
         <div id="chatlog"></div>
@@ -229,13 +291,94 @@
             );
         }
 
-        // Check if an ID already exists for this window/tab
-        let windowId = sessionStorage.getItem('windowId');
-        if (!windowId) {
-            // If no ID, generate a new one
-            windowId = generateUniqueId();
-            sessionStorage.setItem('windowId', windowId);
+        // Conversations Data Structure
+        let currentConversationId = null;
+        let conversationCount = 0;
+
+        const conversationList = document.getElementById('conversation-list');
+        const newChatBtn = document.getElementById('new-chat-btn');
+        const chatbox = document.getElementById('chatbox');
+        const entry = document.getElementById('entry');
+        const sendBtn = document.getElementById('send-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const clearBtn = document.getElementById('clear-btn');
+        const knowledgeModule = document.getElementById('knowledge-module');
+
+        // Event listener for pressing Enter in the input field
+        entry.addEventListener('keypress', function(event) {
+            if (event.key === 'Enter') {
+                event.preventDefault(); // Prevent the default action (submitting form, etc.)
+                sendBtn.click(); // Programmatically click the send button
+            }
+        });
+
+        // Function to create a new conversation
+        function createNewConversation() {
+            conversationCount += 1;
+            const conversationId = generateUniqueId();
+            const conversationName = `Conversation ${conversationCount}`;
+            addConversationToList(conversationId, conversationName);
+            switchConversation(conversationId);
         }
+
+        // Function to add conversation to the side panel list
+        function addConversationToList(conversationId, conversationName) {
+            const li = document.createElement('li');
+            li.className = 'conversation-item';
+            li.id = `conv-${conversationId}`;
+            li.textContent = conversationName;
+            li.onclick = () => switchConversation(conversationId);
+            conversationList.appendChild(li);
+        }
+
+        // Function to switch between conversations
+        function switchConversation(conversationId) {
+            // Update active class
+            const items = document.querySelectorAll('.conversation-item');
+            items.forEach(item => {
+                if (item.id === `conv-${conversationId}`) {
+                    item.classList.add('active');
+                } else {
+                    item.classList.remove('active');
+                }
+            });
+
+            currentConversationId = conversationId;
+            renderConversation();
+        }
+
+        // Function to render the current conversation
+        function renderConversation() {
+            chatbox.innerHTML = ''; // Clear chatbox
+
+            fetch('/get_conversation', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    conversation_id: currentConversationId
+                }),
+            })
+            .then(response => response.json())
+            .then(data => {
+                data.messages.forEach(msg => {
+                    const msgDiv = document.createElement('div');
+                    chatbox.appendChild(msgDiv);
+                    msgDiv.className = `message ${msg.role === 'user' ? 'user-message' : 'bot-message'}`;
+                    msgDiv.innerHTML = `${msg.role === 'user' ? msg.content : marked.marked(msg.content)}`;
+                });
+                chatbox.scrollTop = chatbox.scrollHeight;
+            })
+        }
+
+        // Initialize with one conversation
+        createNewConversation();
+
+        // New Chat Button Event
+        newChatBtn.onclick = function() {
+            createNewConversation();
+        };
 
         document.getElementById('knowledge-module').onchange = function() {
             const selectedModule = document.getElementById('knowledge-module').value;
@@ -248,7 +391,7 @@
                 },
                 body: JSON.stringify({
                     module_name: selectedModule,
-                    window_id: windowId
+                    conversation_id: currentConversationId
                 }),
             })
             .then(response => response.json())
@@ -290,7 +433,7 @@
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({
-                        window_id: windowId,
+                        conversation_id: currentConversationId,
                         message: message
                     }),
                 })
@@ -298,6 +441,7 @@
                     const reader = response.body.getReader();
                     let decoder = new TextDecoder();
 
+                    let message = "";
                     let botMessageElement = document.createElement('div');
                     botMessageElement.className = 'message bot-message';
                     botMessageElement.innerHTML = "";
@@ -312,17 +456,15 @@
                                 return;
                             }
                             let chunk = decoder.decode(value, { stream: true });
-                            // Render chunk as Markdown to HTML
-                            let renderedMarkdown = chunk;
 
-                            botMessageElement.innerHTML = marked.marked(chunk);
+                            message += chunk;
+                            botMessageElement.innerHTML = marked.marked(message);
 
                             // Scroll to the bottom of the chatbox
                             chatbox.scrollTop = chatbox.scrollHeight;
                             read();
                         });
                     }
-
                     read();
                 })
                 .catch(error => {
@@ -333,16 +475,15 @@
 
         // Stop button functionality
         document.getElementById('clear-btn').onclick = function() {
-            fetch('/clear', {
+            fetch('/clear_conversation', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({window_id: windowId})
+                body: JSON.stringify({conversation_id: currentConversationId})
             })
             .then(response => {
-                const chatbox = document.getElementById('chatbox');
-                chatbox.innerHTML = "";
+                renderConversation();
             })
         };
 

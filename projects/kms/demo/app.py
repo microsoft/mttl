@@ -48,29 +48,43 @@ def index():
 def load_knowledge_module():
     data = request.json
     km_name = data.get("module_name")
-    window_id = data.get("window_id", None)
+    conversation_id = data.get("conversation_id", None)
 
-    if window_id not in active_modules:
-        active_modules[window_id] = None
+    if conversation_id not in active_modules:
+        active_modules[conversation_id] = None
 
     try:
-        active_modules[window_id] = km_name
+        active_modules[conversation_id] = km_name
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False})
 
 
-@app.route("/clear", methods=["POST"])
-def clear():
+@app.route("/get_conversation", methods=["POST"])
+def get_conversation():
     from flask import Response, request, stream_with_context
 
     data = request.json
-    window_id = data.get("window_id")
+    conversation_id = data.get("conversation_id")
 
-    if window_id not in conversation:
-        conversation[window_id] = []
+    if conversation_id not in conversation:
+        conversation[conversation_id] = []
 
-    conversation[window_id].clear()
+    print(conversation[conversation_id])
+    return jsonify({"messages": conversation[conversation_id]})
+
+
+@app.route("/clear_conversation", methods=["POST"])
+def clear_conversation():
+    from flask import Response, request, stream_with_context
+
+    data = request.json
+    conversation_id = data.get("conversation_id")
+
+    if conversation_id not in conversation:
+        conversation[conversation_id] = []
+
+    conversation[conversation_id].clear()
     return jsonify({"success": True})
 
 
@@ -80,24 +94,26 @@ def send():
 
     data = request.json
     message = data.get("message")
-    window_id = data.get("window_id")
+    conversation_id = data.get("conversation_id")
 
-    if window_id not in conversation:
-        conversation[window_id] = []
+    if conversation_id not in conversation:
+        conversation[conversation_id] = []
 
-    if window_id not in active_modules:
-        active_modules[window_id] = "None"
+    if conversation_id not in active_modules:
+        active_modules[conversation_id] = "None"
 
-    conversation[window_id].append({"role": "user", "content": message})
+    conversation[conversation_id].append({"role": "user", "content": message})
 
     def generate(message):
-        task_names = [active_modules[window_id]]
+        task_names = [active_modules[conversation_id]]
         generation_streamer = TextIteratorStreamer(
             tokenizer, skip_special_tokens=True, skip_prompt=True
         )
         generation_kwargs = dict(
             input_ids=tokenizer.apply_chat_template(
-                conversation[window_id], return_tensors="pt", add_generation_prompt=True
+                conversation[conversation_id],
+                return_tensors="pt",
+                add_generation_prompt=True,
             ).to(model.device),
             task_names=task_names,
             streamer=generation_streamer,
@@ -117,12 +133,12 @@ def send():
             if not outputs or i == 0:
                 continue
             text += outputs
-            yield text
+            yield outputs
 
-        conversation[window_id].append({"role": "assistant", "content": text})
+        conversation[conversation_id].append({"role": "assistant", "content": text})
 
-        with open(f"./logs/{window_id}.jsonl", "w") as f:
-            f.write(json.dumps(conversation[window_id]) + "\n")
+        with open(f"./logs/{conversation_id}.jsonl", "w") as f:
+            f.write(json.dumps(conversation[conversation_id]) + "\n")
 
     response = Response(generate(message), mimetype="text/event-stream")
     return response
