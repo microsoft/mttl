@@ -18,31 +18,13 @@ from torch import nn
 
 from mttl.models.modifiers.base import Modifier, ModifierConfig, ModifyMixin
 from mttl.models.modifiers.sparse_utils.utils import (
-    MatrixBlockIndexer,
+    BlcokSparseLinearFunction_SP_ADD,
     SparseLinearFunction_SP_ADD,
+    get_top_k_sparcity,
     init_sparse_weights,
-    top_k_block_sparcify,
-    top_k_sparcify,
+    torch_coo_to_scipy_csr,
 )
 from mttl.registrable import Registrable
-
-
-def torch_coo_to_scipy_csr(coo_tensor):
-    """
-    Convert a torch COO tensor to a scipy CSR matrix
-    """
-    if isinstance(coo_tensor, csr_matrix):
-        return coo_tensor
-    return csr_matrix(
-        (
-            coo_tensor.values().cpu().float(),
-            (
-                coo_tensor.indices()[0].cpu().long(),
-                coo_tensor.indices()[1].cpu().long(),
-            ),
-        ),
-        shape=coo_tensor.shape,
-    )
 
 
 @dataclass
@@ -55,7 +37,7 @@ class SparseMaskConfig(ModifierConfig):
     mask_update_interval: int = (
         100  # every how many steps to switch to mask update regime
     )
-    sps_type: str = "block_sparse"  # ['block_sparse','regular_sparse']
+    sps_type: str = "block_sparse"  # ['block_sparse','regular_sparse','row_sparse']
     sps_impl: str = "sp_add+sp_mm"  # ['sp_add+sp_mm','scattered', 'masked_linear']
     mask_updater: str = "snip"
 
@@ -88,12 +70,12 @@ class SparseLinear(ABC):
                     self.base_bias, dtype=self.base_bias.dtype, device=self.device
                 ),
                 requires_grad=True,
-            )
-
+            )   
+    
     @property
     def device(self):
         return self.base_weight.device
-
+        
     @abstractmethod
     def get_weights_for_mask_learning(self) -> torch.Tensor:
         """
@@ -118,16 +100,20 @@ class SparseWeights(nn.Module):
     This is used to produce neccessary inouts to spops kernels.
     """
 
-    def __init__(self, base_weight, config: SparseMaskConfig, **kwargs):
+    def __init__(self, config: SparseMaskConfig, shape, dtype, device, **kwargs):
         super().__init__()
 
-        self.base_weight = base_weight
-        self.shape = self.base_weight.shape
-        self.dtype = base_weight.dtype
-
+        self.shape = shape
+        self.dtype = dtype        
+        
         self.sps_type = config.sps_type
         self.block_size = config.block_size
         self.keep_ratio = config.keep_ratio
+
+        _sparse_csr_representation = self._init_sparse_weights()
+        self.sparse_weights: nn.Parameter = nn.Parameter(
+            torch.zeros(_sparse_csr_representation.data.shape), requires_grad=True
+        ).contiguous()
 
         nnz = int(self.keep_ratio * np.prod(self.shape))
         self.register_buffer(
@@ -138,12 +124,13 @@ class SparseWeights(nn.Module):
         )
         self.register_buffer("col_idx", torch.zeros((nnz,), dtype=torch.int16))
 
-        _sparse_csr_representation = self._init_sparse_weights()
         self.set_sparse_idxs(_sparse_csr_representation)
-        self.sparse_weights: nn.Parameter = nn.Parameter(
-            torch.zeros(_sparse_csr_representation.data.shape), requires_grad=True
-        ).contiguous()
         self.set_sparse_weights(_sparse_csr_representation)
+    
+    @property
+    def device(self):
+        return self.sparse_weights.device
+    
 
     @torch.no_grad()
     def set_sparse_weights(self, sparse_tensor: csr_matrix):
@@ -154,7 +141,7 @@ class SparseWeights(nn.Module):
             sparse_tensor.data.shape == self.sparse_weights.data.shape
         ), "Shape mismatch when resetting sparse weights"
         self.sparse_weights.data = torch.tensor(
-            sparse_tensor.data, dtype=self.dtype, device=self.base_weight.device
+            sparse_tensor.data, dtype=self.dtype, device=self.device
         ).contiguous()
 
     @torch.no_grad()
@@ -177,12 +164,12 @@ class SparseWeights(nn.Module):
         self.row_offs = torch.tensor(
             sparse_tensor.indptr,
             dtype=torch.int32,
-            device=self.base_weight.device,
+            device=self.device,
         )
         self.col_idx = torch.tensor(
             sparse_tensor.indices,
             dtype=torch.int16,
-            device=self.base_weight.device,
+            device=self.device,
         )
         self.row_idx = torch.argsort(-1 * torch.diff(self.row_offs)).to(torch.int16)
 
@@ -204,7 +191,7 @@ class SparseWeights(nn.Module):
                 self.col_idx.cpu(),
                 self.row_offs.cpu(),
             ),
-            shape=self.base_weight.shape,
+            shape=self.shape,
         )
 
     @property
@@ -215,8 +202,29 @@ class SparseWeights(nn.Module):
         val = self.sparse_weights.cpu().data.float() + 1.0
         return csr_matrix(
             (val, self.col_idx.cpu(), self.row_offs.cpu()),
-            shape=self.base_weight.shape,
+            shape=self.shape,
         ).nonzero()
+
+    def to_dense(self):
+        """
+        Returns dense representation of the sparse weights.
+        """
+        return torch.tensor(
+            self.scipy_representation.toarray(), device=self.device, dtype=self.dtype
+        )
+
+    @classmethod
+    def from_dense(cls, dense_tensor: torch.Tensor, config: SparseMaskConfig):
+        """
+        Initialize the sparse weights from a dense tensor.
+        """
+        sparse_weights = cls(
+            config, dense_tensor.shape, dense_tensor.dtype, dense_tensor.device
+        )
+        scipu_csr = torch_coo_to_scipy_csr(dense_tensor.data.to_sparse_coo())
+        sparse_weights.set_sparse_idxs(scipu_csr)
+        sparse_weights.set_sparse_weights(scipu_csr)
+        return sparse_weights
 
 
 class MaskedLinear(SparseLinear, nn.Module):
@@ -240,13 +248,13 @@ class MaskedLinear(SparseLinear, nn.Module):
         self.block_size = config.block_size
         self.keep_ratio = config.keep_ratio
 
-        self.binary_mask = init_sparse_weights(
+        binary_mask = init_sparse_weights(
             self.config.sps_type,
             self.keep_ratio,
             self.base_weight.shape,
             self.block_size,
         )
-
+        self.binary_mask = binary_mask.to(self.device)
         self.sparse_weights = nn.Parameter(
             torch.zeros_like(
                 self.base_weight, dtype=self.base_weight.dtype, device=self.device
@@ -270,7 +278,7 @@ class MaskedLinear(SparseLinear, nn.Module):
 
     def reseset_sparse_weights(self, mask: csr_matrix):
         self.binary_mask = torch.tensor(
-            mask.toarray(), device=self.device, dtype=self.base_weight.dtype
+            mask.toarray(), device=self.base_weight.device, dtype=self.base_weight.dtype
         )
 
 
@@ -286,18 +294,20 @@ class SparseLinearModule(SparseWeights, SparseLinear):
         config: SparseMaskConfig,
         parent_name=None,
         use_sparse_bias=False,
+        sparse_func=None,
     ):
-        SparseWeights.__init__(self, weight, config)
+        SparseWeights.__init__(self, config, weight.shape, weight.dtype, weight.device)
         SparseLinear.__init__(self, weight, bias, config, parent_name, use_sparse_bias)
-
-        if self.config.sps_type == "regular_sparse":
-            self.sparse_func = SparseLinearFunction_SP_ADD
-        elif self.config.sps_type == "block_sparse":
-            # SparseLinearFunction_SP_ADD uses sdmm from spops, which is structure aware, and will skipp zero rows and columns
-            # this is not exactly block though
-            self.sparse_func = SparseLinearFunction_SP_ADD  # to be implemented with a custom kernel maybe
-        else:
-            raise NotImplementedError
+        self.sparse_func = sparse_func
+        if self.sparse_func is None:
+            if self.config.sps_type in ["regular_sparse", "row_sparse"]:
+                self.sparse_func = SparseLinearFunction_SP_ADD
+            elif self.config.sps_type == "block_sparse":
+                # uses stk for now
+                raise NotImplementedError, "Block sparse is not implemented yet"
+                self.sparse_func = BlcokSparseLinearFunction_SP_ADD
+            else:
+                raise NotImplementedError
 
     def forward(self, input):
         bias = self.base_bias
@@ -348,7 +358,7 @@ class ScatteredSparseLinearModule(SparseWeights, SparseLinear):
         mask: torch.Tensor = None,
     ):
 
-        SparseWeights.__init__(self, weight, config)
+        SparseWeights.__init__(self, config, weight.shape, weight.dtype, weight.device)
         SparseLinear.__init__(self, weight, bias, config, parent_name, use_sparse_bias)
 
         idxs = torch.tensor(
@@ -445,11 +455,6 @@ class SNIPMaskUpdateWrapper(MaskUpdatWrapper):
         self.binary_mask = None
         self._selected_indices = None
         self._backward_hooks = []
-
-        input_dim, output_dim = self.sparse_layer.base_weight.T.shape
-        self.BlockwiseConvolution = MatrixBlockIndexer(
-            M=input_dim, N=output_dim, block_size=self.block_size
-        )
         self.sparse_layer_weights, self.sparse_layer_biases = None, None
 
     def switch_to_mask_update_modus(self):
@@ -465,16 +470,9 @@ class SNIPMaskUpdateWrapper(MaskUpdatWrapper):
         self.binary_mask.requires_grad = True
 
         def mask_backward_hook(mask):
-            if self.config.sps_type == "regular_sparse":
-                selected_params_dense = top_k_sparcify(mask.grad, self.keep_ratio)
-            elif self.config.sps_type == "block_sparse":
-                selected_params_dense = top_k_block_sparcify(
-                    mask.grad, self.keep_ratio, self.BlockwiseConvolution
-                )
-            else:
-                raise NotImplementedError(
-                    f"Choose `sps_type` from ['block_sparse','regular_sparse'] "
-                )
+            selected_params_dense = get_top_k_sparcity(
+                mask.grad, self.config.sps_type, self.keep_ratio, self.block_size
+            )
             selected_params = selected_params_dense.float().to_sparse_coo()  # .cpu()
             if self._selected_indices == None:
                 self._selected_indices = selected_params.coalesce()
@@ -512,14 +510,12 @@ class SNIPMaskUpdateWrapper(MaskUpdatWrapper):
         # self._selected_indices = self._selected_indices
 
         selected_indices_dense = self._selected_indices.to_dense()
-        if self.config.sps_type == "regular_sparse":
-            selected_indices_dense = top_k_sparcify(
-                selected_indices_dense, self.keep_ratio
-            )
-        elif self.config.sps_type == "block_sparse":
-            selected_indices_dense = top_k_block_sparcify(
-                selected_indices_dense, self.keep_ratio, self.BlockwiseConvolution
-            )
+        selected_indices_dense = get_top_k_sparcity(
+            selected_indices_dense,
+            self.config.sps_type,
+            self.keep_ratio,
+            self.block_size,
+        )
         return csr_matrix(selected_indices_dense.cpu())
 
     @property
@@ -598,9 +594,11 @@ class SparseMaskAdapter(Modifier, ModifyMixin):
         assert self.sps_type in [
             "block_sparse",
             "regular_sparse",
-        ], "Choose `sps_type` from ['block_sparse','regular_sparse'] "
+            "row_sparse",
+        ], "Choose `sps_type` from ['block_sparse','regular_sparse','row_sparse'] "
         self.sp_impl = config.sps_impl
         assert self.sp_impl in [
+            "sp_add+matmul",
             "sp_add+sp_mm",
             "scattered",
             "masked_linear",

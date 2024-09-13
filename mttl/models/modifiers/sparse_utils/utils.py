@@ -4,6 +4,7 @@ import os
 import numpy as np
 import torch
 import torch.nn.functional as F
+from scipy.sparse import csr_matrix
 
 try:
     from spops import csr_add, sddmm
@@ -15,6 +16,24 @@ except ImportError:
     )
 
 from torch.autograd import Function
+
+
+def torch_coo_to_scipy_csr(coo_tensor):
+    """
+    Convert a torch COO tensor to a scipy CSR matrix
+    """
+    if isinstance(coo_tensor, csr_matrix):
+        return coo_tensor
+    return csr_matrix(
+        (
+            coo_tensor.values().cpu().float(),
+            (
+                coo_tensor.indices()[0].cpu().long(),
+                coo_tensor.indices()[1].cpu().long(),
+            ),
+        ),
+        shape=coo_tensor.shape,
+    )
 
 
 def load_mask(f_name):
@@ -86,29 +105,47 @@ class MatrixBlockIndexer:
         # get_i = lambda i : self.block_offset[i] + self.first_block_idx
 
 
-@torch.no_grad()
-def init_sparse_weights(sps_type, keep_ratio, shape, block_size):
+def to_block_sparse_layout(matrix: torch.Tensor, block_size: int):
     """
-    Init sparse weights randomly. This uses CSR representaiton from scipy.
+    Returns layout of block sparse matrix: i.e. a matrix of shape (M//block_size, N//block_size) where each element is a boolean indicating whether the block is non-zero.
     """
-    if sps_type == "block_sparse":
-        block_indexer = MatrixBlockIndexer(
-            M=shape[0],
-            N=shape[1],
-            block_size=block_size,
-        )
-        random_grad = torch.randn(shape)
-        keep_params = top_k_block_sparcify(
-            random_grad,
-            keep_ratio,
-            block_indexer,
-        )
-    elif sps_type == "regular_sparse":
-        random_grad = torch.randn(shape)
-        keep_params = top_k_sparcify(random_grad, keep_ratio)
-    else:
-        raise NotImplementedError
-    return keep_params
+    M, N = matrix.shape
+    assert M % block_size == 0, "M must be divisible by block_size"
+    assert N % block_size == 0, "N must be divisible by block_size"
+    matrix = matrix.reshape(
+        M // block_size,
+        block_size,
+        N // block_size,
+        block_size,
+    ).permute(0, 2, 1, 3)
+    matrix = matrix.flatten(2, 3).sum(dim=2)
+    return matrix.bool()
+
+
+def top_k_row_sparcify(grad, keep_ratio):
+    """
+    ROW-SPARSE mask calculation
+    Selects the top-k rows based on the sum of the absolute values of each row.
+
+    Parameters:
+    - grad: A 2D tensor where each row will be evaluated.
+    - keep_ratio: A float between 0 and 1 indicating the ratio of rows to keep.
+
+    Returns:
+    - keep_masks: A mask tensor of the same shape as `grad`, where only the top-k rows are kept.
+    """
+
+    grad = torch.abs(grad)
+    num_params_to_keep = int(torch.numel(grad) * keep_ratio)
+    row_scores = torch.abs(grad).sum(dim=1)
+    num_rows_to_keep = int(math.ceil(num_params_to_keep / grad.size(1)))
+
+    # Find the indices of the top-k rows
+    _, topk_row_idx = torch.topk(row_scores, num_rows_to_keep, sorted=True)
+    keep_masks = torch.zeros_like(grad, dtype=torch.bool)
+    keep_masks[topk_row_idx] = 1
+
+    return keep_masks.to(grad.dtype)
 
 
 def top_k_block_sparcify(grad, keep_ratio, block_indexer: MatrixBlockIndexer):
@@ -161,6 +198,34 @@ def top_k_sparcify(grad, keep_ratio, **kwargs):
     return keep_masks.to(grad.dtype)
 
 
+def get_top_k_sparcity(grad, sps_type, keep_ratio, block_size=None):
+    if sps_type == "regular_sparse":
+        selected_params_dense = top_k_sparcify(grad, keep_ratio)
+    elif sps_type == "block_sparse":
+        block_indexed = MatrixBlockIndexer(
+            M=grad.size(0), N=grad.size(1), block_size=block_size
+        )
+        selected_params_dense = top_k_block_sparcify(grad, keep_ratio, block_indexed)
+    elif sps_type == "row_sparse":
+        selected_params_dense = top_k_row_sparcify(grad, keep_ratio)
+
+    else:
+        raise NotImplementedError(
+            f"Choose `sps_type` from ['block_sparse','regular_sparse','row_sparse'] "
+        )
+    return selected_params_dense
+
+
+@torch.no_grad()
+def init_sparse_weights(sps_type, keep_ratio, shape, block_size=None):
+    """
+    Init sparse weights randomly. This uses CSR representaiton from scipy.
+    """
+    random_grad = torch.randn(shape)
+    keep_params = get_top_k_sparcity(random_grad, sps_type, keep_ratio, block_size)
+    return keep_params
+
+
 def make_sparse_model_during_training(module, batch):
     from mttl.models.modifiers.sparse_mask import SparseMaskAdapter as SparseMaskModule
 
@@ -185,7 +250,7 @@ class SparseLinearFunction_SP_ADD(Function):
     """
 
     @staticmethod
-    @torch.cuda.amp.custom_fwd
+    # @torch.amp.custom_fwd()
     def forward(
         ctx,
         input,
@@ -204,7 +269,7 @@ class SparseLinearFunction_SP_ADD(Function):
         return output
 
     @staticmethod
-    @torch.cuda.amp.custom_bwd
+    # @torch.amp.custom_bwd
     def backward(ctx, grad_output):
         input, sparse_weights, row_idx, col_idx, row_offs, dense_weights = (
             ctx.saved_tensors
@@ -231,3 +296,40 @@ class BlcokSparseLinearFunction_SP_ADD(Function):
     def backward(ctx, grad_output):
         grad_input = grad_weight = grad_bias = grad_sparse_weight = None
         return grad_input, grad_weight, grad_bias, grad_sparse_weight
+
+    @staticmethod
+    # @torch.amp.custom_fwd
+    def forward(
+        ctx,
+        input,
+        dense_weights,
+        dense_bias,
+        sparse_weights,
+        row_idx,
+        col_idx,
+        row_offs,
+    ):
+        weights = csr_add(sparse_weights, row_offs, row_idx, col_idx, dense_weights)
+        output = F.linear(input, weights, dense_bias)
+        ctx.save_for_backward(
+            input, sparse_weights, row_idx, col_idx, row_offs, dense_weights
+        )
+        return output
+
+    @staticmethod
+    # @torch.amp.custom_bwd
+    def backward(ctx, grad_output):
+        input, sparse_weights, row_idx, col_idx, row_offs, dense_weights = (
+            ctx.saved_tensors
+        )
+        weights = csr_add(
+            sparse_weights, row_offs, row_idx, col_idx, dense_weights
+        )  # could be done also with torch.sparse.sampled_addmm
+        dX = grad_output @ weights
+        import pdb
+
+        pdb.set_trace()
+        dsW = sddmm(
+            row_offs, row_idx, col_idx, grad_output.T.contiguous(), input.T.contiguous()
+        )
+        return dX, None, None, dsW, None, None, None
