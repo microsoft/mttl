@@ -11,7 +11,9 @@ from mttl.logging import setup_logging
 from mttl.models.expert_model import ExpertModel, ExpertModelConfig
 from mttl.models.hf.trainer import ExpertModelTrainer
 from mttl.utils import remote_login
-from projects.kms.km_dataloader import KMSummaryDatasetModule
+
+# register this datamodule!
+from projects.kms.km_dataloader import KMDataModule
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
