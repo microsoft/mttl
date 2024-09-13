@@ -7,19 +7,24 @@ from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from mttl.logging import logger
 from mttl.models.library.dataset_library import DatasetLibrary
 
+AVAILABLE_PROMPTS = {
+    "summary": "Summarize the preceding passage.",
+    "qa": "Generate a question-answer pair given the preceding passage.",
+}
 
-class KMSummaryDatasetConfig(DatasetConfig):
-    # prompt to summarize the text
-    summarize_prompt: str = "Summarize the preceding passage."
-    # load summaries from the dataset
-    num_summaries: int = 4
+
+class KMDatasetConfig(DatasetConfig):
+    # there might be multiple types, i.e. "qa", "summary", or maybe else in the future
+    use_only_type: str = None
+    # for each input example, we could have several outputs (e.g. several summaries or QA pairs), we can only use N of these
+    num_outputs_per_chunk: int = 4
     # field in the dataset that contains the task name
     task_name_field: str = "subject"
     # field in the dataset that contains the task source
     task_source_field: str = "subject"
 
 
-class KMSummaryDataCollator(DefaultCollator):
+class KMDataCollator(DefaultCollator):
     def __call__(self, batch):
         output_batch = super().__call__(batch)
 
@@ -34,11 +39,11 @@ class KMSummaryDataCollator(DefaultCollator):
         return output_batch
 
 
-@DataModule.register("dcd_summary", config_cls=KMSummaryDatasetConfig)
-class KMSummaryDatasetModule(DataModule):
+@DataModule.register("dcd_km", config_cls=KMDatasetConfig)
+class KMDatasetModule(DataModule):
     @property
     def collate_class(self):
-        return KMSummaryDataCollator
+        return KMDataCollator
 
     def setup_dataset(self):
         dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
@@ -46,15 +51,26 @@ class KMSummaryDatasetModule(DataModule):
 
         assert "train" in dataset
 
-        def filter_summaries(example, n):
-            return {"summaries": example["summaries"][:n]}
+        def filter_targets(example, n):
+            return {"outputs": example["outputs"][:n]}
 
-        logger.info(f"Keeping only {self.config.num_summaries} summaries per document.")
+        logger.info(
+            f"Keeping only {self.config.num_outputs_per_chunk} outputs per document."
+        )
         dataset = dataset.map(
-            partial(filter_summaries, n=self.config.num_summaries), num_proc=20
+            partial(filter_targets, n=self.config.num_outputs_per_chunk), num_proc=20
         )
 
-        def expand_summaries_and_chat(example):
+        if self.config.use_only_type:
+            # filter types (e.g. use only summary, or use only qas)
+            def filter_types(example, types):
+                return example["type"] in types.split(",")
+
+            dataset = dataset.filter(
+                partial(filter_types, type=self.config.use_only_type), num_proc=20
+            )
+
+        def expand_targets_and_chat(example):
             return_dict = {
                 "source": [],
                 "target": [],
@@ -62,46 +78,47 @@ class KMSummaryDatasetModule(DataModule):
                 "subject": [],
             }
 
-            prompt = self.tokenizer.apply_chat_template(
-                [
-                    {
-                        "role": "user",
-                        "content": self.config.summarize_prompt,
-                    }
-                ],
-                tokenize=False,
-                add_generation_prompt=True,
-            )
-
             for i in range(len(example["text"])):
                 text = example["text"][i]
-                summaries = example["summaries"][i]
+                outputs = example["outputs"][i]
+                type = example["type"][i]
                 subject = example["subject"][i]
 
-                source = self.tokenizer.apply_chat_template(
+                prompt = self.tokenizer.apply_chat_template(
                     [
                         {
                             "role": "user",
-                            "content": text + "\n\n" + self.config.summarize_prompt,
+                            "content": AVAILABLE_PROMPTS[type],
                         }
                     ],
                     tokenize=False,
                     add_generation_prompt=True,
                 )
 
-                for summary in summaries:
+                source = self.tokenizer.apply_chat_template(
+                    [
+                        {
+                            "role": "user",
+                            "content": text + "\n\n" + AVAILABLE_PROMPTS[type],
+                        }
+                    ],
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+
+                for output in outputs:
                     return_dict["source"].append(source)
-                    return_dict["target"].append(summary)
+                    return_dict["target"].append(output)
                     return_dict["prompt"].append(prompt)
                     return_dict["subject"].append(subject)
             return return_dict
 
         dataset = dataset.map(
-            expand_summaries_and_chat,
+            expand_targets_and_chat,
             batched=True,
             batch_size=1000,
             desc="Applying chat template to text column.",
-            remove_columns=["summaries", "text"],
+            remove_columns=["outputs", "text"],
         )
 
         (
