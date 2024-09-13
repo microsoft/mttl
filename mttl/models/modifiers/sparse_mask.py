@@ -70,12 +70,12 @@ class SparseLinear(ABC):
                     self.base_bias, dtype=self.base_bias.dtype, device=self.device
                 ),
                 requires_grad=True,
-            )   
-    
+            )
+
     @property
     def device(self):
         return self.base_weight.device
-        
+
     @abstractmethod
     def get_weights_for_mask_learning(self) -> torch.Tensor:
         """
@@ -104,8 +104,8 @@ class SparseWeights(nn.Module):
         super().__init__()
 
         self.shape = shape
-        self.dtype = dtype        
-        
+        self.dtype = dtype
+
         self.sps_type = config.sps_type
         self.block_size = config.block_size
         self.keep_ratio = config.keep_ratio
@@ -126,11 +126,10 @@ class SparseWeights(nn.Module):
 
         self.set_sparse_idxs(_sparse_csr_representation)
         self.set_sparse_weights(_sparse_csr_representation)
-    
+
     @property
     def device(self):
         return self.sparse_weights.device
-    
 
     @torch.no_grad()
     def set_sparse_weights(self, sparse_tensor: csr_matrix):
