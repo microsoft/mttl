@@ -304,7 +304,7 @@ class SparseLinearModule(SparseWeights, SparseLinear):
                 self.sparse_func = SparseLinearFunction_SP_ADD
             elif self.config.sps_type == "block_sparse":
                 # uses stk for now
-                raise NotImplementedError, "Block sparse is not implemented yet"
+                raise NotImplementedError
                 self.sparse_func = BlcokSparseLinearFunction_SP_ADD
             else:
                 raise NotImplementedError
