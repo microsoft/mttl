@@ -276,31 +276,3 @@ scattered_runtime, scattered_alloc, scattered_reserved = benchmark_module(
 print(
     f"ScatteredSparseLinearModule with regular sparsity - Runtime: {scattered_runtime:.6f}s, Allocated Memory: {scattered_alloc / 1e6:.2f}MB, Reserved Memory: {scattered_reserved / 1e6:.2f}MB"
 )
-
-
-seed_everything(0)
-adapter_config = SparseMaskConfig(
-    modify_layers=".*c_fc|.*c_proj",
-    sps_impl="sp_add+matmul",
-    sps_type="block_sparse",
-    keep_ratio=0.05,
-    mask_updater=None,
-    n_steps_in_mask_update=1,
-)
-model = model_loader_helper(
-    "EleutherAI/gpt-neo-125m",
-    bf16=True,
-    fp16=False,
-    load_in_4bit=False,
-    load_in_8bit=False,
-    device_map="cpu",
-)
-modify_transformer(model, adapter_config)
-model.to("cuda")
-
-scattered_runtime, scattered_alloc, scattered_reserved = benchmark_module(
-    model, runs=50
-)
-print(
-    f"SparseLinearModule (triton) with block sparsity - Runtime: {scattered_runtime:.6f}s, Allocated Memory: {scattered_alloc / 1e6:.2f}MB, Reserved Memory: {scattered_reserved / 1e6:.2f}MB"
-)

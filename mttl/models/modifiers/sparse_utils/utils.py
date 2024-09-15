@@ -19,6 +19,16 @@ except ImportError:
 from torch.autograd import Function
 
 
+def get_2d_indices_from_csr_matrix(sparse_tensor: csr_matrix):
+    """
+    Given a csr_matrix, return the row and column indices of data elements.
+    We evoid just calling .nonzero() on the sparse tensor as values may be zeros.
+
+    """
+    dat = np.ones_like(sparse_tensor.data)
+    return csr_matrix((dat, sparse_tensor.indices, sparse_tensor.indptr)).nonzero()
+
+
 def to_block_sparse_layout(matrix: torch.Tensor, block_size: int):
     """
     Returns layout of block sparse matrix: i.e. a matrix of shape (M//block_size, N//block_size) where each element is a boolean indicating whether the block is non-zero.
@@ -261,10 +271,7 @@ class SparseLinearFunction_SP_ADD(Function):
     """
     Will add sparse deltas into the weights in the forward pass and calculate the gradients w.r.t. sparse weights in the backward pass.
     THis is inspired by stuff from RoSA paper and uses spops kernels.
-
-    I guess an alternative implementation could be to use scatter add + filter out unneccessary grads in backward hook, probably like in https://arxiv.org/pdf/2401.16405 Ansel et al.
-
-    Importantly: spops is compiled to be used with sm_80 architectures, e.g. A100. If you dont have such GPU there will be an error here, in which case you the scatter-add implementation or recompile spops to be used with your GPU.
+    Spops is compiled to be used with sm_80 architectures, e.g. A100. If you dont have such GPU there will be an error here, in which case you the scatter-add implementation or recompile spops to be used with your GPU.
     """
 
     @staticmethod
@@ -296,14 +303,10 @@ class SparseLinearFunction_SP_ADD(Function):
             sparse_weights, row_offs, row_idx, col_idx, dense_weights
         )  # could be done also with torch.sparse.sampled_addmm
         dX = grad_output @ weights
-        # TODO: double check this
+        # this line is from here: https://github.com/IST-DASLab/peft-rosa/blob/810da6a13f7bf3f38bc10778d589a4342351e846/src/peft/tuners/rosa/rosa_functions.py#L107
         dsW = sddmm(
-            row_offs, row_idx, col_idx, grad_output.T.contiguous(), input.contiguous()
+            row_offs, row_idx, col_idx, grad_output.T.contiguous(), input.T.contiguous()
         )
-
-        import pdb
-
-        pdb.set_trace()
         return dX, None, None, dsW, None, None, None
 
 
@@ -321,7 +324,8 @@ class BlcokSparseLinearFunction_SP_ADD(Function):
         row_offs,
         c_lut,
         block_size,
-    ):  
+    ):
+        # using csr_add is faster than scatter add
         sparse_weights = sparse_weights.flatten()
         weights = csr_add(sparse_weights, row_offs, row_idx, col_idx, dense_weights)
         output = F.linear(input, weights, dense_bias)
@@ -333,7 +337,7 @@ class BlcokSparseLinearFunction_SP_ADD(Function):
             row_offs,
             dense_weights,
             c_lut,
-            block_size
+            block_size,
         )
         return output
 

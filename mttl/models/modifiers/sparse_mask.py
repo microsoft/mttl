@@ -22,6 +22,7 @@ from mttl.models.modifiers.base import Modifier, ModifierConfig, ModifyMixin
 from mttl.models.modifiers.sparse_utils.utils import (
     BlcokSparseLinearFunction_SP_ADD,
     SparseLinearFunction_SP_ADD,
+    get_2d_indices_from_csr_matrix,
     get_top_k_sparcity,
     init_sparse_weights,
     to_block_sparse_layout,
@@ -156,19 +157,25 @@ class SparseWeights(nn.Module):
 
     @torch.no_grad()
     def reset_sparse_weights(self, sparse_tensor: csr_matrix):
-        raise NotImplementedError
         """
         1. We reset the indices to new values from the sparse_tensor
-        2. Values of new indices are set to zero
+        2. Values at new indices are set to values from sparse_tensor and kept to old values if they are already at the same indices as in the sparse_tensor.
         """
-        # assert np.isclose(sparse_tensor.sum(), self.config.keep_ratio * self.dense_layer_weight.numel())
-        r, c = sparse_tensor.nonzero()
-        a = sparse_tensor * 0.0  # new weights are set to zero
-        a[r, c] += self.scipy_representation[
-            r, c
-        ]  # uncless these are the same as already present
-        self.set_sparse_idxs(a)
-        self.set_sparse_weights(a)
+        # new indices
+        old_weights = self.scipy_representation
+        r_old, c_old = get_2d_indices_from_csr_matrix(old_weights)
+        r_new, c_new = get_2d_indices_from_csr_matrix(sparse_tensor)
+
+        old_pairs = set(zip(r_old, c_old))
+        new_pairs = set(zip(r_new, c_new))
+        # Find the intersection of the two sets to get common pairs: indices of current weights that are also in the new
+        # for these we keep the old values
+        common_pairs = old_pairs.intersection(new_pairs)
+        r_int, c_int = zip(*common_pairs)
+        sparse_tensor[r_int, c_int] = old_weights[r_int, c_int]
+
+        self.set_sparse_idxs(sparse_tensor)
+        self.set_sparse_weights(sparse_tensor)
 
     @torch.no_grad()
     def set_sparse_idxs(self, sparse_tensor: csr_matrix):
@@ -209,11 +216,7 @@ class SparseWeights(nn.Module):
         """
         Returns a simple 2d representation of the sparse weights instead of the CSR format.
         """
-        val = torch.ones_like(self.sparse_weights.data)
-        return csr_matrix(
-            (val, self.col_idx.cpu(), self.row_offs.cpu()),
-            shape=self.shape,
-        ).nonzero()
+        return get_2d_indices_from_csr_matrix(self.scipy_representation)
 
     def to_dense(self):
         """
@@ -261,17 +264,6 @@ class BlockSparseWeights(SparseWeights):
             shape=self.shape,
         )
 
-    @property
-    def twod_indices(self):
-        """
-        Returns a simple 2d representation of the sparse weights instead of the CSR format.
-        """
-        val = torch.ones_like(self.sparse_weights.data.flatten())
-        return csr_matrix(
-            (val, self.col_idx.cpu(), self.row_offs.cpu()),
-            shape=self.shape,
-        ).nonzero()
-
     @torch.no_grad()
     def set_sparse_weights(self, sparse_tensor: csr_matrix):
         """
@@ -285,22 +277,6 @@ class BlockSparseWeights(SparseWeights):
             .view_as(self.sparse_weights)
             .contiguous()
         )
-
-    @torch.no_grad()
-    def reset_sparse_weights(self, sparse_tensor: csr_matrix):
-        raise NotImplementedError
-        """
-        1. We reset the indices to new values from the sparse_tensor
-        2. Values of new indices are set to zero
-        """
-        # assert np.isclose(sparse_tensor.sum(), self.config.keep_ratio * self.dense_layer_weight.numel())
-        r, c = sparse_tensor.nonzero()
-        a = sparse_tensor * 0.0  # new weights are set to zero
-        a[r, c] += self.scipy_representation[
-            r, c
-        ]  # uncless these are the same as already present
-        self.set_sparse_idxs(a)
-        self.set_sparse_weights(a)
 
 
 class MaskedLinear(SparseLinear, nn.Module):
@@ -353,7 +329,6 @@ class MaskedLinear(SparseLinear, nn.Module):
         return self.base_weight + self.sparse_weights, bias
 
     def reset_sparse_weights(self, mask: csr_matrix):
-        raise NotImplementedError
         self.binary_mask = torch.tensor(
             mask.toarray(), device=self.base_weight.device, dtype=self.base_weight.dtype
         )
@@ -415,10 +390,6 @@ class SparseLinearModule(SparseWeights, SparseLinear):
             ),
             bias,
         )
-
-    def reset_sparse_weights(self, mask: csr_matrix):
-        raise NotImplementedError
-        self.reset_sparse_weights(mask)
 
 
 class BlockSparseLinearModule(BlockSparseWeights, SparseLinear):
@@ -501,10 +472,6 @@ class BlockSparseLinearModule(BlockSparseWeights, SparseLinear):
             bias,
         )
 
-    def reset_sparse_weights(self, mask: csr_matrix):
-        raise NotImplementedError
-        self.reset_sparse_weights(mask)
-
 
 class ScatteredSparseLinearModule(SparseWeights, SparseLinear):
     """
@@ -574,11 +541,12 @@ class ScatteredSparseLinearModule(SparseWeights, SparseLinear):
         )
 
     def reset_sparse_weights(self, mask: csr_matrix):
-        raise NotImplementedError
         self.idxs = torch.tensor(
-            np.array(mask.nonzero()), dtype=torch.int64, device=self.base_weight.device
+            np.array(get_2d_indices_from_csr_matrix(mask)),
+            dtype=torch.int64,
+            device=self.base_weight.device,
         )
-        self.reset_sparse_weights(mask)
+        SparseWeights.reset_sparse_weights(self, mask)
 
 
 class MaskUpdatWrapper(nn.Module, Registrable):
@@ -658,9 +626,9 @@ class SNIPMaskUpdateWrapper(MaskUpdatWrapper):
         self.updating_the_mask = False
         self.sparse_layer_weights, self.sparse_layer_biases = None, None
         # update the mask of the sparse layer
-        self.sparse_layer.reset_sparse_weights(
-            torch_coo_to_scipy_csr(self.selected_params)
-        )
+        # SNIP resets the new weights to all zeros
+        new_weights = torch_coo_to_scipy_csr(self.selected_params) * 0.0
+        self.sparse_layer.reset_sparse_weights(new_weights)
         self._selected_indices = None
         self.binary_mask = None
 

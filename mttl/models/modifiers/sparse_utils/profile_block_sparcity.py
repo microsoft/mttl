@@ -14,7 +14,7 @@ from mttl.models.modifiers.sparse_utils.utils import init_sparse_weights
 
 n_blocks = 4
 BLOCK_SIZE = 128
-dtype = torch.float16
+dtype = torch.bfloat16
 
 sequence_length = 1024
 hidden_size = 2048  # phi2 size
@@ -128,23 +128,23 @@ def benchmark(s, h, o, sp, provider):
     assert W.sum() > 0
     assert W_row_sparse.sum() == W.sum()
 
-    W_stk = stk.ops.to_sparse(W, blocking=BLOCK_SIZE)
-    W_stk.validate()
-    W_bst = WT.to_sparse_bsr(blocksize=BLOCK_SIZE)
 
     quantiles = [0.5, 0.2, 0.8]
     if provider == "naive":
         ms, min_ms, max_ms = tn.testing.do_bench(
             lambda: torch_linear(X, WT), quantiles=quantiles
         )
-    if provider == "stk":
-        if BLOCK_SIZE != 128:
+    if provider == "stk":      
+        if BLOCK_SIZE != 128 or dtype != torch.float16:
             ms, min_ms, max_ms = 0, 0, 0
-        else:
+        else:                      
+            W_stk = stk.ops.to_sparse(W, blocking=BLOCK_SIZE)
+            W_stk.validate()
             ms, min_ms, max_ms = tn.testing.do_bench(
                 lambda: stk_sdd(X, W, W_stk), quantiles=quantiles
             )
     if provider == "torch_bsr":
+        W_bst = WT.to_sparse_bsr(blocksize=BLOCK_SIZE)
         ms, min_ms, max_ms = tn.testing.do_bench(
             lambda: torch_linear(X, W_bst), quantiles=quantiles
         )
