@@ -1,9 +1,11 @@
 from abc import ABC, abstractmethod
+from collections import namedtuple
 from dataclasses import dataclass
 
 import numpy as np
 import torch
 from scipy.sparse import csr_matrix
+from triton.ops.blocksparse.matmul import dsd_lut, sdd_lut
 
 from mttl.logging import logger
 
@@ -22,6 +24,7 @@ from mttl.models.modifiers.sparse_utils.utils import (
     SparseLinearFunction_SP_ADD,
     get_top_k_sparcity,
     init_sparse_weights,
+    to_block_sparse_layout,
     torch_coo_to_scipy_csr,
 )
 from mttl.registrable import Registrable
@@ -87,7 +90,7 @@ class SparseLinear(ABC):
         pass
 
     @abstractmethod
-    def reseset_sparse_weights(self, mask: csr_matrix):
+    def reset_sparse_weights(self, mask: csr_matrix):
         """
         Resets the indices of sparse weights as well as their values if needed.
         """
@@ -97,7 +100,14 @@ class SparseLinear(ABC):
 class SparseWeights(nn.Module):
     """
     It implements essentially the CSR representation of the sparse weights.
-    This is used to produce neccessary inouts to spops kernels.
+    This is used to produce neccessary inputs to spops kernels.
+
+    Keeps track of:
+    - row offsets
+    - row indices
+    - column indices
+
+    Weights are innitialized to all zeros.
     """
 
     def __init__(self, config: SparseMaskConfig, shape, dtype, device, **kwargs):
@@ -111,8 +121,10 @@ class SparseWeights(nn.Module):
         self.keep_ratio = config.keep_ratio
 
         _sparse_csr_representation = self._init_sparse_weights()
+        # innitialize weights to all zeros
         self.sparse_weights: nn.Parameter = nn.Parameter(
-            torch.zeros(_sparse_csr_representation.data.shape), requires_grad=True
+            torch.zeros(_sparse_csr_representation.data.shape, dtype=self.dtype),
+            requires_grad=True,
         ).contiguous()
 
         nnz = int(self.keep_ratio * np.prod(self.shape))
@@ -125,7 +137,6 @@ class SparseWeights(nn.Module):
         self.register_buffer("col_idx", torch.zeros((nnz,), dtype=torch.int16))
 
         self.set_sparse_idxs(_sparse_csr_representation)
-        self.set_sparse_weights(_sparse_csr_representation)
 
     @property
     def device(self):
@@ -145,6 +156,7 @@ class SparseWeights(nn.Module):
 
     @torch.no_grad()
     def reset_sparse_weights(self, sparse_tensor: csr_matrix):
+        raise NotImplementedError
         """
         1. We reset the indices to new values from the sparse_tensor
         2. Values of new indices are set to zero
@@ -179,7 +191,6 @@ class SparseWeights(nn.Module):
         )
         keep_params = keep_params.contiguous().float()
         sparse_weights = csr_matrix(keep_params.cpu())
-        sparse_weights *= 0.0
         return sparse_weights
 
     @property
@@ -198,7 +209,7 @@ class SparseWeights(nn.Module):
         """
         Returns a simple 2d representation of the sparse weights instead of the CSR format.
         """
-        val = self.sparse_weights.cpu().data.float() + 1.0
+        val = torch.ones_like(self.sparse_weights.data)
         return csr_matrix(
             (val, self.col_idx.cpu(), self.row_offs.cpu()),
             shape=self.shape,
@@ -224,6 +235,72 @@ class SparseWeights(nn.Module):
         sparse_weights.set_sparse_idxs(scipu_csr)
         sparse_weights.set_sparse_weights(scipu_csr)
         return sparse_weights
+
+
+class BlockSparseWeights(SparseWeights):
+    """
+    Here the sparse weights are stored as [nb-blocks x block-size x block-size] view instead of flattened.
+    This is usefull for block-sparse kernels.
+    """
+
+    def __init__(self, config: SparseMaskConfig, shape, dtype, device, **kwargs):
+        super().__init__(config, shape, dtype, device, **kwargs)
+        self.sparse_weights = nn.Parameter(
+            self.sparse_weights.data.view(-1, self.block_size, self.block_size),
+            requires_grad=True,
+        )
+
+    @property
+    def scipy_representation(self):
+        return csr_matrix(
+            (
+                self.sparse_weights.flatten().cpu().data.float(),
+                self.col_idx.cpu(),
+                self.row_offs.cpu(),
+            ),
+            shape=self.shape,
+        )
+
+    @property
+    def twod_indices(self):
+        """
+        Returns a simple 2d representation of the sparse weights instead of the CSR format.
+        """
+        val = torch.ones_like(self.sparse_weights.data.flatten())
+        return csr_matrix(
+            (val, self.col_idx.cpu(), self.row_offs.cpu()),
+            shape=self.shape,
+        ).nonzero()
+
+    @torch.no_grad()
+    def set_sparse_weights(self, sparse_tensor: csr_matrix):
+        """
+        Set the sparse weights to the weights of the passed csr_matrix.
+        """
+        assert (
+            sparse_tensor.data.shape == self.sparse_weights.data.flatten().shape
+        ), "Shape mismatch when resetting sparse weights"
+        self.sparse_weights.data = (
+            torch.tensor(sparse_tensor.data, dtype=self.dtype, device=self.device)
+            .view_as(self.sparse_weights)
+            .contiguous()
+        )
+
+    @torch.no_grad()
+    def reset_sparse_weights(self, sparse_tensor: csr_matrix):
+        raise NotImplementedError
+        """
+        1. We reset the indices to new values from the sparse_tensor
+        2. Values of new indices are set to zero
+        """
+        # assert np.isclose(sparse_tensor.sum(), self.config.keep_ratio * self.dense_layer_weight.numel())
+        r, c = sparse_tensor.nonzero()
+        a = sparse_tensor * 0.0  # new weights are set to zero
+        a[r, c] += self.scipy_representation[
+            r, c
+        ]  # uncless these are the same as already present
+        self.set_sparse_idxs(a)
+        self.set_sparse_weights(a)
 
 
 class MaskedLinear(SparseLinear, nn.Module):
@@ -275,7 +352,8 @@ class MaskedLinear(SparseLinear, nn.Module):
             bias = self.base_bias + self.sparse_bias
         return self.base_weight + self.sparse_weights, bias
 
-    def reseset_sparse_weights(self, mask: csr_matrix):
+    def reset_sparse_weights(self, mask: csr_matrix):
+        raise NotImplementedError
         self.binary_mask = torch.tensor(
             mask.toarray(), device=self.base_weight.device, dtype=self.base_weight.dtype
         )
@@ -302,9 +380,10 @@ class SparseLinearModule(SparseWeights, SparseLinear):
             if self.config.sps_type in ["regular_sparse", "row_sparse"]:
                 self.sparse_func = SparseLinearFunction_SP_ADD
             elif self.config.sps_type == "block_sparse":
-                # uses stk for now
-                raise NotImplementedError
-                self.sparse_func = BlcokSparseLinearFunction_SP_ADD
+                logger.warning(
+                    "SparseLinearModule is not optimized for block_sparse, try using BlockSparseLinearModule"
+                )
+                self.sparse_func = SparseLinearFunction_SP_ADD
             else:
                 raise NotImplementedError
 
@@ -337,7 +416,93 @@ class SparseLinearModule(SparseWeights, SparseLinear):
             bias,
         )
 
-    def reseset_sparse_weights(self, mask: csr_matrix):
+    def reset_sparse_weights(self, mask: csr_matrix):
+        raise NotImplementedError
+        self.reset_sparse_weights(mask)
+
+
+class BlockSparseLinearModule(BlockSparseWeights, SparseLinear):
+    """
+    Implements a block sparse linear layer with block sparse weights and sparse backprop.
+    """
+
+    def __init__(
+        self,
+        weight,
+        bias,
+        config: SparseMaskConfig,
+        parent_name=None,
+        use_sparse_bias=False,
+        sparse_func=None,
+    ):
+        assert (
+            config.sps_type == "block_sparse"
+        ), "BlockSparseLinearModule only supports block_sparse type"
+        BlockSparseWeights.__init__(
+            self, config, weight.shape, weight.dtype, weight.device
+        )
+        SparseLinear.__init__(self, weight, bias, config, parent_name, use_sparse_bias)
+        self.sparse_func = sparse_func
+        self.sparse_func = BlcokSparseLinearFunction_SP_ADD
+        if self.sps_type != "block_sparse":
+            logger.warning(
+                f"Using 'triton_block_sparse' which only suppots block_sparse type but got {self.sps_type}"
+            )
+            self.sps_type = "block_sparse"
+
+        layout = self.get_layout().unsqueeze(0)
+        c_lut, _ = sdd_lut(layout, self.block_size, self.device)
+        self.register_buffer("c_lut", c_lut)
+
+    def get_layout(self):
+        """
+        Returns layout of block sparse matrix: i.e. a matrix of shape (M//block_size, N//block_size) where each element is a boolean indicating whether the block is non-zero.
+        """
+        sparse_weights = torch.ones_like(self.sparse_weights.flatten())
+        sp_m = csr_matrix(
+            (
+                sparse_weights.cpu().data.float(),
+                self.col_idx.cpu(),
+                self.row_offs.cpu(),
+            ),
+            shape=self.shape,
+        )
+        w = torch.tensor(sp_m.toarray(), device="cpu", dtype=self.dtype)
+        return to_block_sparse_layout(w, self.block_size)
+
+    def forward(self, input):
+        bias = self.base_bias
+        if self.sparse_bias is not None:
+            bias = self.base_bias + self.sparse_bias
+        return self.sparse_func.apply(
+            input,
+            self.base_weight,
+            bias,
+            self.sparse_weights,
+            self.row_idx,
+            self.col_idx,
+            self.row_offs,
+            self.c_lut,
+            torch.tensor(self.block_size),
+        )
+
+    def get_weights_for_mask_learning(self):
+        bias = self.base_bias
+        if self.sparse_bias is not None:
+            bias = self.base_bias + self.sparse_bias
+        return (
+            csr_add(
+                self.sparse_weights,
+                self.row_offs,
+                self.row_idx,
+                self.col_idx,
+                self.base_weight,
+            ),
+            bias,
+        )
+
+    def reset_sparse_weights(self, mask: csr_matrix):
+        raise NotImplementedError
         self.reset_sparse_weights(mask)
 
 
@@ -408,7 +573,8 @@ class ScatteredSparseLinearModule(SparseWeights, SparseLinear):
             bias,
         )
 
-    def reseset_sparse_weights(self, mask: csr_matrix):
+    def reset_sparse_weights(self, mask: csr_matrix):
+        raise NotImplementedError
         self.idxs = torch.tensor(
             np.array(mask.nonzero()), dtype=torch.int64, device=self.base_weight.device
         )
@@ -492,7 +658,7 @@ class SNIPMaskUpdateWrapper(MaskUpdatWrapper):
         self.updating_the_mask = False
         self.sparse_layer_weights, self.sparse_layer_biases = None, None
         # update the mask of the sparse layer
-        self.sparse_layer.reseset_sparse_weights(
+        self.sparse_layer.reset_sparse_weights(
             torch_coo_to_scipy_csr(self.selected_params)
         )
         self._selected_indices = None
@@ -601,10 +767,15 @@ class SparseMaskAdapter(Modifier, ModifyMixin):
             "sp_add+sp_mm",
             "scattered",
             "masked_linear",
-        ], "Choose `sps_type` from ['sp_add+sp_mm','scattered','masked_linear] "
+            "triton_block_sparse",
+        ], "Choose `sps_type` from ['sp_add+sp_mm','scattered','masked_linear','triton_block_sparse']"
 
         if self.sp_impl == "sp_add+sp_mm":
             sparse_layer: SparseLinear = SparseLinearModule(
+                self.dense_layer_weight, self.dense_layer_bias, self.config
+            )
+        elif self.sp_impl == "triton_block_sparse":
+            sparse_layer: SparseLinear = BlockSparseLinearModule(
                 self.dense_layer_weight, self.dense_layer_bias, self.config
             )
         elif self.sp_impl == "scattered":

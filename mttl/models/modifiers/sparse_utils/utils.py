@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from scipy.sparse import csr_matrix
+from triton.ops.blocksparse.matmul import _matmul
 
 try:
     from spops import csr_add, sddmm
@@ -16,6 +17,23 @@ except ImportError:
     )
 
 from torch.autograd import Function
+
+
+def to_block_sparse_layout(matrix: torch.Tensor, block_size: int):
+    """
+    Returns layout of block sparse matrix: i.e. a matrix of shape (M//block_size, N//block_size) where each element is a boolean indicating whether the block is non-zero.
+    """
+    M, N = matrix.shape
+    assert M % block_size == 0, "M must be divisible by block_size"
+    assert N % block_size == 0, "N must be divisible by block_size"
+    matrix = matrix.reshape(
+        M // block_size,
+        block_size,
+        N // block_size,
+        block_size,
+    ).permute(0, 2, 1, 3)
+    matrix = matrix.flatten(2, 3).sum(dim=-1)
+    return matrix.cpu().bool().to(torch.int64)
 
 
 def torch_coo_to_scipy_csr(coo_tensor):
@@ -119,7 +137,7 @@ def to_block_sparse_layout(matrix: torch.Tensor, block_size: int):
         block_size,
     ).permute(0, 2, 1, 3)
     matrix = matrix.flatten(2, 3).sum(dim=2)
-    return matrix.bool()
+    return matrix.bool().cpu().to(torch.int64)
 
 
 def top_k_row_sparcify(grad, keep_ratio):
@@ -278,25 +296,18 @@ class SparseLinearFunction_SP_ADD(Function):
             sparse_weights, row_offs, row_idx, col_idx, dense_weights
         )  # could be done also with torch.sparse.sampled_addmm
         dX = grad_output @ weights
+        # TODO: double check this
         dsW = sddmm(
-            row_offs, row_idx, col_idx, grad_output.T.contiguous(), input.T.contiguous()
+            row_offs, row_idx, col_idx, grad_output.T.contiguous(), input.contiguous()
         )
+
+        import pdb
+
+        pdb.set_trace()
         return dX, None, None, dsW, None, None, None
 
 
 class BlcokSparseLinearFunction_SP_ADD(Function):
-    @staticmethod
-    def forward(
-        ctx, input, dense_weight, dense_bias, sparse_weight, row_idx, col_idx, row_offs
-    ):
-        output = F.linear(input, dense_weight, dense_bias)
-        return output
-
-    @staticmethod
-    def backward(ctx, grad_output):
-        grad_input = grad_weight = grad_bias = grad_sparse_weight = None
-        return grad_input, grad_weight, grad_bias, grad_sparse_weight
-
     @staticmethod
     # @torch.amp.custom_fwd
     def forward(
@@ -308,28 +319,60 @@ class BlcokSparseLinearFunction_SP_ADD(Function):
         row_idx,
         col_idx,
         row_offs,
-    ):
+        c_lut,
+        block_size,
+    ):  
+        sparse_weights = sparse_weights.flatten()
         weights = csr_add(sparse_weights, row_offs, row_idx, col_idx, dense_weights)
         output = F.linear(input, weights, dense_bias)
         ctx.save_for_backward(
-            input, sparse_weights, row_idx, col_idx, row_offs, dense_weights
+            input,
+            sparse_weights,
+            row_idx,
+            col_idx,
+            row_offs,
+            dense_weights,
+            c_lut,
+            block_size
         )
         return output
 
     @staticmethod
     # @torch.amp.custom_bwd
     def backward(ctx, grad_output):
-        input, sparse_weights, row_idx, col_idx, row_offs, dense_weights = (
-            ctx.saved_tensors
-        )
+        (
+            input,
+            sparse_weights,
+            row_idx,
+            col_idx,
+            row_offs,
+            dense_weights,
+            c_lut,
+            block_size,
+        ) = ctx.saved_tensors
         weights = csr_add(
             sparse_weights, row_offs, row_idx, col_idx, dense_weights
         )  # could be done also with torch.sparse.sampled_addmm
+        n_blocks = c_lut.shape[0]
+        block_size = block_size.item()
+        spdims = (1, weights.shape[0] // block_size, weights.shape[1] // block_size)
         dX = grad_output @ weights
-        import pdb
+        grad_output = grad_output.contiguous()
+        input = input.contiguous()
+        dsW = _matmul.fn["sdd"](
+            grad_output.unsqueeze(1),
+            input.unsqueeze(1),
+            True,
+            False,
+            False,
+            spdims,
+            block_size,
+            c_lut,
+            None,
+            out=None,
+        ).sum(0)
 
-        pdb.set_trace()
-        dsW = sddmm(
-            row_offs, row_idx, col_idx, grad_output.T.contiguous(), input.T.contiguous()
-        )
-        return dX, None, None, dsW, None, None, None
+        # dsW is n_blocks x block_size x block_size
+        # import pdb
+        # pdb.set_trace()
+        return dX, None, None, dsW, None, None, None, None, None
