@@ -4,6 +4,9 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+# register this datamodule!
+from km_dataloader import KMDatasetModule
 from lightning_fabric import seed_everything
 
 from mttl.arguments import ExpertConfig
@@ -11,9 +14,6 @@ from mttl.logging import setup_logging
 from mttl.models.expert_model import ExpertModel, ExpertModelConfig
 from mttl.models.hf.trainer import ExpertModelTrainer
 from mttl.utils import remote_login
-
-# register this datamodule!
-from projects.kms.km_dataloader import KMDatasetModule
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
