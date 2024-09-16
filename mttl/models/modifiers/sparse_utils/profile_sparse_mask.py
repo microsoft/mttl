@@ -20,7 +20,7 @@ logger.setLevel(logging.ERROR)
 # Define input sizes and batch sizes for testing
 max_seq_len = 1024
 bs = 2
-vocab_size = 400
+vocab_size = 32000
 
 
 def dummy_batch():
@@ -79,7 +79,7 @@ def benchmark_module(module, runs=100):
 
 seed_everything(0)
 adapter_config = SparseMaskConfig(
-    modify_layers=".*c_fc|.*c_proj",
+    modify_layers=".*Wqkv.*|.*out_proj.*",
     sps_impl="triton_block_sparse",
     sps_type="block_sparse",
     keep_ratio=0.05,
@@ -87,7 +87,7 @@ adapter_config = SparseMaskConfig(
     n_steps_in_mask_update=1,
 )
 model = model_loader_helper(
-    "EleutherAI/gpt-neo-125m",
+    "phi-2",
     bf16=True,
     fp16=False,
     load_in_4bit=False,
@@ -99,7 +99,7 @@ model.to("cuda")
 
 
 # Run benchmarks
-sparse_runtime, sparse_alloc, sparse_reserved = benchmark_module(model, runs=50)
+sparse_runtime, sparse_alloc, sparse_reserved = benchmark_module(model, runs=10)
 print(
     f"BlockSparseLinearModule with block sparsity - Runtime: {sparse_runtime:.6f}s, Allocated Memory: {sparse_alloc / 1e6:.2f}MB, Reserved Memory: {sparse_reserved / 1e6:.2f}MB"
 )
@@ -110,7 +110,7 @@ print(
 
 seed_everything(0)
 adapter_config = SparseMaskConfig(
-    modify_layers=".*c_fc|.*c_proj",
+    modify_layers=".*Wqkv.*|.*out_proj.*",
     sps_impl="sp_add+sp_mm",
     sps_type="regular_sparse",
     keep_ratio=0.05,
@@ -118,7 +118,7 @@ adapter_config = SparseMaskConfig(
     n_steps_in_mask_update=1,
 )
 model = model_loader_helper(
-    "EleutherAI/gpt-neo-125m",
+    "phi-2",
     bf16=True,
     fp16=False,
     load_in_4bit=False,
@@ -130,14 +130,14 @@ model.to("cuda")
 
 
 # Run benchmarks
-sparse_runtime, sparse_alloc, sparse_reserved = benchmark_module(model, runs=50)
+sparse_runtime, sparse_alloc, sparse_reserved = benchmark_module(model, runs=10)
 print(
     f"SparseLinearModule (spops) with regular sparsity - Runtime: {sparse_runtime:.6f}s, Allocated Memory: {sparse_alloc / 1e6:.2f}MB, Reserved Memory: {sparse_reserved / 1e6:.2f}MB"
 )
 
 seed_everything(0)
 adapter_config = SparseMaskConfig(
-    modify_layers=".*c_fc|.*c_proj",
+    modify_layers=".*Wqkv.*|.*out_proj.*",
     sps_impl="sp_add+sp_mm",
     sps_type="block_sparse",
     keep_ratio=0.05,
@@ -145,7 +145,7 @@ adapter_config = SparseMaskConfig(
     n_steps_in_mask_update=1,
 )
 model = model_loader_helper(
-    "EleutherAI/gpt-neo-125m",
+    "phi-2",
     bf16=True,
     fp16=False,
     load_in_4bit=False,
@@ -155,7 +155,7 @@ model = model_loader_helper(
 modify_transformer(model, adapter_config)
 model.to("cuda")
 
-sparse_runtime, sparse_alloc, sparse_reserved = benchmark_module(model, runs=50)
+sparse_runtime, sparse_alloc, sparse_reserved = benchmark_module(model, runs=10)
 print(
     f"SparseLinearModule (spops) with blcok sparsity - Runtime: {sparse_runtime:.6f}s, Allocated Memory: {sparse_alloc / 1e6:.2f}MB, Reserved Memory: {sparse_reserved / 1e6:.2f}MB"
 )
@@ -166,7 +166,7 @@ print(
 
 seed_everything(0)
 adapter_config = SparseMaskConfig(
-    modify_layers=".*c_fc|.*c_proj",
+    modify_layers=".*Wqkv.*|.*out_proj.*",
     sps_impl="masked_linear",
     sps_type="regular_sparse",
     keep_ratio=0.05,
@@ -174,7 +174,7 @@ adapter_config = SparseMaskConfig(
     n_steps_in_mask_update=1,
 )
 model = model_loader_helper(
-    "EleutherAI/gpt-neo-125m",
+    "phi-2",
     bf16=True,
     fp16=False,
     load_in_4bit=False,
@@ -185,7 +185,7 @@ modify_transformer(model, adapter_config)
 model.to("cuda")
 
 scattered_runtime, scattered_alloc, scattered_reserved = benchmark_module(
-    model, runs=50
+    model, runs=10
 )
 print(
     f"MaskedLinear with regular sparsity - Runtime: {scattered_runtime:.6f}s, Allocated Memory: {scattered_alloc / 1e6:.2f}MB, Reserved Memory: {scattered_reserved / 1e6:.2f}MB"
@@ -193,7 +193,7 @@ print(
 
 seed_everything(0)
 adapter_config = SparseMaskConfig(
-    modify_layers=".*c_fc|.*c_proj",
+    modify_layers=".*Wqkv.*|.*out_proj.*",
     sps_impl="masked_linear",
     sps_type="block_sparse",
     keep_ratio=0.05,
@@ -201,7 +201,7 @@ adapter_config = SparseMaskConfig(
     n_steps_in_mask_update=1,
 )
 model = model_loader_helper(
-    "EleutherAI/gpt-neo-125m",
+    "phi-2",
     bf16=True,
     fp16=False,
     load_in_4bit=False,
@@ -212,7 +212,7 @@ modify_transformer(model, adapter_config)
 model.to("cuda")
 
 scattered_runtime, scattered_alloc, scattered_reserved = benchmark_module(
-    model, runs=50
+    model, runs=10
 )
 print(
     f"MaskedLinear with block sparsity - Runtime: {scattered_runtime:.6f}s, Allocated Memory: {scattered_alloc / 1e6:.2f}MB, Reserved Memory: {scattered_reserved / 1e6:.2f}MB"
@@ -224,7 +224,7 @@ print(
 
 seed_everything(0)
 adapter_config = SparseMaskConfig(
-    modify_layers=".*c_fc|.*c_proj",
+    modify_layers=".*Wqkv.*|.*out_proj.*",
     sps_impl="scattered",
     sps_type="block_sparse",
     keep_ratio=0.05,
@@ -232,7 +232,7 @@ adapter_config = SparseMaskConfig(
     n_steps_in_mask_update=1,
 )
 model = model_loader_helper(
-    "EleutherAI/gpt-neo-125m",
+    "phi-2",
     bf16=True,
     fp16=False,
     load_in_4bit=False,
@@ -243,7 +243,7 @@ modify_transformer(model, adapter_config)
 model.to("cuda")
 
 scattered_runtime, scattered_alloc, scattered_reserved = benchmark_module(
-    model, runs=50
+    model, runs=10
 )
 print(
     f"ScatteredSparseLinearModule with block sparsity - Runtime: {scattered_runtime:.6f}s, Allocated Memory: {scattered_alloc / 1e6:.2f}MB, Reserved Memory: {scattered_reserved / 1e6:.2f}MB"
@@ -251,7 +251,7 @@ print(
 
 seed_everything(0)
 adapter_config = SparseMaskConfig(
-    modify_layers=".*c_fc|.*c_proj",
+    modify_layers=".*Wqkv.*|.*out_proj.*",
     sps_impl="scattered",
     sps_type="regular_sparse",
     keep_ratio=0.05,
@@ -259,7 +259,7 @@ adapter_config = SparseMaskConfig(
     n_steps_in_mask_update=1,
 )
 model = model_loader_helper(
-    "EleutherAI/gpt-neo-125m",
+    "phi-2",
     bf16=True,
     fp16=False,
     load_in_4bit=False,
@@ -270,7 +270,7 @@ modify_transformer(model, adapter_config)
 model.to("cuda")
 
 scattered_runtime, scattered_alloc, scattered_reserved = benchmark_module(
-    model, runs=50
+    model, runs=10
 )
 print(
     f"ScatteredSparseLinearModule with regular sparsity - Runtime: {scattered_runtime:.6f}s, Allocated Memory: {scattered_alloc / 1e6:.2f}MB, Reserved Memory: {scattered_reserved / 1e6:.2f}MB"
