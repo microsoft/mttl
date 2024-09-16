@@ -35,6 +35,7 @@ print(f"sparsity: {sparcity}")
 #     device="cuda"
 # )
 
+
 def scatter_add(X_dense, values, idxs):
     row_indices, col_indices = idxs[0], idxs[1]
     flat_indices = row_indices * X_dense.size(1) + col_indices
@@ -43,12 +44,10 @@ def scatter_add(X_dense, values, idxs):
 
     weights = updated_flat_weights.view_as(X_dense)
     return weights
-    
+
 
 def stk_sdd(X, values, W):
-    return csr_add(
-            values, W.row_offs, W.row_idx, W.col_idx, X
-        ) 
+    return csr_add(values, W.row_offs, W.row_idx, W.col_idx, X)
 
 
 @tn.testing.perf_report(
@@ -85,23 +84,28 @@ def benchmark(h, o, sp, provider):
         .to("cuda")
         .to(dtype)
         .contiguous()
-    )    
-    sparse_W = SparseWeights.from_dense(W, SparseMaskConfig(keep_ratio=sparcity, block_size=BLOCK_SIZE, sps_type="block_sparse")).to("cuda")
+    )
+    sparse_W = SparseWeights.from_dense(
+        W,
+        SparseMaskConfig(
+            keep_ratio=sparcity, block_size=BLOCK_SIZE, sps_type="block_sparse"
+        ),
+    ).to("cuda")
 
     idxs = torch.tensor(
-        np.array(sparse_W.twod_indices),
-        dtype=torch.int64,
-        device="cuda"
+        np.array(sparse_W.twod_indices), dtype=torch.int64, device="cuda"
     )
 
     quantiles = [0.5, 0.2, 0.8]
     if provider == "scatter_add":
         ms, min_ms, max_ms = tn.testing.do_bench(
-            lambda: scatter_add(X, sparse_W.sparse_weights.detach(), idxs), quantiles=quantiles
+            lambda: scatter_add(X, sparse_W.sparse_weights.detach(), idxs),
+            quantiles=quantiles,
         )
     elif provider == "csr_add":
         ms, min_ms, max_ms = tn.testing.do_bench(
-            lambda: stk_sdd(X, sparse_W.sparse_weights.detach(), sparse_W), quantiles=quantiles
+            lambda: stk_sdd(X, sparse_W.sparse_weights.detach(), sparse_W),
+            quantiles=quantiles,
         )
     # gbps = lambda ms: 2 * s * h * o * 2 * 1e-9 / (ms * 1e-3)
     # return gbps(ms), gbps(max_ms), gbps(min_ms)
