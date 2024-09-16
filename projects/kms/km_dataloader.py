@@ -78,8 +78,8 @@ class KMDatasetModule(DataModule):
                 "subject": [],
             }
 
-            for i in range(len(example["text"])):
-                text = example["text"][i]
+            for i in range(len(example["input"])):
+                input = example["input"][i]
                 outputs = example["outputs"][i]
                 type = example["type"][i]
                 subject = example["subject"][i]
@@ -99,7 +99,7 @@ class KMDatasetModule(DataModule):
                     [
                         {
                             "role": "user",
-                            "content": text + "\n\n" + AVAILABLE_PROMPTS[type],
+                            "content": input + "\n\n" + AVAILABLE_PROMPTS[type],
                         }
                     ],
                     tokenize=False,
@@ -117,8 +117,8 @@ class KMDatasetModule(DataModule):
             expand_targets_and_chat,
             batched=True,
             batch_size=1000,
-            desc="Applying chat template to text column.",
-            remove_columns=["outputs", "text"],
+            desc="Applying chat template...",
+            remove_columns=["input", "outputs", "type"],
         )
 
         (
