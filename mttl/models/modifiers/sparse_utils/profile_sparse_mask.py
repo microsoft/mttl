@@ -19,16 +19,16 @@ from mttl.models.modifiers.sparse_mask import (
 from mttl.models.utils import model_loader_helper, transfer_batch_to_device
 
 logger.setLevel(logging.ERROR)
-model_name = "EleutherAI/gpt-neo-125m"  # "phi-2"
-block_size = 16
+model_name = "phi-2" #"EleutherAI/gpt-neo-125m"  # "phi-2"
+block_size = 128
 n_blocks = 6
 mask_updater = None
-modify_layers = ".*q_proj.*|.*v_proj.*|.*k_proj.*"  # ".*Wqkv.*" #
-n_iters = 10
+modify_layers =  ".*Wqkv.*"  #".*q_proj.*|.*v_proj.*|.*k_proj.*"  # ".*Wqkv.*" #
+n_iters = 50
 
 # input sizes and batch sizes for testing
 max_seq_len = 1024
-bs = 1
+bs = 2
 vocab_size = 32000
 
 
