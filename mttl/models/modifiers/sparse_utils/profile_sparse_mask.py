@@ -316,3 +316,5 @@ run_benchmark("ScatteredSparseLinearModule (reg sp.)", adapter_config)
 
 ############################################################################################################################################################
 print(table)
+# write table to a csv file
+table.to_csv("benchmark_results.csv")
