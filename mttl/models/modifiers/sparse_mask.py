@@ -81,7 +81,9 @@ class SparseLinear(ABC):
         return self.base_weight.device
 
     @abstractmethod
-    def get_weights_for_mask_learning(self) -> torch.Tensor:
+    def get_weights_for_mask_learning(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor, csr_matrix, torch.Tensor]:
         """
         Returns weights that are used for updating the binary mask indices:
         e.g. can be base model weights o base model weights + accumulated sparse weights.
@@ -157,23 +159,6 @@ class SparseWeights(nn.Module):
 
     @torch.no_grad()
     def reset_sparse_weights(self, sparse_tensor: csr_matrix):
-        """
-        1. We reset the indices to new values from the sparse_tensor
-        2. Values at new indices are set to values from sparse_tensor and kept to old values if they are already at the same indices as in the sparse_tensor.
-        """
-        # new indices
-        old_weights = self.scipy_representation
-        r_old, c_old = get_2d_indices_from_csr_matrix(old_weights)
-        r_new, c_new = get_2d_indices_from_csr_matrix(sparse_tensor)
-
-        old_pairs = set(zip(r_old, c_old))
-        new_pairs = set(zip(r_new, c_new))
-        # Find the intersection of the two sets to get common pairs: indices of current weights that are also in the new
-        # for these we keep the old values
-        common_pairs = old_pairs.intersection(new_pairs)
-        r_int, c_int = zip(*common_pairs)
-        sparse_tensor[r_int, c_int] = old_weights[r_int, c_int]
-
         self.set_sparse_idxs(sparse_tensor)
         self.set_sparse_weights(sparse_tensor)
 
@@ -323,14 +308,20 @@ class MaskedLinear(SparseLinear, nn.Module):
         return base_out + sparse_out
 
     def get_weights_for_mask_learning(self):
-        bias = self.base_bias
-        if self.sparse_bias is not None:
-            bias = self.base_bias + self.sparse_bias
-        return self.base_weight + self.sparse_weights, bias
+        return (
+            self.base_weight,
+            self.base_bias,
+            csr_matrix(self.sparse_weights.data.cpu().float(), shape=self.sparse_weights.shape),
+            self.sparse_bias,
+        )
 
     def reset_sparse_weights(self, mask: csr_matrix):
         self.binary_mask = torch.tensor(
             mask.toarray(), device=self.base_weight.device, dtype=self.base_weight.dtype
+        )
+        r,c = get_2d_indices_from_csr_matrix(mask)
+        self.sparse_weights.data[r,c] = torch.tensor(
+            mask.data, dtype=self.base_weight.dtype, device=self.base_weight.device
         )
 
 
@@ -377,18 +368,11 @@ class SparseLinearModule(SparseWeights, SparseLinear):
         )
 
     def get_weights_for_mask_learning(self):
-        bias = self.base_bias
-        if self.sparse_bias is not None:
-            bias = self.base_bias + self.sparse_bias
         return (
-            csr_add(
-                self.sparse_weights,
-                self.row_offs,
-                self.row_idx,
-                self.col_idx,
-                self.base_weight,
-            ),
-            bias,
+            self.base_weight,
+            self.base_bias,
+            self.scipy_representation,
+            self.sparse_bias,
         )
 
 
@@ -458,18 +442,11 @@ class BlockSparseLinearModule(BlockSparseWeights, SparseLinear):
         )
 
     def get_weights_for_mask_learning(self):
-        bias = self.base_bias
-        if self.sparse_bias is not None:
-            bias = self.base_bias + self.sparse_bias
         return (
-            csr_add(
-                self.sparse_weights,
-                self.row_offs,
-                self.row_idx,
-                self.col_idx,
-                self.base_weight,
-            ),
-            bias,
+            self.base_weight,
+            self.base_bias,
+            self.scipy_representation,
+            self.sparse_bias,
         )
 
 
@@ -527,26 +504,20 @@ class ScatteredSparseLinearModule(SparseWeights, SparseLinear):
         return torch.nn.functional.linear(input, weights, bias)
 
     def get_weights_for_mask_learning(self):
-        """
-        Right now, we only pass the vlaues of the current sparse weights not the accumulated ones, which is in contrast to MaskedLinear.
-        """
-        bias = self.base_bias
-        if self.sparse_bias is not None:
-            bias = self.base_bias + self.sparse_bias
         return (
-            self._scatter_add_flattened(
-                self.base_weight, self.sparse_weights, self.idxs
-            ),
-            bias,
+            self.base_weight,
+            self.base_bias,
+            self.scipy_representation,
+            self.sparse_bias,
         )
 
     def reset_sparse_weights(self, mask: csr_matrix):
-        self.idxs = torch.tensor(
-            np.array(get_2d_indices_from_csr_matrix(mask)),
+        SparseWeights.reset_sparse_weights(self, mask)
+        self.idxs.data = torch.tensor(
+            np.array(self.twod_indices),
             dtype=torch.int64,
             device=self.base_weight.device,
         )
-        SparseWeights.reset_sparse_weights(self, mask)
 
 
 class MaskUpdatWrapper(nn.Module, Registrable):
@@ -571,7 +542,9 @@ class SNIPMaskUpdateWrapper(MaskUpdatWrapper):
     """
     SNIPMaskUpdateWrapper is a wrapper around SparseLinear.
     It is used to periodically re-calculate the sparse mask indices a la SNIP (https://arxiv.org/pdf/1810.02340).
-    This uses a couple of in-comming batches.
+    To recalculate the mask, it uses a couple of incoming mini-batches to estimate the importance of each parameter.
+
+    This method willl also keep track of the selected weights throughout learning on CPU.
     """
 
     def __init__(self, sparse_layer: SparseLinear, config: SparseMaskConfig):
@@ -590,12 +563,44 @@ class SNIPMaskUpdateWrapper(MaskUpdatWrapper):
         self._backward_hooks = []
         self.sparse_layer_weights, self.sparse_layer_biases = None, None
 
+        # sparse weights for accumulation on CPU
+        self.accumulated_sparse_weights = torch.zeros_like(
+            sparse_layer.base_weight, device="cpu"
+        )
+
+    # make sure accumulated_sparse_weights are on CPU
+    def cuda(self, *args, **kwargs):
+        super().cuda(*args, **kwargs)
+        self.accumulated_sparse_weights = self.accumulated_sparse_weights.cpu()
+        return self
+
+    def to(self, *args, **kwargs):
+        super().to(*args, **kwargs)
+        self.accumulated_sparse_weights = self.accumulated_sparse_weights.cpu()
+        return self
+
     def switch_to_mask_update_modus(self):
         self.updating_the_mask = True
         self._selected_indices = None
-        self.sparse_layer_weights, self.sparse_layer_biases = (
+        base_weights, base_biases, sparse_weights, sparse_biases = (
             self.sparse_layer.get_weights_for_mask_learning()
         )
+        # need to do two things:
+        # 1. keep track of accumulated sparse weights
+        # 2. Merge those accumulated weight deltas into the base weights and use them for importance estimation
+        r, c = get_2d_indices_from_csr_matrix(sparse_weights)
+        if len(r) > 0:
+            self.accumulated_sparse_weights[r, c] = torch.tensor(
+                sparse_weights[r, c],
+                dtype=self.accumulated_sparse_weights.dtype,
+                device="cpu",
+            )
+        self.sparse_layer_weights = base_weights + self.accumulated_sparse_weights.to(
+            base_weights.device
+        )
+        self.sparse_layer_biases = base_biases
+        if sparse_biases is not None:
+            self.sparse_layer_biases += sparse_biases
 
         self.binary_mask = torch.ones_like(
             self.sparse_layer_weights, device=self.sparse_layer_weights.device
@@ -626,8 +631,10 @@ class SNIPMaskUpdateWrapper(MaskUpdatWrapper):
         self.updating_the_mask = False
         self.sparse_layer_weights, self.sparse_layer_biases = None, None
         # update the mask of the sparse layer
-        # SNIP resets the new weights to all zeros
+        # SNIP sets the new weights to zeros but weights that have been learned in the past are kept
         new_weights = torch_coo_to_scipy_csr(self.selected_params) * 0.0
+        r, c = get_2d_indices_from_csr_matrix(new_weights)
+        new_weights[r, c] = self.accumulated_sparse_weights[r, c].float()
         self.sparse_layer.reset_sparse_weights(new_weights)
         self._selected_indices = None
         self.binary_mask = None

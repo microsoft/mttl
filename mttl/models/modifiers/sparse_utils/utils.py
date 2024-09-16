@@ -26,7 +26,9 @@ def get_2d_indices_from_csr_matrix(sparse_tensor: csr_matrix):
 
     """
     dat = np.ones_like(sparse_tensor.data)
-    return csr_matrix((dat, sparse_tensor.indices, sparse_tensor.indptr)).nonzero()
+    return csr_matrix(
+        (dat, sparse_tensor.indices, sparse_tensor.indptr), shape=sparse_tensor.shape
+    ).nonzero()
 
 
 def to_block_sparse_layout(matrix: torch.Tensor, block_size: int):
