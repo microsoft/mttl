@@ -1,5 +1,6 @@
 import os
 from collections import defaultdict
+from dataclasses import dataclass
 from functools import partial
 
 from mttl.datamodule.base import DataModule, DatasetConfig, DefaultCollator
@@ -13,6 +14,7 @@ AVAILABLE_PROMPTS = {
 }
 
 
+@dataclass
 class KMDatasetConfig(DatasetConfig):
     # there might be multiple types, i.e. "qa", "summary", or maybe else in the future
     use_only_type: str = None
@@ -26,6 +28,9 @@ class KMDatasetConfig(DatasetConfig):
 
 class KMDataCollator(DefaultCollator):
     def __call__(self, batch):
+        if "input_ids" in batch[0]:
+            return self.packed_collate(batch)
+
         output_batch = super().__call__(batch)
 
         prompts = [b["prompt"] for b in batch]
@@ -36,14 +41,13 @@ class KMDataCollator(DefaultCollator):
         output_batch["nc_input_ids"] = prompt_batch["input_ids"]
         output_batch["nc_attention_mask"] = prompt_batch["attention_mask"]
         output_batch["nc_labels"] = prompt_batch["labels"]
+
         return output_batch
 
 
 @DataModule.register("dcd_km", config_cls=KMDatasetConfig)
 class KMDatasetModule(DataModule):
-    @property
-    def collate_class(self):
-        return KMDataCollator
+    collate_class = KMDataCollator
 
     def setup_dataset(self):
         dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
