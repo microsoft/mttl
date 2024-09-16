@@ -310,7 +310,7 @@ class SparseLinearFunction_SP_ADD(Function):
             col_idx,
             grad_output.mT.contiguous(),
             input.mT.contiguous(),
-            backend="sputnik"
+            backend="sputnik",
         )
         return dX, None, None, dsW, None, None, None
 
@@ -362,7 +362,7 @@ class BlcokSparseLinearFunction_SP_ADD(Function):
         weights = csr_add(
             sparse_weights, row_offs, row_idx, col_idx, dense_weights
         )  # could be done also with torch.sparse.sampled_addmm
-        
+
         block_size = block_size.item()
         spdims = (1, weights.shape[0] // block_size, weights.shape[1] // block_size)
         dX = grad_output @ weights
