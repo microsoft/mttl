@@ -1,6 +1,8 @@
 import json
 import os
+import threading
 import uuid
+from dataclasses import dataclass, field
 from threading import Thread
 
 import torch
@@ -11,6 +13,13 @@ from mttl.datamodule.utils import get_tokenizer_with_args
 from mttl.models.base_model import AutoExpertModel
 from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
 from mttl.models.modifiers.lora import LoRAConfig
+
+
+@dataclass
+class Conversation:
+    messages: list = field(default_factory=list)
+    active_module: str = "None"
+
 
 app = Flask(__name__)
 app.secret_key = "your_secret_key"
@@ -35,8 +44,8 @@ tokenizer = get_tokenizer_with_args(
     for_generation=True,
 )
 
-conversation = {}
-active_modules = {}
+conversations = {}
+conversation_lock = threading.Lock()
 
 
 @app.route("/")
@@ -50,11 +59,12 @@ def load_knowledge_module():
     km_name = data.get("module_name")
     conversation_id = data.get("conversation_id", None)
 
-    if conversation_id not in active_modules:
-        active_modules[conversation_id] = None
+    with conversation_lock:
+        if conversation_id not in conversations:
+            conversations[conversation_id] = Conversation()
 
     try:
-        active_modules[conversation_id] = km_name
+        conversations[conversation_id].active_module = km_name
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"success": False})
@@ -65,13 +75,18 @@ def get_conversation():
     from flask import Response, request, stream_with_context
 
     data = request.json
-    conversation_id = data.get("conversation_id")
+    conversation_id = data["conversation_id"]
 
-    if conversation_id not in conversation:
-        conversation[conversation_id] = []
+    with conversation_lock:
+        if conversation_id not in conversations:
+            conversations[conversation_id] = Conversation()
 
-    print(conversation[conversation_id])
-    return jsonify({"messages": conversation[conversation_id]})
+    return jsonify(
+        {
+            "messages": conversations[conversation_id].messages,
+            "active_module": conversations[conversation_id].active_module,
+        }
+    )
 
 
 @app.route("/clear_conversation", methods=["POST"])
@@ -79,12 +94,13 @@ def clear_conversation():
     from flask import Response, request, stream_with_context
 
     data = request.json
-    conversation_id = data.get("conversation_id")
+    conversation_id = data["conversation_id"]
 
-    if conversation_id not in conversation:
-        conversation[conversation_id] = []
+    with conversation_lock:
+        if conversation_id not in conversations:
+            conversations[conversation_id] = Conversation()
 
-    conversation[conversation_id].clear()
+    conversations[conversation_id].messages.clear()
     return jsonify({"success": True})
 
 
@@ -96,22 +112,20 @@ def send():
     message = data.get("message")
     conversation_id = data.get("conversation_id")
 
-    if conversation_id not in conversation:
-        conversation[conversation_id] = []
+    with conversation_lock:
+        if conversation_id not in conversations:
+            conversations[conversation_id] = Conversation()
 
-    if conversation_id not in active_modules:
-        active_modules[conversation_id] = "None"
-
-    conversation[conversation_id].append({"role": "user", "content": message})
+    conversations[conversation_id].messages.append({"role": "user", "content": message})
 
     def generate(message):
-        task_names = [active_modules[conversation_id]]
+        task_names = [conversations[conversation_id].active_module]
         generation_streamer = TextIteratorStreamer(
             tokenizer, skip_special_tokens=True, skip_prompt=True
         )
         generation_kwargs = dict(
             input_ids=tokenizer.apply_chat_template(
-                conversation[conversation_id],
+                conversations[conversation_id].messages,
                 return_tensors="pt",
                 add_generation_prompt=True,
             ).to(model.device),
@@ -135,10 +149,12 @@ def send():
             text += outputs
             yield outputs
 
-        conversation[conversation_id].append({"role": "assistant", "content": text})
+        conversations[conversation_id].messages.append(
+            {"role": "assistant", "content": text}
+        )
 
         with open(f"./logs/{conversation_id}.jsonl", "w") as f:
-            f.write(json.dumps(conversation[conversation_id]) + "\n")
+            f.write(json.dumps(conversations[conversation_id].messages) + "\n")
 
     response = Response(generate(message), mimetype="text/event-stream")
     return response
