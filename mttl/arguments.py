@@ -40,13 +40,7 @@ class MultiDefaultValue:
         if default != last_default:
             self.defaults[cls.__name__] = default
 
-    def resolve_default(self):
-        # if any of these attributes is required, we need to specify it in the config
-        return next(iter(self.defaults.values())) if len(self.defaults) == 1 else self
-
     def __repr__(self):
-        if len(self.defaults) == 1:
-            return repr(self.default)
         return f"MultiDefaultValue({self.defaults})"
 
 
@@ -72,16 +66,13 @@ def dataclasses_union(*dataclasses: Type[dataclass]) -> List:
             else:
                 new_fields[name][1].default.update(klass, field_.default, field_.type)
 
-    # We resolve the default if possible for each field, if we can't resolve default will be MultiDefaultValue
-    for k, (_, field_instance) in new_fields.items():
-        field_instance.default = field_instance.default.resolve_default()
-
     return [(name,) + field_info for name, field_info in new_fields.items()]
 
 
 def create_config_class_from_args(config_class, args):
     """
-    Load a dataclass from the arguments.
+    Load a dataclass from the arguments. We don't include field names that were not set,
+    i.e. that were MultiDefaultValue.
     """
     kwargs = {
         f.name: getattr(args, f.name)
@@ -263,60 +254,46 @@ class AutoArgs(AutoSerializable):
             return cls.fromdict_legacy(data)
 
 
-class MetaRegistrable(type):
-    """
-    Meta class that creates a new dataclass containing fields all the config dataclasses
-    in this registrable.
-    """
-
-    def __new__(cls, name, bases, attrs, registrable: Registrable = None):
+def dataclass_from_registrable(registrable):
+    def decorator(cls):
         module_name, class_name = registrable.rsplit(".", 1)
         module = importlib.import_module(module_name)
-
         registrable_class = getattr(module, class_name)
 
-        # make the union of all the fields across the registered configs
+        # Make the union of all the fields across the registered configs
         to_tuples = dataclasses_union(*registrable_class.registered_configs())
 
-        # create new dataclass with the union of all the fields
-        new_cls = make_dataclass(name, to_tuples, bases=(Args,), init=False)
+        # Create new dataclass with the union of all the fields
+        new_cls = make_dataclass(cls.__name__, to_tuples, bases=(Args,), init=False)
         new_cls.registrable_class = registrable_class
 
-        # set functions to be had in the new baby dataclass
-        for k, v in {
-            **attrs,
-        }.items():
-            setattr(new_cls, k, v)
+        # Copy attributes and methods from the original class
+        for k, v in cls.__dict__.items():
+            if not k.startswith("__"):
+                setattr(new_cls, k, v)
+
         return new_cls
 
+    return decorator
 
-@dataclass
-class DataArgs(
-    metaclass=MetaRegistrable, registrable="mttl.datamodule.base.DataModule"
-):
+
+@dataclass_from_registrable("mttl.datamodule.base.DataModule")
+class DataArgs(Args):
     pass
 
 
-@dataclass
-class SelectorArgs(
-    metaclass=MetaRegistrable,
-    registrable="mttl.models.containers.selectors.base.Selector",
-):
+@dataclass_from_registrable("mttl.models.containers.selectors.base.Selector")
+class SelectorArgs(Args):
     pass
 
 
-@dataclass
-class ModifierArgs(
-    metaclass=MetaRegistrable, registrable="mttl.models.modifiers.base.Modifier"
-):
+@dataclass_from_registrable("mttl.models.modifiers.base.Modifier")
+class ModifierArgs(Args):
     pass
 
 
-@dataclass
-class TransformArgs(
-    metaclass=MetaRegistrable,
-    registrable="mttl.models.library.library_transforms.LibraryTransform",
-):
+@dataclass_from_registrable("mttl.models.library.library_transforms.LibraryTransform")
+class TransformArgs(Args):
     pass
 
 
