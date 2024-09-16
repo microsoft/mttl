@@ -19,6 +19,9 @@ class Registrable:
                 "Registering %s: adding %s as %s", cls.__name__, subclass.__name__, name
             )
             registry[name] = (subclass, config_cls)
+
+            # add the registered name to the subclass as a field
+            subclass.registered_name = name
             return subclass
 
         return add_to_registry
