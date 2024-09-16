@@ -1,8 +1,8 @@
 import dataclasses
 import itertools
 from collections import defaultdict
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Union
+from dataclasses import dataclass, make_dataclass
+from typing import Any, Dict, List, Optional, Type, Union
 
 import numpy as np
 import torch
@@ -97,6 +97,9 @@ class DatasetConfig:
     pack_sequences: bool = False  # True
     pad_to_multiple_of: int = 8
     max_seq_per_pack: int = 4
+    task_id_field: str = "task_id"
+    task_name_field: str = "task_name"
+    task_source_field: str = "task_source"
 
 
 class PackedMixin:
@@ -203,6 +206,13 @@ class DefaultCollator(PackedMixin):
     train_on_inputs: bool = False
     task_to_id: dict = None
     add_eos_to_targets: bool = True
+    task_id_field: str = (
+        "task_id"  # where to read task id information from in the batch
+    )
+    task_name_field: str = (
+        "task_name"  # where to read task name information from in the batch
+    )
+    task_source_field: str = "task_source"
     collate_extra_fields: Optional[List] = None
 
     def enforce_eos(self, targets):
@@ -414,9 +424,9 @@ class DefaultCollator(PackedMixin):
         # Otherwise process as expected
         sources = [b["source"] for b in batch]
         labels = [b["target"] for b in batch]
-        task_ids = [b.get("task_id", None) for b in batch]
-        task_names = [b.get("task_name", None) for b in batch]
-        task_sources = [b.get("task_source", None) for b in batch]
+        task_ids = [b.get(self.task_id_field, None) for b in batch]
+        task_names = [b.get(self.task_name_field, None) for b in batch]
+        task_sources = [b.get(self.task_source_field, None) for b in batch]
 
         output_batch = (
             self.prepare_inputs_for_gpt_family(sources, labels)
@@ -528,7 +538,9 @@ def subsample_dst(dataset, subsample: int, rng: torch.Generator = None):
 
 
 class DataModule(LightningDataModule, Registrable):
-    # if you want the default collator to return extra fields, you can set this to the list of fields
+    # default collator class
+    collate_class: Type = DefaultCollator
+    # if you want the collator to return extra fields, you can set this to the list of fields
     collate_extra_fields: List[str] = None
 
     def train_dataloader(self, subsample=None):
@@ -581,7 +593,7 @@ class DataModule(LightningDataModule, Registrable):
 
     @property
     def collate_fn(self):
-        return DefaultCollator(
+        return self.collate_class(
             tokenizer=self.tokenizer,
             padding="longest",
             max_input_length=self.config.max_input_length,
@@ -593,12 +605,16 @@ class DataModule(LightningDataModule, Registrable):
             train_on_inputs=self.config.train_on_inputs,
             add_eos_to_targets=self.config.add_eos_to_targets,
             task_to_id=self.task_to_id,
+            task_name_field=self.config.task_name_field,
+            task_id_field=self.config.task_id_field,
+            task_source_field=self.config.task_source_field,
             collate_extra_fields=self.collate_extra_fields,
         )
 
     def print_infos(self):
         logger.info("Dataset name: %s", self.config.dataset)
         logger.info("Reader class: %s", self.__class__.__name__)
+
         if self.train_dataset is not None and len(self.train_dataset) > 0:
             logger.info("Training steps: %s" % len(self.train_dataloader()))
             logger.info("Training samples: %s" % len(self.train_dataset))
@@ -619,7 +635,9 @@ class DataModule(LightningDataModule, Registrable):
     def task_to_id(self):
         return self._task_to_id
 
-    def create_train_valid_split(self, dataset, validation_portion=None):
+    def create_train_valid_split(
+        self, dataset: ArrowDataset, validation_portion: float = 0.05
+    ):
         # always use the same split for the dataset
         validation_portion = validation_portion or self.config.validation_portion
 
@@ -629,17 +647,10 @@ class DataModule(LightningDataModule, Registrable):
             )
             return dataset, None
 
-        n_tr_samples = int(len(dataset) * (1 - validation_portion))
-
-        train_dataset, dev_dataset = torch.utils.data.random_split(
-            dataset,
-            [
-                n_tr_samples,
-                len(dataset) - n_tr_samples,
-            ],
-            generator=self.rng,
+        split_dataset = dataset.train_test_split(
+            test_size=validation_portion, seed=self.rng.seed()
         )
-        return train_dataset, dev_dataset
+        return split_dataset["train"], split_dataset["test"]
 
     def subsample_dataset(self, dataset, n_samples, per_task=False):
         """
@@ -669,7 +680,7 @@ class DataModule(LightningDataModule, Registrable):
         # make this deterministic to always sample the same subset
         if isinstance(dataset, ArrowDataset):
             if per_task:
-                task_names = dataset.unique("task_name")
+                task_names = dataset.unique(self.config.task_name_field)
                 subsampled_dataset = []
                 for i, task_name in enumerate(task_names):
                     logger.info(
@@ -678,7 +689,9 @@ class DataModule(LightningDataModule, Registrable):
                     task_idxs = torch.tensor(
                         [
                             index
-                            for index, value in enumerate(dataset["task_name"])
+                            for index, value in enumerate(
+                                dataset[self.config.task_name_field]
+                            )
                             if value == task_name
                         ]
                     )
@@ -686,7 +699,12 @@ class DataModule(LightningDataModule, Registrable):
                     task_idxs = task_idxs[idxs]
                     task_dataset = dataset.select(task_idxs)
                     subsampled_dataset.append(task_dataset)
-                    assert all([t == task_name for t in task_dataset["task_name"]])
+                    assert all(
+                        [
+                            t == task_name
+                            for t in task_dataset[self.config.task_name_field]
+                        ]
+                    )
                 subsampled_dataset = concatenate_datasets(subsampled_dataset)
             else:
                 idxs = get_dst_idxs_sampled(n_samples, total_size)
@@ -729,7 +747,6 @@ class DataModule(LightningDataModule, Registrable):
         collate_fn_ = dataclasses.replace(self.collate_fn)
         collate_fn_.pad_to_multiple_of = 1
         collate_fn_.padding = "longest"
-        dataset_columns = dataset.column_names
 
         def collate_fn_wrapper(batch):
             out = collate_fn_([batch])
@@ -739,7 +756,6 @@ class DataModule(LightningDataModule, Registrable):
             collate_fn_wrapper,
             batched=False,
             num_proc=20,
-            remove_columns=dataset_columns,
         )
         return dataset
 
@@ -770,7 +786,7 @@ class DataModule(LightningDataModule, Registrable):
                     elif isinstance(v, list):
                         container[k] += v
                     else:
-                        raise ValueError(f"Unknown type {type(v)}")
+                        raise ValueError(f"Unknown type {type(v)} for key {k}.")
 
                 container["seq_lens"] += [len(example["input_ids"])]
 
@@ -822,7 +838,6 @@ class DataModule(LightningDataModule, Registrable):
             batch_size=10_000,
             remove_columns=list(dataset.features),
         )
-
         return dataset
 
     def post_setup_dataset(self):
@@ -868,6 +883,9 @@ class MultiChoiceDataModule(DataModule):
             train_on_inputs=self.config.train_on_inputs,
             task_to_id=self.task_to_id,
             add_eos_to_targets=self.config.add_eos_to_targets,
+            task_name_field=self.config.task_name_field,
+            task_id_field=self.config.task_id_field,
+            task_source_field=self.config.task_source_field,
         )
 
 
@@ -892,10 +910,14 @@ class MultiChoiceSourceDataModule(DataModule):
             task_to_id=self.task_to_id,
             multisource=True,
             add_eos_to_targets=self.config.add_eos_to_targets,
+            task_name_field=self.config.task_name_field,
+            task_id_field=self.config.task_id_field,
+            task_source_field=self.config.task_source_field,
         )
 
 
 def get_datamodule(args, for_generation=False, dataset_override=None):
+    from mttl.arguments import DataArgs
     from mttl.datamodule.arc_data_module import ArcDataConfig, ArcMultiChoiceDataModule
     from mttl.datamodule.codex_data_module import CodexDataConfig, CodexDataModule
     from mttl.datamodule.hellaswag_data_module import (
@@ -925,6 +947,14 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         WinograndeDataConfig,
         WinograndeMultiChoiceDataModule,
     )
+
+    # if we have a DataArgs object, we can directly create the datamodule
+    if isinstance(args, DataArgs) and args.dataset_type is not None:
+        dataset_config = args.dataset_config
+
+        return DataModule.get_class_by_config_class(type(dataset_config))(
+            dataset_config, for_generation=for_generation
+        )
 
     # refactor all the common arguments below into a dict common kwargs
     dataset = args.dataset if not dataset_override else dataset_override
