@@ -40,13 +40,7 @@ class MultiDefaultValue:
         if default != last_default:
             self.defaults[cls.__name__] = default
 
-    def resolve_default(self):
-        # if any of these attributes is required, we need to specify it in the config
-        return next(iter(self.defaults.values())) if len(self.defaults) == 1 else self
-
     def __repr__(self):
-        if len(self.defaults) == 1:
-            return repr(self.default)
         return f"MultiDefaultValue({self.defaults})"
 
 
@@ -72,16 +66,15 @@ def dataclasses_union(*dataclasses: Type[dataclass]) -> List:
             else:
                 new_fields[name][1].default.update(klass, field_.default, field_.type)
 
-    # We resolve the default if possible for each field, if we can't resolve default will be MultiDefaultValue
-    for k, (_, field_instance) in new_fields.items():
-        field_instance.default = field_instance.default.resolve_default()
-
     return [(name,) + field_info for name, field_info in new_fields.items()]
 
 
 def create_config_class_from_args(config_class, args):
     """
     Load a dataclass from the arguments.
+
+    We skip MultiDefaultValue fields (i.e. fields user has not overridden)
+    such that each config class can use their own default values.
     """
     kwargs = {
         f.name: getattr(args, f.name)
