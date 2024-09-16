@@ -420,6 +420,7 @@ class DefaultCollator:
     def __call__(self, batch):
         if "input_ids" in batch[0]:
             return self.packed_collate(batch)
+
         # Otherwise process as expected
         sources = [b["source"] for b in batch]
         labels = [b["target"] for b in batch]
