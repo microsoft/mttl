@@ -128,16 +128,15 @@ def benchmark(s, h, o, sp, provider):
     assert W.sum() > 0
     assert W_row_sparse.sum() == W.sum()
 
-
     quantiles = [0.5, 0.2, 0.8]
     if provider == "naive":
         ms, min_ms, max_ms = tn.testing.do_bench(
             lambda: torch_linear(X, WT), quantiles=quantiles
         )
-    if provider == "stk":      
+    if provider == "stk":
         if BLOCK_SIZE != 128 or dtype != torch.float16:
             ms, min_ms, max_ms = 0, 0, 0
-        else:                      
+        else:
             W_stk = stk.ops.to_sparse(W, blocking=BLOCK_SIZE)
             W_stk.validate()
             ms, min_ms, max_ms = tn.testing.do_bench(

@@ -305,7 +305,11 @@ class SparseLinearFunction_SP_ADD(Function):
         dX = grad_output @ weights
         # this line is from here: https://github.com/IST-DASLab/peft-rosa/blob/810da6a13f7bf3f38bc10778d589a4342351e846/src/peft/tuners/rosa/rosa_functions.py#L107
         dsW = sddmm(
-            row_offs, row_idx, col_idx, grad_output.T.contiguous(), input.T.contiguous()
+            row_offs,
+            row_idx,
+            col_idx,
+            grad_output.mT.contiguous(),
+            input.mT.contiguous(),
         )
         return dX, None, None, dsW, None, None, None
 

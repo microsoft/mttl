@@ -1,11 +1,13 @@
 import logging
 import time
 
+import pandas as pd
 import torch
 from pytorch_lightning import seed_everything
 
 from mttl.logging import logger
 from mttl.models.modifiers import modify_transformer
+from mttl.models.modifiers.lora import LoRAConfig
 from mttl.models.modifiers.sparse_mask import (
     MaskedLinear,
     ScatteredSparseLinearModule,
@@ -15,12 +17,21 @@ from mttl.models.modifiers.sparse_mask import (
 from mttl.models.utils import model_loader_helper, transfer_batch_to_device
 
 logger.setLevel(logging.ERROR)
+model_name = "EleutherAI/gpt-neo-125m"
+keep_ratio = 0.002
+block_size = 64
+mask_updater = None
+modify_layers = "q_proj|v_proj|k_proj"  # ,".*Wqkv.*|.*out_proj.*"
 
 
 # Define input sizes and batch sizes for testing
 max_seq_len = 1024
 bs = 2
 vocab_size = 32000
+
+table = pd.DataFrame(
+    columns=["Runtime", "Allocated Memory", "Reserved Memory", "Number of Parameters"]
+)
 
 
 def dummy_batch():
@@ -74,20 +85,15 @@ def benchmark_module(module, runs=100):
     return avg_runtime, memory_allocated, memory_reserved
 
 
-#####
-# Benchmarking BlcockSparseLinearModule
+############################################################################################################################################################
+# Benchmarking LoRA
 
 seed_everything(0)
-adapter_config = SparseMaskConfig(
-    modify_layers=".*Wqkv.*|.*out_proj.*",
-    sps_impl="triton_block_sparse",
-    sps_type="block_sparse",
-    keep_ratio=0.05,
-    mask_updater=None,
-    n_steps_in_mask_update=1,
-)
+
+adapter_config = LoRAConfig(modify_layers=modify_layers, lora_rank=8)
+model = None
 model = model_loader_helper(
-    "phi-2",
+    model_name,
     bf16=True,
     fp16=False,
     load_in_4bit=False,
@@ -98,27 +104,71 @@ modify_transformer(model, adapter_config)
 model.to("cuda")
 
 
+sparse_runtime, sparse_alloc, sparse_reserved = benchmark_module(model, runs=50)
+n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+print(
+    f"LoRA - Runtime: {sparse_runtime:.6f}s, Allocated Memory: {sparse_alloc / 1e6:.2f}MB, Reserved Memory: {sparse_reserved / 1e6:.2f}MB"
+)
+table.loc["LoRA"] = [sparse_runtime, sparse_alloc, sparse_reserved, n_params]
+
+#################################################################################################################################################################
+# Benchmarking BlcockSparseLinearModule
+
+seed_everything(0)
+adapter_config = SparseMaskConfig(
+    modify_layers=modify_layers,
+    sps_impl="triton_block_sparse",
+    sps_type="block_sparse",
+    keep_ratio=keep_ratio,
+    mask_updater=mask_updater,
+    n_steps_in_mask_update=1,
+    block_size=block_size,
+)
+model = None
+model = model_loader_helper(
+    model_name,
+    bf16=True,
+    fp16=False,
+    load_in_4bit=False,
+    load_in_8bit=False,
+    device_map="cpu",
+)
+modify_transformer(model, adapter_config)
+model.to("cuda")
+n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
 # Run benchmarks
-sparse_runtime, sparse_alloc, sparse_reserved = benchmark_module(model, runs=10)
+sparse_runtime, sparse_alloc, sparse_reserved = benchmark_module(model, runs=50)
 print(
     f"BlockSparseLinearModule with block sparsity - Runtime: {sparse_runtime:.6f}s, Allocated Memory: {sparse_alloc / 1e6:.2f}MB, Reserved Memory: {sparse_reserved / 1e6:.2f}MB"
 )
+table.loc["BlockSparseLinearModule"] = [
+    sparse_runtime,
+    sparse_alloc,
+    sparse_reserved,
+    n_params,
+]
 
-#####
+
+#################################################################################################################################################################
 # Benchmarking SparseLinearModule
 
 
 seed_everything(0)
 adapter_config = SparseMaskConfig(
-    modify_layers=".*Wqkv.*|.*out_proj.*",
+    modify_layers=modify_layers,
     sps_impl="sp_add+sp_mm",
     sps_type="regular_sparse",
-    keep_ratio=0.05,
-    mask_updater=None,
+    keep_ratio=keep_ratio,
+    mask_updater=mask_updater,
     n_steps_in_mask_update=1,
+    block_size=block_size,
 )
+model = None
 model = model_loader_helper(
-    "phi-2",
+    model_name,
     bf16=True,
     fp16=False,
     load_in_4bit=False,
@@ -127,25 +177,38 @@ model = model_loader_helper(
 )
 modify_transformer(model, adapter_config)
 model.to("cuda")
+n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
 # Run benchmarks
-sparse_runtime, sparse_alloc, sparse_reserved = benchmark_module(model, runs=10)
+sparse_runtime, sparse_alloc, sparse_reserved = benchmark_module(model, runs=50)
 print(
     f"SparseLinearModule (spops) with regular sparsity - Runtime: {sparse_runtime:.6f}s, Allocated Memory: {sparse_alloc / 1e6:.2f}MB, Reserved Memory: {sparse_reserved / 1e6:.2f}MB"
 )
+table.loc["SparseLinearModule (reg sp.)"] = [
+    sparse_runtime,
+    sparse_alloc,
+    sparse_reserved,
+    n_params,
+]
+
+############################################################################################################################################################
+# Benchmarking SparseLinearModule with block sparsity
+
 
 seed_everything(0)
 adapter_config = SparseMaskConfig(
-    modify_layers=".*Wqkv.*|.*out_proj.*",
+    modify_layers=modify_layers,
     sps_impl="sp_add+sp_mm",
     sps_type="block_sparse",
-    keep_ratio=0.05,
-    mask_updater=None,
+    keep_ratio=keep_ratio,
+    mask_updater=mask_updater,
     n_steps_in_mask_update=1,
+    block_size=block_size,
 )
+model = None
 model = model_loader_helper(
-    "phi-2",
+    model_name,
     bf16=True,
     fp16=False,
     load_in_4bit=False,
@@ -154,27 +217,35 @@ model = model_loader_helper(
 )
 modify_transformer(model, adapter_config)
 model.to("cuda")
+n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-sparse_runtime, sparse_alloc, sparse_reserved = benchmark_module(model, runs=10)
+sparse_runtime, sparse_alloc, sparse_reserved = benchmark_module(model, runs=50)
 print(
     f"SparseLinearModule (spops) with blcok sparsity - Runtime: {sparse_runtime:.6f}s, Allocated Memory: {sparse_alloc / 1e6:.2f}MB, Reserved Memory: {sparse_reserved / 1e6:.2f}MB"
 )
+table.loc["SparseLinearModule (block sp.)"] = [
+    sparse_runtime,
+    sparse_alloc,
+    sparse_reserved,
+    n_params,
+]
 
-
-#####
-# Benchmarking MaskedLinear and SparseLinearModule
+#################################################################################################################################################################
+#  Benchmarking MaskedLinear with regular sparsity
 
 seed_everything(0)
 adapter_config = SparseMaskConfig(
-    modify_layers=".*Wqkv.*|.*out_proj.*",
+    modify_layers=modify_layers,
     sps_impl="masked_linear",
     sps_type="regular_sparse",
-    keep_ratio=0.05,
-    mask_updater=None,
+    keep_ratio=keep_ratio,
+    mask_updater=mask_updater,
     n_steps_in_mask_update=1,
+    block_size=block_size,
 )
+model = None
 model = model_loader_helper(
-    "phi-2",
+    model_name,
     bf16=True,
     fp16=False,
     load_in_4bit=False,
@@ -183,25 +254,37 @@ model = model_loader_helper(
 )
 modify_transformer(model, adapter_config)
 model.to("cuda")
+n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 scattered_runtime, scattered_alloc, scattered_reserved = benchmark_module(
-    model, runs=10
+    model, runs=50
 )
 print(
     f"MaskedLinear with regular sparsity - Runtime: {scattered_runtime:.6f}s, Allocated Memory: {scattered_alloc / 1e6:.2f}MB, Reserved Memory: {scattered_reserved / 1e6:.2f}MB"
 )
+table.loc["MaskedLinear (reg. sp)"] = [
+    scattered_runtime,
+    scattered_alloc,
+    scattered_reserved,
+    n_params,
+]
+
+############################################################################################################################################################
+# Benchmarking MaskedLinear with block sparsity
 
 seed_everything(0)
 adapter_config = SparseMaskConfig(
-    modify_layers=".*Wqkv.*|.*out_proj.*",
+    modify_layers=modify_layers,
     sps_impl="masked_linear",
     sps_type="block_sparse",
-    keep_ratio=0.05,
-    mask_updater=None,
+    keep_ratio=keep_ratio,
+    mask_updater=mask_updater,
     n_steps_in_mask_update=1,
+    block_size=block_size,
 )
+model = None
 model = model_loader_helper(
-    "phi-2",
+    model_name,
     bf16=True,
     fp16=False,
     load_in_4bit=False,
@@ -210,29 +293,38 @@ model = model_loader_helper(
 )
 modify_transformer(model, adapter_config)
 model.to("cuda")
+n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 scattered_runtime, scattered_alloc, scattered_reserved = benchmark_module(
-    model, runs=10
+    model, runs=50
 )
 print(
     f"MaskedLinear with block sparsity - Runtime: {scattered_runtime:.6f}s, Allocated Memory: {scattered_alloc / 1e6:.2f}MB, Reserved Memory: {scattered_reserved / 1e6:.2f}MB"
 )
+table.loc["MaskedLinear (block sp.)"] = [
+    scattered_runtime,
+    scattered_alloc,
+    scattered_reserved,
+    n_params,
+]
 
-#####
+#################################################################################################################################################################
 # Benchmarking ScatteredSparseLinearModule
 
 
 seed_everything(0)
 adapter_config = SparseMaskConfig(
-    modify_layers=".*Wqkv.*|.*out_proj.*",
+    modify_layers=modify_layers,
     sps_impl="scattered",
     sps_type="block_sparse",
-    keep_ratio=0.05,
-    mask_updater=None,
+    keep_ratio=keep_ratio,
+    mask_updater=mask_updater,
     n_steps_in_mask_update=1,
+    block_size=block_size,
 )
+model = None
 model = model_loader_helper(
-    "phi-2",
+    model_name,
     bf16=True,
     fp16=False,
     load_in_4bit=False,
@@ -241,25 +333,38 @@ model = model_loader_helper(
 )
 modify_transformer(model, adapter_config)
 model.to("cuda")
+n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 scattered_runtime, scattered_alloc, scattered_reserved = benchmark_module(
-    model, runs=10
+    model, runs=50
 )
 print(
     f"ScatteredSparseLinearModule with block sparsity - Runtime: {scattered_runtime:.6f}s, Allocated Memory: {scattered_alloc / 1e6:.2f}MB, Reserved Memory: {scattered_reserved / 1e6:.2f}MB"
 )
+table.loc["ScatteredSparseLinearModule (block sp.)"] = [
+    scattered_runtime,
+    scattered_alloc,
+    scattered_reserved,
+    n_params,
+]
+
+############################################################################################################################################################
+# Benchmarking ScatteredSparseLinearModule with regular sparsity
+
 
 seed_everything(0)
 adapter_config = SparseMaskConfig(
-    modify_layers=".*Wqkv.*|.*out_proj.*",
+    modify_layers=modify_layers,
     sps_impl="scattered",
     sps_type="regular_sparse",
-    keep_ratio=0.05,
-    mask_updater=None,
+    keep_ratio=keep_ratio,
+    mask_updater=mask_updater,
     n_steps_in_mask_update=1,
+    block_size=block_size,
 )
+model = None
 model = model_loader_helper(
-    "phi-2",
+    model_name,
     bf16=True,
     fp16=False,
     load_in_4bit=False,
@@ -268,10 +373,19 @@ model = model_loader_helper(
 )
 modify_transformer(model, adapter_config)
 model.to("cuda")
+n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 scattered_runtime, scattered_alloc, scattered_reserved = benchmark_module(
-    model, runs=10
+    model, runs=50
 )
 print(
     f"ScatteredSparseLinearModule with regular sparsity - Runtime: {scattered_runtime:.6f}s, Allocated Memory: {scattered_alloc / 1e6:.2f}MB, Reserved Memory: {scattered_reserved / 1e6:.2f}MB"
 )
+table.loc["ScatteredSparseLinearModule (reg sp.)"] = [
+    scattered_runtime,
+    scattered_alloc,
+    scattered_reserved,
+    n_params,
+]
+
+print(table)
