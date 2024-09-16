@@ -2,6 +2,8 @@ import math
 import os
 
 import pytest
+import torch
+import torch.nn as nn
 from pytorch_lightning import seed_everything
 
 from mttl.models.modifiers import modify_transformer
@@ -10,6 +12,7 @@ from mttl.models.modifiers.sparse_mask import (
     ScatteredSparseLinearModule,
     SNIPMaskUpdateWrapper,
     SparseLinearModule,
+    SparseMaskAdapter,
     SparseMaskConfig,
 )
 
@@ -218,6 +221,55 @@ def test_snip_updater(dummy_batch):
             parent_module = modules[parent_name]
             assert isinstance(parent_module, SNIPMaskUpdateWrapper)
             assert parent_module._mask_update_steps == 1
+
+
+@pytest.mark.parametrize(
+    "sps_type", ["sp_add+sp_mm", "scattered", "masked_linear", "triton_block_sparse"]
+)
+def test_snip_weight_accumulation(sps_type):
+    os.environ["CONFIG_PATH"] = "./"
+
+    seed_everything(0)
+    from transformers.models.llama.configuration_llama import LlamaConfig
+
+    adapter_config = SparseMaskConfig(
+        sps_impl=sps_type,
+        sps_type="block_sparse",
+        keep_ratio=0.02,
+        block_size=10,
+        mask_updater="snip",
+    )
+    snip_module = SparseMaskAdapter(adapter_config, nn.Linear(100, 100)).sparse_layer
+
+    assert snip_module.accumulated_sparse_weights.sum() == 0.0
+    sparse_weights = snip_module.sparse_layer.sparse_weights
+    sparse_weights.requires_grad = False
+    idxs_perm = torch.randperm(sparse_weights.flatten().shape[0])
+    idxs1 = idxs_perm[:100]
+    sparse_weights.flatten()[idxs1] += 1.0
+    assert sparse_weights.sum() == 100.0
+
+    assert snip_module.accumulated_sparse_weights.sum() == 0.0
+    snip_module.switch_to_mask_update_modus()
+    assert snip_module.accumulated_sparse_weights.sum() == 100.0
+
+    idxs2 = idxs_perm[100:200]
+    sparse_weights.flatten()[idxs2] += 1.0
+    assert sparse_weights.sum() == 200.0
+    snip_module.switch_to_mask_update_modus()
+    assert snip_module.accumulated_sparse_weights.sum() == 200.0
+
+    selected_indices = torch.zeros_like(snip_module.accumulated_sparse_weights)
+    # half already existing and half new
+    _, idxs = torch.topk(
+        snip_module.accumulated_sparse_weights.flatten(), 300, sorted=True
+    )
+    selected_indices.flatten()[idxs[100:]] = 1.0
+    assert selected_indices.sum() == 200.0
+    snip_module._selected_indices = selected_indices.float().to_sparse_coo()
+    snip_module.sparse_layer.sparse_weights *= 0.0
+    snip_module.switch_to_weights_update_modus()
+    assert snip_module.sparse_layer.sparse_weights.sum() == 100.0
 
 
 if __name__ == "__main__":

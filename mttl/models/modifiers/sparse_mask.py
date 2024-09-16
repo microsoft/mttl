@@ -311,7 +311,9 @@ class MaskedLinear(SparseLinear, nn.Module):
         return (
             self.base_weight,
             self.base_bias,
-            csr_matrix(self.sparse_weights.data.cpu().float(), shape=self.sparse_weights.shape),
+            csr_matrix(
+                self.sparse_weights.data.cpu().float(), shape=self.sparse_weights.shape
+            ),
             self.sparse_bias,
         )
 
@@ -319,8 +321,8 @@ class MaskedLinear(SparseLinear, nn.Module):
         self.binary_mask = torch.tensor(
             mask.toarray(), device=self.base_weight.device, dtype=self.base_weight.dtype
         )
-        r,c = get_2d_indices_from_csr_matrix(mask)
-        self.sparse_weights.data[r,c] = torch.tensor(
+        r, c = get_2d_indices_from_csr_matrix(mask)
+        self.sparse_weights.data[r, c] = torch.tensor(
             mask.data, dtype=self.base_weight.dtype, device=self.base_weight.device
         )
 
@@ -568,17 +570,6 @@ class SNIPMaskUpdateWrapper(MaskUpdatWrapper):
             sparse_layer.base_weight, device="cpu"
         )
 
-    # make sure accumulated_sparse_weights are on CPU
-    def cuda(self, *args, **kwargs):
-        super().cuda(*args, **kwargs)
-        self.accumulated_sparse_weights = self.accumulated_sparse_weights.cpu()
-        return self
-
-    def to(self, *args, **kwargs):
-        super().to(*args, **kwargs)
-        self.accumulated_sparse_weights = self.accumulated_sparse_weights.cpu()
-        return self
-
     def switch_to_mask_update_modus(self):
         self.updating_the_mask = True
         self._selected_indices = None
@@ -632,8 +623,9 @@ class SNIPMaskUpdateWrapper(MaskUpdatWrapper):
         self.sparse_layer_weights, self.sparse_layer_biases = None, None
         # update the mask of the sparse layer
         # SNIP sets the new weights to zeros but weights that have been learned in the past are kept
-        new_weights = torch_coo_to_scipy_csr(self.selected_params) * 0.0
+        new_weights = torch_coo_to_scipy_csr(self.selected_params)
         r, c = get_2d_indices_from_csr_matrix(new_weights)
+        new_weights *= 0.0
         new_weights[r, c] = self.accumulated_sparse_weights[r, c].float()
         self.sparse_layer.reset_sparse_weights(new_weights)
         self._selected_indices = None
