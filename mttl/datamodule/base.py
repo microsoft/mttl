@@ -186,7 +186,7 @@ class PackedMixin:
 
 
 @dataclass
-class DefaultCollator:
+class DefaultCollator(PackedMixin):
     """Simple collator
 
     Converts a batch of examples into a batch of inputs and labels for a sequence to sequence task.
