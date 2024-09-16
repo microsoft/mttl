@@ -5,19 +5,10 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 from scipy.sparse import csr_matrix
+from torch import nn
 from triton.ops.blocksparse.matmul import dsd_lut, sdd_lut
 
 from mttl.logging import logger
-
-try:
-    from spops import csr_add
-except ImportError:
-    logger.info(
-        "spops not available. You can install it with `pip install -e 'git+https://github.com/IST-DASLab/spops.git'"
-    )
-
-from torch import nn
-
 from mttl.models.modifiers.base import Modifier, ModifierConfig, ModifyMixin
 from mttl.models.modifiers.sparse_utils.utils import (
     BlcokSparseLinearFunction_SP_ADD,
