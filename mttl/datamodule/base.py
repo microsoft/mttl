@@ -661,7 +661,7 @@ class DataModule(LightningDataModule, Registrable):
                     int(len(dataset) * (1 - validation_portion)),
                     int(len(dataset) * validation_portion),
                 ],
-                seed=self.rng,
+                generator=self.rng,
             )
             return split_dataset[0], split_dataset[1]
         else:
