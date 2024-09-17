@@ -24,21 +24,23 @@ class MultiDefaultValue:
     different defaults for the same field. This class is used to store all the defaults and resolve them when needed.
     """
 
-    def __init__(self, cls: dataclass, name: str, field_type: Type[T], default: T):
-        self.name = name
+    def __init__(self, field_type: Type[T]):
         self.type = field_type
-        self.defaults: Dict[str, T] = {cls.__name__: default}
+        self.defaults: Dict[str, T] = {}
 
-    def update(self, cls, default, field_type):
+    def add_default(self, klass, value, field_type):
         if field_type != self.type:
             raise TypeError(
-                f"Field '{self.name}' has conflicting types: {field_type} and {self.type}."
+                f"Field has conflicting types: {field_type} and {self.type}."
             )
 
-        # Add a new default only if it's different from the last one
-        last_default = list(self.defaults.values())[-1]
-        if default != last_default:
-            self.defaults[cls.__name__] = default
+        if value not in set(self.defaults.values()):
+            self.defaults[klass.__name__] = value
+
+    def resolve(self):
+        if len(self.defaults) == 1:
+            return list(self.defaults.values())[0]
+        return self
 
     def __repr__(self):
         return f"MultiDefaultValue({self.defaults})"
@@ -60,14 +62,18 @@ def dataclasses_union(*dataclasses: Type[dataclass]) -> List:
 
             if field_.name not in new_fields:
                 # If the field does not exist, we create it
-                new_fields[name] = (field_.type, field(default=field_.default))
+                multi_default = MultiDefaultValue(field_.type)
             else:
-                # If the field already exists, we create a MultiDefaultValue object to store all the defaults
-                multi_default = MultiDefaultValue(
-                    klass, name, new_fields[name][0], new_fields[name][1].default
-                )
-                multi_default.update(klass, field_.default, field_.type)
-                new_fields[name] = (field_.type, field(default=multi_default))
+                multi_default = new_fields[name][1].default
+
+            multi_default.add_default(klass, field_.default, field_.type)
+            new_fields[name] = (multi_default.type, field(default=multi_default))
+
+    # try to resolve the MultiDefaultValue objects
+    for name, (field_type, field_info) in new_fields.items():
+        multi_default = field_info.default
+        if isinstance(multi_default, MultiDefaultValue):
+            new_fields[name] = (field_type, field(default=multi_default.resolve()))
 
     return [(name,) + field_info for name, field_info in new_fields.items()]
 
