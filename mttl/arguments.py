@@ -59,12 +59,15 @@ def dataclasses_union(*dataclasses: Type[dataclass]) -> List:
                 )
 
             if field_.name not in new_fields:
-                multi_default = MultiDefaultValue(
-                    klass, name, field_.type, field_.default
-                )
-                new_fields[name] = (field_.type, field(default=multi_default))
+                # If the field does not exist, we create it
+                new_fields[name] = (field_.type, field(default=field_.default))
             else:
-                new_fields[name][1].default.update(klass, field_.default, field_.type)
+                # If the field already exists, we create a MultiDefaultValue object to store all the defaults
+                multi_default = MultiDefaultValue(
+                    klass, name, new_fields[name][0], new_fields[name][1].default
+                )
+                multi_default.update(klass, field_.default, field_.type)
+                new_fields[name] = (field_.type, field(default=multi_default))
 
     return [(name,) + field_info for name, field_info in new_fields.items()]
 
