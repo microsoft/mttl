@@ -636,7 +636,9 @@ class DataModule(LightningDataModule, Registrable):
         return self._task_to_id
 
     def create_train_valid_split(
-        self, dataset: ArrowDataset, validation_portion: float = 0.05
+        self,
+        dataset: Union[ArrowDataset, torch.utils.data.Dataset],
+        validation_portion: float = 0.05,
     ):
         # always use the same split for the dataset
         validation_portion = validation_portion or self.config.validation_portion
@@ -647,10 +649,25 @@ class DataModule(LightningDataModule, Registrable):
             )
             return dataset, None
 
-        split_dataset = dataset.train_test_split(
-            test_size=validation_portion, seed=self.rng.seed()
-        )
-        return split_dataset["train"], split_dataset["test"]
+        if isinstance(dataset, ArrowDataset):
+            split_dataset = dataset.train_test_split(
+                test_size=validation_portion, generator=self.rng
+            )
+            return split_dataset["train"], split_dataset["test"]
+        elif isinstance(dataset, torch.utils.data.Dataset):
+            split_dataset = torch.utils.data.random_split(
+                dataset,
+                [
+                    int(len(dataset) * (1 - validation_portion)),
+                    int(len(dataset) * validation_portion),
+                ],
+                seed=self.rng,
+            )
+            return split_dataset[0], split_dataset[1]
+        else:
+            raise ValueError(
+                "Only ArrowDataset and torch.utils.data.Dataset are supported for train/valid split."
+            )
 
     def subsample_dataset(self, dataset, n_samples, per_task=False):
         """
