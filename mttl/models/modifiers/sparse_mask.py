@@ -37,7 +37,7 @@ class SparseMaskConfig(ModifierConfig):
     sps_impl: str = "sp_add+sp_mm"  # ['sp_add+sp_mm','scattered', 'masked_linear']
     selection_algorithm: str = "rigl"
     reselection_rate_policy: str = "linear"
-    mask_updater: str = None #"snip"
+    mask_updater: str = None  # "snip"
 
 
 class SparseLinear(ABC):
