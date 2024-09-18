@@ -19,7 +19,7 @@ def test_prefix_prompt_tuning():
     # build llama config
     from transformers.models.llama.configuration_llama import LlamaConfig
 
-    adapter_config = PromptTuningConfig(n_tasks=768, soft_prompt_learn_kv=True)
+    adapter_config = PromptTuningConfig(n_tasks=768)
     small_config = LlamaConfig(
         vocab_size=400,
         hidden_size=512,
@@ -95,7 +95,7 @@ def test_suffix_prompt_tuning():
     from transformers.models.llama.configuration_llama import LlamaConfig
 
     adapter_config = PromptTuningConfig(
-        n_tasks=768, soft_prompt_learn_kv=True, prompt_placement="suffix"
+        n_tasks=768, prompt_placement="suffix"
     )
     small_config = LlamaConfig(
         vocab_size=400,
