@@ -37,6 +37,7 @@ class SparseMaskConfig(ModifierConfig):
     sps_impl: str = "sp_add+sp_mm"  # ['sp_add+sp_mm','scattered', 'masked_linear']
     selection_algorithm: str = "rigl"
     reselection_rate_policy: str = "linear"
+    mask_updater: str = None #"snip"
 
 
 class SparseLinear(ABC):
@@ -445,37 +446,6 @@ class BlockSparseLinearModule(BlockSparseWeights, SparseLinear):
         )
 
 
-class BlockSparseLinearModuleAddDense(BlockSparseLinearModule):
-    def __init__(
-        self,
-        weight,
-        bias,
-        config: SparseMaskConfig,
-        parent_name=None,
-        use_sparse_bias=False,
-        sparse_func=None,
-    ):
-        super().__init__(
-            weight,
-            bias,
-            config,
-            parent_name,
-            use_sparse_bias,
-            sparse_func=BlcokSparseLinearFunction,
-        )
-        self.sparse_func = BlcokSparseLinearFunction
-
-    def forward(self, input):
-        dense_out = torch.nn.functional.linear(input, self.base_weight, self.base_bias)
-        sparse_out = self.sparse_func.apply(
-            input,
-            self.sparse_weights,
-            self.c_lut,
-            torch.tensor(self.block_size),
-        )
-        return dense_out + sparse_out
-
-
 class BlockSparseLinearModuleScatter(BlockSparseLinearModule):
     """
     Implements a block sparse linear layer with block sparse weights and sparse backprop.
@@ -874,11 +844,6 @@ class SparseMaskAdapter(Modifier, ModifyMixin):
             )
         elif self.sp_impl == "triton_block_sparse_scatter":
             sparse_layer: SparseLinear = BlockSparseLinearModuleScatter(
-                self.dense_layer_weight, self.dense_layer_bias, self.config
-            )
-        elif self.sp_impl == "dense+triton_block_sparse":
-            raise NotImplementedError
-            sparse_layer: SparseLinear = BlockSparseLinearModuleAddDense(
                 self.dense_layer_weight, self.dense_layer_bias, self.config
             )
         elif self.sp_impl == "scattered":
