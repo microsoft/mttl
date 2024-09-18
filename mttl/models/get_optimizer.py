@@ -100,11 +100,6 @@ def get_optimizer(model, args, no_decay=None):
             relative_step=args.adafactor_relative_step,
             warmup_init=args.adafactor_warmup_init,
         )
-    elif optim_name.lower() == "sftadamw":
-        from mttl.models.modifiers.sparse_utils.optimizers import SftAdamW
-
-        optimizer = SftAdamW(param_groups, eps=args.adam_epsilon)
-
     else:
         raise ValueError("Invalid Optimizer name %s" % optim_name)
 
