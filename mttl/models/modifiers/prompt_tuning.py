@@ -5,8 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from mttl.models.expert_context import InfoContainer
-from mttl.models.modifiers.base import Modifier
-from mttl.models.modifiers.kv_adapter import KVAdapterConfig
+from mttl.models.modifiers.base import Modifier, ModifierConfig
 
 PromptTuningRouting = None
 
@@ -315,7 +314,12 @@ def modify_with_prompt_tuning(soft_prompt_cls, embed_cls, transformer, config):
 
 
 @dataclass
-class PromptTuningConfig(KVAdapterConfig):
+class PromptTuningConfig(ModifierConfig):
+    model: str = "gpt-neo"
+    soft_prompt_length: int = 10
+    n_tasks: int = None
+    # This argument is deprecated, to ensure compatibility with `add_expert_to_transformer`
+    patch_last_k_layers: int = -1
     prompt_placement: str = "prefix"
 
 
