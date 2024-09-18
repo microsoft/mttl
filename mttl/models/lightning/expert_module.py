@@ -174,6 +174,9 @@ class MultiExpertModule(LightningTrainingMixin, LightningEfficientCheckpoint):
     def add_expert_instance(self, *args, **kwargs):
         return self.model.add_expert_instance(*args, **kwargs)
 
+    def add_experts_from_library(self, *args, **kwargs):
+        return self.model.add_experts_from_library(*args, **kwargs)
+
     def on_save_checkpoint(self, ckpt):
         super().on_save_checkpoint(ckpt)
 
