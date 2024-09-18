@@ -41,6 +41,7 @@ def _scatter_add_flattened(weights, weights_sparse, idxs):
     weights = updated_flat_weights.view_as(weights)
     return weights
 
+
 def get_2d_indices_from_csr_matrix(sparse_tensor: csr_matrix):
     """
     Given a csr_matrix, return the row and column indices of data elements.
@@ -410,8 +411,9 @@ class BlcokSparseLinearFunction_SP_ADD(Function):
         # pdb.set_trace()
         return dX, None, None, dsW, None, None, None, None, None
 
+
 class BlcokSparseLinearFunction_SP_SCATTER(Function):
-    
+
     @staticmethod
     # @torch.amp.custom_fwd
     def forward(
@@ -475,9 +477,10 @@ class BlcokSparseLinearFunction_SP_SCATTER(Function):
 
 
 class LinearWithSparseDelta(torch.autograd.Function):
-    '''
+    """
     copied from https://github.com/AlanAnsell/peft
-    '''
+    """
+
     @staticmethod
     def forward(ctx, input, weight, dv, di, bias, weight_grad_hook, compute_dtype):
         ctx.save_for_backward(input, weight, dv, di, bias)
@@ -501,7 +504,11 @@ class LinearWithSparseDelta(torch.autograd.Function):
             ).to(ctx.compute_dtype)
 
         grads = linear_sd.backward(
-            output_grad, input, weight, dv, di, 
+            output_grad,
+            input,
+            weight,
+            dv,
+            di,
             ctx.needs_input_grad[0],
             ctx.weight_grad_hook is not None or ctx.needs_input_grad[1],
             ctx.needs_input_grad[2],
@@ -512,7 +519,7 @@ class LinearWithSparseDelta(torch.autograd.Function):
             ctx.weight_grad_hook(grads[1])
 
         # need to return extra values corresponding to weight_grad_hook and compute_dtype
-        grads.extend([None, None]) 
+        grads.extend([None, None])
         if ctx.needs_input_grad[1]:
             return tuple(grads)
         else:

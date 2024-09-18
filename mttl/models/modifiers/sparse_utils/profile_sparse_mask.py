@@ -267,7 +267,6 @@ adapter_config = SparseMaskConfig(
 run_benchmark("Spiel Linear (reg. sp)", adapter_config)
 
 
-
 #################################################################################################################################################################
 #  Benchmarking MaskedLinear with regular sparsity
 

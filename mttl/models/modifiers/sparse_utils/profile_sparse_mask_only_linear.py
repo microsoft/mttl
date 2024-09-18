@@ -29,8 +29,8 @@ modify_layers = ".*q_proj.*|.*v_proj.*|.*k_proj.*"  # ".*q_proj.*|.*v_proj.*|.*k
 n_iters = 50
 
 in_d = 2048
-out_d = 8192 *2
-dtype=torch.bfloat16
+out_d = 8192 * 2
+dtype = torch.bfloat16
 
 # input sizes and batch sizes for testing
 max_seq_len = 1024
@@ -41,9 +41,11 @@ vocab_size = 32000
 def calculate_lora_parameters(input_dim, output_dim, rank):
     return input_dim * rank + output_dim * rank
 
+
 layer = nn.Linear(in_d, out_d)
 layer.weight.requires_grad_(False)
 layer.bias.requires_grad_(False)
+
 
 def find_hyperpaams():
     modules = {"linear": layer}
@@ -53,13 +55,9 @@ def find_hyperpaams():
 
     for name, module in modules.items():
         keep_ratio = (
-            n_blocks
-            * (block_size**2)
-            / (module.in_features * module.out_features)
+            n_blocks * (block_size**2) / (module.in_features * module.out_features)
         )
-        tot_sparse_params = (
-            module.in_features * module.out_features * keep_ratio
-        )
+        tot_sparse_params = module.in_features * module.out_features * keep_ratio
         lora_rank = 1
         for rank in range(1, module.in_features):
             lora_params = calculate_lora_parameters(
@@ -129,7 +127,7 @@ def benchmark_module(module, runs=100):
         # Forward pass timing
         torch.cuda.synchronize()
         start_time = time.time()
-        out = module(input_data)        
+        out = module(input_data)
         loss = torch.mean(out)
         torch.cuda.synchronize()
         forward_time = time.time() - start_time
@@ -175,12 +173,12 @@ def benchmark_module(module, runs=100):
 
 
 def run_benchmark(name, adapter_config):
-    seed_everything(0)   
+    seed_everything(0)
     if isinstance(adapter_config, LoRAConfig):
         module = LoRA(adapter_config, layer)
     else:
         module = SparseMaskAdapter(adapter_config, layer)
-    
+
     module.to("cuda").to(dtype)
     n_params = sum(p.numel() for p in module.parameters() if p.requires_grad)
 
@@ -288,7 +286,6 @@ adapter_config = SparseMaskConfig(
     block_size=block_size,
 )
 run_benchmark("Spiel Linear (reg. sp)", adapter_config)
-
 
 
 #################################################################################################################################################################

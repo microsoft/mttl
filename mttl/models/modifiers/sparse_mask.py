@@ -444,6 +444,7 @@ class BlockSparseLinearModule(BlockSparseWeights, SparseLinear):
             self.sparse_bias,
         )
 
+
 class BlockSparseLinearModuleAddDense(BlockSparseLinearModule):
     def __init__(
         self,
@@ -463,7 +464,7 @@ class BlockSparseLinearModuleAddDense(BlockSparseLinearModule):
             sparse_func=BlcokSparseLinearFunction,
         )
         self.sparse_func = BlcokSparseLinearFunction
-    
+
     def forward(self, input):
         dense_out = torch.nn.functional.linear(input, self.base_weight, self.base_bias)
         sparse_out = self.sparse_func.apply(
@@ -473,7 +474,7 @@ class BlockSparseLinearModuleAddDense(BlockSparseLinearModule):
             torch.tensor(self.block_size),
         )
         return dense_out + sparse_out
-        
+
 
 class BlockSparseLinearModuleScatter(BlockSparseLinearModule):
     """
@@ -488,10 +489,12 @@ class BlockSparseLinearModuleScatter(BlockSparseLinearModule):
         parent_name=None,
         use_sparse_bias=False,
         sparse_func=None,
-    ):  
-        super().__init__(weight, bias, config, parent_name, use_sparse_bias, sparse_func)
+    ):
+        super().__init__(
+            weight, bias, config, parent_name, use_sparse_bias, sparse_func
+        )
         self.sparse_func = BlcokSparseLinearFunction_SP_SCATTER
-        
+
         idxs = torch.tensor(
             np.array(self.twoD_indices),
             dtype=torch.int64,
@@ -500,7 +503,6 @@ class BlockSparseLinearModuleScatter(BlockSparseLinearModule):
         self.register_buffer(
             "idxs", idxs
         )  # will also sync the device to the device of the model
-
 
     def forward(self, input):
         bias = self.base_bias
@@ -523,7 +525,6 @@ class BlockSparseLinearModuleScatter(BlockSparseLinearModule):
             self.scipy_representation,
             self.sparse_bias,
         )
-
 
 
 class ScatteredSparseLinearModule(SparseWeights, SparseLinear):
@@ -874,7 +875,7 @@ class SparseMaskAdapter(Modifier, ModifyMixin):
         elif self.sp_impl == "triton_block_sparse_scatter":
             sparse_layer: SparseLinear = BlockSparseLinearModuleScatter(
                 self.dense_layer_weight, self.dense_layer_bias, self.config
-            )        
+            )
         elif self.sp_impl == "dense+triton_block_sparse":
             raise NotImplementedError
             sparse_layer: SparseLinear = BlockSparseLinearModuleAddDense(
