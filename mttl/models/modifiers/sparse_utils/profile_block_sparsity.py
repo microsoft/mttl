@@ -14,7 +14,7 @@ from mttl.models.modifiers.sparse_utils.utils import init_sparse_weights
 
 n_blocks = 4
 BLOCK_SIZE = 128
-dtype = torch.bfloat16
+dtype = torch.float16
 
 sequence_length = 1024
 hidden_size = 2048  # phi2 size
