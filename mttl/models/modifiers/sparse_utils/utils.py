@@ -1,17 +1,26 @@
 import math
 import os
 
-import linear_sd
 import numpy as np
 import torch
 import torch.nn.functional as F
 from scipy.sparse import csr_matrix
 from triton.ops.blocksparse.matmul import _matmul
 
+from mttl.logging import logger
+
+try:
+    import linear_sd
+except ImportError:
+
+    logger.info(
+        "linear_sd not available, LinearWithSparseDelta will not work. You can install it from https://github.com/AlanAnsell/peft"
+    )
+
+
 try:
     from spops import csr_add, sddmm
 except ImportError:
-    from mttl.logging import logger
 
     logger.info(
         "spops not available. You can install it with `pip install -e 'git+https://github.com/IST-DASLab/spops.git'"
