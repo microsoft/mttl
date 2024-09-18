@@ -26,12 +26,6 @@ except ImportError:
         "spops not available. You can install it with `pip install -e 'git+https://github.com/IST-DASLab/spops.git'"
     )
 
-from peft.import_utils import is_bnb_available
-
-BNB_AVAILABLE = is_bnb_available()
-if BNB_AVAILABLE:
-    import bitsandbytes as bnb
-
 from torch.autograd import Function
 
 
@@ -495,11 +489,11 @@ class LinearWithSparseDelta(torch.autograd.Function):
         ctx.save_for_backward(input, weight, dv, di, bias)
         ctx.weight_grad_hook = weight_grad_hook
         ctx.compute_dtype = compute_dtype
-        if BNB_AVAILABLE and isinstance(weight, bnb.nn.Params4bit):
-            weight = bnb.functional.dequantize_4bit(
-                weight,
-                quant_state=weight.quant_state,
-            ).to(compute_dtype)
+        # if BNB_AVAILABLE and isinstance(weight, bnb.nn.Params4bit):
+        #     weight = bnb.functional.dequantize_4bit(
+        #         weight,
+        #         quant_state=weight.quant_state,
+        #     ).to(compute_dtype)
 
         return linear_sd.forward(input, weight, dv, di, bias)
 
