@@ -216,7 +216,6 @@ class LoRA(Modifier, MergeableModifierMixin, ModifyMixin):
 class SkilledLoRAConfig(LoRAConfig):
     n_skills: int = 1
     n_splits: int = 1
-    phi_2_align_heads: bool = False
 
 
 @Modifier.register("skilled_lora", config_cls=SkilledLoRAConfig)
@@ -438,7 +437,6 @@ class SkilledLoRA(LoRA):
 
         # (n_examples, seq_len, out_features)
         layer_out = skilled_loras[0].layer(input)
-        phi_2_align_heads = skilled_loras[0].config.phi_2_align_heads
 
         input_lora = input.to(skilled_loras[0].lora_a.dtype)
         input_lora = skilled_loras[0].dropout_layer(input_lora)
@@ -469,18 +467,6 @@ class SkilledLoRA(LoRA):
             A = torch.einsum("blqe,beqdr->blqdr", (weights, skilled_loras_a))
             B = torch.einsum("blqe,berqd->blrqd", (weights, skilled_loras_b))
             batch_size, sequence_length, rank, n_splits, d_split = B.shape
-
-            if (
-                phi_2_align_heads and B.size(-1) // A.size(-2) == 3
-            ):  # last only true for Wqkv weight
-                # phi_2 formats the B as  "... (three h d) -> ... three h d"
-                # We want to make sure that the `h` here aligns with n_splits, or `q` index
-                # (h, 3 * d) -> (h, 3, d)
-                B = B.view(batch_size, sequence_length, rank, n_splits, 3, d_split // 3)
-                # (bs, r, h, 3, d) -> (bs, r, 3, h, d) -> ... (bs, r, 3 * h * d)
-                B = B.transpose(3, 4).reshape(
-                    batch_size, sequence_length, rank, n_splits, d_split
-                )
 
             # flatten the "splits" (q) dimension
             A, B = A.flatten(2, 3), B.flatten(3, 4)
