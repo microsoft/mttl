@@ -12,7 +12,10 @@ from mttl.logging import logger
 from mttl.models.modifiers.base import Modifier, ModifierConfig, ModifyMixin
 from mttl.models.modifiers.sparse_utils.utils import (
     BlcokSparseLinearFunction_SP_ADD,
+    BlcokSparseLinearFunction_SP_SCATTER,
+    LinearWithSparseDelta,
     SparseLinearFunction_SP_ADD,
+    _scatter_add_flattened,
     get_2d_indices_from_csr_matrix,
     get_top_k_sparcity,
     init_sparse_weights,
@@ -26,15 +29,14 @@ from mttl.registrable import Registrable
 class SparseMaskConfig(ModifierConfig):
     keep_ratio: float = 1.0
     block_size: int = 16  # e.g. 16x16
-    n_steps_in_mask_update: int = (
+    selection_accumulation_steps: int = (
         1  # fo how many batches stay in mask update regime where sparse weights are fixed but masks are updated
     )
-    mask_update_interval: int = (
-        100  # every how many steps to switch to mask update regime
-    )
+    reselection_steps: int = 100  # every how many steps to switch to mask update regime
     sps_type: str = "block_sparse"  # ['block_sparse','regular_sparse','row_sparse']
     sps_impl: str = "sp_add+sp_mm"  # ['sp_add+sp_mm','scattered', 'masked_linear']
-    mask_updater: str = "snip"
+    selection_algorithm: str = "rigl"
+    reselection_rate_policy: str = "linear"
 
 
 class SparseLinear(ABC):
@@ -188,7 +190,7 @@ class SparseWeights(nn.Module):
         )
 
     @property
-    def twod_indices(self):
+    def twoD_indices(self):
         """
         Returns a simple 2d representation of the sparse weights instead of the CSR format.
         """
@@ -442,6 +444,87 @@ class BlockSparseLinearModule(BlockSparseWeights, SparseLinear):
             self.sparse_bias,
         )
 
+class BlockSparseLinearModuleAddDense(BlockSparseLinearModule):
+    def __init__(
+        self,
+        weight,
+        bias,
+        config: SparseMaskConfig,
+        parent_name=None,
+        use_sparse_bias=False,
+        sparse_func=None,
+    ):
+        super().__init__(
+            weight,
+            bias,
+            config,
+            parent_name,
+            use_sparse_bias,
+            sparse_func=BlcokSparseLinearFunction,
+        )
+        self.sparse_func = BlcokSparseLinearFunction
+    
+    def forward(self, input):
+        dense_out = torch.nn.functional.linear(input, self.base_weight, self.base_bias)
+        sparse_out = self.sparse_func.apply(
+            input,
+            self.sparse_weights,
+            self.c_lut,
+            torch.tensor(self.block_size),
+        )
+        return dense_out + sparse_out
+        
+
+class BlockSparseLinearModuleScatter(BlockSparseLinearModule):
+    """
+    Implements a block sparse linear layer with block sparse weights and sparse backprop.
+    """
+
+    def __init__(
+        self,
+        weight,
+        bias,
+        config: SparseMaskConfig,
+        parent_name=None,
+        use_sparse_bias=False,
+        sparse_func=None,
+    ):  
+        super().__init__(weight, bias, config, parent_name, use_sparse_bias, sparse_func)
+        self.sparse_func = BlcokSparseLinearFunction_SP_SCATTER
+        
+        idxs = torch.tensor(
+            np.array(self.twoD_indices),
+            dtype=torch.int64,
+            device=self.base_weight.device,
+        )
+        self.register_buffer(
+            "idxs", idxs
+        )  # will also sync the device to the device of the model
+
+
+    def forward(self, input):
+        bias = self.base_bias
+        if self.sparse_bias is not None:
+            bias = self.base_bias + self.sparse_bias
+        return self.sparse_func.apply(
+            input,
+            self.base_weight,
+            bias,
+            self.sparse_weights,
+            self.idxs,
+            self.c_lut,
+            torch.tensor(self.block_size),
+        )
+
+    def get_weights_for_mask_learning(self):
+        return (
+            self.base_weight,
+            self.base_bias,
+            self.scipy_representation,
+            self.sparse_bias,
+        )
+
+
 
 class ScatteredSparseLinearModule(SparseWeights, SparseLinear):
     """
@@ -463,7 +546,7 @@ class ScatteredSparseLinearModule(SparseWeights, SparseLinear):
         SparseLinear.__init__(self, weight, bias, config, parent_name, use_sparse_bias)
 
         idxs = torch.tensor(
-            np.array(self.twod_indices),
+            np.array(self.twoD_indices),
             dtype=torch.int64,
             device=self.base_weight.device,
         )
@@ -471,24 +554,8 @@ class ScatteredSparseLinearModule(SparseWeights, SparseLinear):
             "idxs", idxs
         )  # will also sync the device to the device of the model
 
-    @staticmethod
-    def _scatter_add_flattened(weights, weights_sparse, idxs):
-        """
-        Adds sparse weights to the passed weights.
-        Does it without in-place operations.
-        """
-        row_indices, col_indices = idxs[0], idxs[1]
-        flat_indices = row_indices * weights.size(1) + col_indices
-        # weights.flatten().scatter_add(0, flat_indices, weights_sparse)
-
-        flat_weights = weights.view(-1)
-        updated_flat_weights = flat_weights.scatter_add(0, flat_indices, weights_sparse)
-
-        weights = updated_flat_weights.view_as(weights)
-        return weights
-
     def forward(self, input):
-        weights = self._scatter_add_flattened(
+        weights = _scatter_add_flattened(
             self.base_weight, self.sparse_weights, self.idxs
         )
         bias = self.base_bias
@@ -507,9 +574,61 @@ class ScatteredSparseLinearModule(SparseWeights, SparseLinear):
     def reset_sparse_weights(self, mask: csr_matrix):
         SparseWeights.reset_sparse_weights(self, mask)
         self.idxs.data = torch.tensor(
-            np.array(self.twod_indices),
+            np.array(self.twoD_indices),
             dtype=torch.int64,
             device=self.base_weight.device,
+        )
+
+
+class SpieLSparseLinearModule(SparseLinearModule):
+    """
+    This implements the SpIEL kernel: https://arxiv.org/pdf/2401.16405
+    """
+
+    def __init__(
+        self,
+        weight,
+        bias,
+        config: SparseMaskConfig,
+        parent_name=None,
+        use_sparse_bias=False,
+        mask: torch.Tensor = None,
+    ):
+        super().__init__(
+            weight,
+            bias,
+            config,
+            parent_name,
+            use_sparse_bias,
+            sparse_func=LinearWithSparseDelta,
+        )
+        indices = torch.tensor(
+            np.array(self.oneD_indices),
+            dtype=torch.int64,
+            device=self.base_weight.device,
+        )
+        self.register_buffer("idxs", indices)
+
+    @property
+    def oneD_indices(self):
+        """
+        Returns a simple 1d representation of the sparse weights instead of the CSR format.
+        """
+        twoD_indices = self.twoD_indices
+        return twoD_indices[0] * self.shape[1] + twoD_indices[1]
+
+    def forward(self, input):
+        bias = self.base_bias
+        if self.sparse_bias is not None:
+            bias = self.base_bias + self.sparse_bias
+        return self.sparse_func.apply(
+            input,
+            self.base_weight,
+            self.sparse_weights,
+            self.idxs,
+            bias,
+            None,
+            self.base_weight.dtype,
         )
 
 
@@ -527,7 +646,25 @@ class SpielMaskUpdateWrapper(MaskUpdatWrapper):
     """
 
     def __init__(self, sparse_layer: SparseLinear, config: SparseMaskConfig):
-        raise NotImplementedError
+        super().__init__(sparse_layer, config)
+
+        self._steps_since_last_mask_update = 0
+        self._mask_update_steps = 0
+        self.sparse_layer_weights, self.sparse_layer_biases = None, None
+
+    @property
+    def _time_to_update_mask(self):
+        return (
+            self._steps_since_last_mask_update % self.config.reselection_steps == 0
+            and self.sparse_layer.training
+        )
+
+    @property
+    def _time_to_update_sparse_weights(self):
+        return (
+            self._mask_update_steps % self.config.selection_accumulation_steps == 0
+            and self.sparse_layer.training
+        )
 
 
 @MaskUpdatWrapper.register("snip", config_cls=SparseMaskConfig)
@@ -538,6 +675,7 @@ class SNIPMaskUpdateWrapper(MaskUpdatWrapper):
     To recalculate the mask, it uses a couple of incoming mini-batches to estimate the importance of each parameter.
 
     This method willl also keep track of the selected weights throughout learning on CPU.
+
     """
 
     def __init__(self, sparse_layer: SparseLinear, config: SparseMaskConfig):
@@ -624,7 +762,7 @@ class SNIPMaskUpdateWrapper(MaskUpdatWrapper):
 
     @property
     def selected_params(self) -> torch.Tensor:
-        if self.config.n_steps_in_mask_update == 1:
+        if self.config.selection_accumulation_steps == 1:
             return self._selected_indices
         # _selected_indices keeps track of how many times each parameter has been selected
         # an alternative, coudl be to actually accumulate gradients for the mask, but it can be too memory expensive, we coudl use cuantization.
@@ -644,14 +782,14 @@ class SNIPMaskUpdateWrapper(MaskUpdatWrapper):
     @property
     def _time_to_update_mask(self):
         return (
-            self._steps_since_last_mask_update % self.config.mask_update_interval == 0
+            self._steps_since_last_mask_update % self.config.reselection_steps == 0
             and self.sparse_layer.training
         )
 
     @property
     def _time_to_update_sparse_weights(self):
         return (
-            self._mask_update_steps % self.config.n_steps_in_mask_update == 0
+            self._mask_update_steps % self.config.selection_accumulation_steps == 0
             and self.sparse_layer.training
         )
 
@@ -720,20 +858,26 @@ class SparseMaskAdapter(Modifier, ModifyMixin):
             "row_sparse",
         ], "Choose `sps_type` from ['block_sparse','regular_sparse','row_sparse'] "
         self.sp_impl = config.sps_impl
-        assert self.sp_impl in [
-            "sp_add+matmul",
-            "sp_add+sp_mm",
-            "scattered",
-            "masked_linear",
-            "triton_block_sparse",
-        ], "Choose `sps_type` from ['sp_add+sp_mm','scattered','masked_linear','triton_block_sparse']"
 
         if self.sp_impl == "sp_add+sp_mm":
             sparse_layer: SparseLinear = SparseLinearModule(
                 self.dense_layer_weight, self.dense_layer_bias, self.config
             )
+        elif self.sp_impl == "spiel":
+            sparse_layer: SparseLinear = SpieLSparseLinearModule(
+                self.dense_layer_weight, self.dense_layer_bias, self.config
+            )
         elif self.sp_impl == "triton_block_sparse":
             sparse_layer: SparseLinear = BlockSparseLinearModule(
+                self.dense_layer_weight, self.dense_layer_bias, self.config
+            )
+        elif self.sp_impl == "triton_block_sparse_scatter":
+            sparse_layer: SparseLinear = BlockSparseLinearModuleScatter(
+                self.dense_layer_weight, self.dense_layer_bias, self.config
+            )        
+        elif self.sp_impl == "dense+triton_block_sparse":
+            raise NotImplementedError
+            sparse_layer: SparseLinear = BlockSparseLinearModuleAddDense(
                 self.dense_layer_weight, self.dense_layer_bias, self.config
             )
         elif self.sp_impl == "scattered":

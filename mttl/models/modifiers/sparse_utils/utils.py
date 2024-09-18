@@ -1,6 +1,7 @@
 import math
 import os
 
+import linear_sd
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -16,8 +17,29 @@ except ImportError:
         "spops not available. You can install it with `pip install -e 'git+https://github.com/IST-DASLab/spops.git'"
     )
 
+from peft.import_utils import is_bnb_available
+
+BNB_AVAILABLE = is_bnb_available()
+if BNB_AVAILABLE:
+    import bitsandbytes as bnb
+
 from torch.autograd import Function
 
+
+def _scatter_add_flattened(weights, weights_sparse, idxs):
+    """
+    Adds sparse weights to the passed weights.
+    Does it without in-place operations.
+    """
+    row_indices, col_indices = idxs[0], idxs[1]
+    flat_indices = row_indices * weights.size(1) + col_indices
+    # weights.flatten().scatter_add(0, flat_indices, weights_sparse)
+
+    flat_weights = weights.view(-1)
+    updated_flat_weights = flat_weights.scatter_add(0, flat_indices, weights_sparse)
+
+    weights = updated_flat_weights.view_as(weights)
+    return weights
 
 def get_2d_indices_from_csr_matrix(sparse_tensor: csr_matrix):
     """
@@ -387,3 +409,111 @@ class BlcokSparseLinearFunction_SP_ADD(Function):
         # import pdb
         # pdb.set_trace()
         return dX, None, None, dsW, None, None, None, None, None
+
+class BlcokSparseLinearFunction_SP_SCATTER(Function):
+    
+    @staticmethod
+    # @torch.amp.custom_fwd
+    def forward(
+        ctx,
+        input,
+        dense_weights,
+        dense_bias,
+        sparse_weights,
+        idxs,
+        c_lut,
+        block_size,
+    ):
+        # using csr_add is faster than scatter add
+        sparse_weights = sparse_weights.flatten()
+        weights = _scatter_add_flattened(dense_weights, sparse_weights, idxs)
+        output = F.linear(input, weights, dense_bias)
+        ctx.save_for_backward(
+            input,
+            sparse_weights,
+            idxs,
+            dense_weights,
+            c_lut,
+            block_size,
+        )
+        return output
+
+    @staticmethod
+    # @torch.amp.custom_bwd
+    def backward(ctx, grad_output):
+        (
+            input,
+            sparse_weights,
+            idxs,
+            dense_weights,
+            c_lut,
+            block_size,
+        ) = ctx.saved_tensors
+        weights = _scatter_add_flattened(dense_weights, sparse_weights, idxs)
+        block_size = block_size.item()
+        spdims = (1, weights.shape[0] // block_size, weights.shape[1] // block_size)
+        dX = grad_output @ weights
+        grad_output = grad_output.contiguous()
+        input = input.contiguous()
+        dsW = _matmul.fn["sdd"](
+            grad_output.unsqueeze(1),
+            input.unsqueeze(1),
+            True,
+            False,
+            False,
+            spdims,
+            block_size,
+            c_lut,
+            None,
+            out=None,
+        ).sum(0)
+
+        # dsW is n_blocks x block_size x block_size
+        # import pdb
+        # pdb.set_trace()
+        return dX, None, None, dsW, None, None, None
+
+
+class LinearWithSparseDelta(torch.autograd.Function):
+    '''
+    copied from https://github.com/AlanAnsell/peft
+    '''
+    @staticmethod
+    def forward(ctx, input, weight, dv, di, bias, weight_grad_hook, compute_dtype):
+        ctx.save_for_backward(input, weight, dv, di, bias)
+        ctx.weight_grad_hook = weight_grad_hook
+        ctx.compute_dtype = compute_dtype
+        if BNB_AVAILABLE and isinstance(weight, bnb.nn.Params4bit):
+            weight = bnb.functional.dequantize_4bit(
+                weight,
+                quant_state=weight.quant_state,
+            ).to(compute_dtype)
+
+        return linear_sd.forward(input, weight, dv, di, bias)
+
+    @staticmethod
+    def backward(ctx, output_grad):
+        input, weight, dv, di, bias = ctx.saved_tensors
+        if BNB_AVAILABLE and isinstance(weight, bnb.nn.Params4bit):
+            weight = bnb.functional.dequantize_4bit(
+                weight,
+                quant_state=weight.quant_state,
+            ).to(ctx.compute_dtype)
+
+        grads = linear_sd.backward(
+            output_grad, input, weight, dv, di, 
+            ctx.needs_input_grad[0],
+            ctx.weight_grad_hook is not None or ctx.needs_input_grad[1],
+            ctx.needs_input_grad[2],
+            bias is not None and ctx.needs_input_grad[4],
+            bias,
+        )
+        if ctx.weight_grad_hook is not None:
+            ctx.weight_grad_hook(grads[1])
+
+        # need to return extra values corresponding to weight_grad_hook and compute_dtype
+        grads.extend([None, None]) 
+        if ctx.needs_input_grad[1]:
+            return tuple(grads)
+        else:
+            return (grads[0], None) + tuple(grads[2:])

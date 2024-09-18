@@ -5,79 +5,77 @@ import time
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn as nn
 from pytorch_lightning import seed_everything
 
 from mttl.logging import logger
 from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.lora import LoRAConfig
+from mttl.models.modifiers.lora import LoRA, LoRAConfig
 from mttl.models.modifiers.sparse_mask import (
     MaskedLinear,
     ScatteredSparseLinearModule,
     SparseLinearModule,
+    SparseMaskAdapter,
     SparseMaskConfig,
 )
 from mttl.models.utils import model_loader_helper, transfer_batch_to_device
 
 logger.setLevel(logging.ERROR)
 model_name = "EleutherAI/gpt-neo-125m"  # "EleutherAI/gpt-neo-125m"  # "phi-2"
-block_size = 128
-n_blocks = 6
+block_size = 64
+n_blocks = 128
 mask_updater = None
 modify_layers = ".*q_proj.*|.*v_proj.*|.*k_proj.*"  # ".*q_proj.*|.*v_proj.*|.*k_proj.*"  # ".*Wqkv.*" #
 n_iters = 50
 
+in_d = 2048
+out_d = 8192 *2
+dtype=torch.bfloat16
+
 # input sizes and batch sizes for testing
 max_seq_len = 1024
-bs = 1
+bs = 5
 vocab_size = 32000
 
 
 def calculate_lora_parameters(input_dim, output_dim, rank):
     return input_dim * rank + output_dim * rank
 
+layer = nn.Linear(in_d, out_d)
+layer.weight.requires_grad_(False)
+layer.bias.requires_grad_(False)
 
 def find_hyperpaams():
-
-    model = model_loader_helper(
-        model_name,
-        bf16=True,
-        fp16=False,
-        load_in_4bit=False,
-        load_in_8bit=False,
-        device_map="cpu",
-    )
-    modules = dict(model.named_modules())
+    modules = {"linear": layer}
     modified_modules = {}
     keep_ratios = []
     lora_ranks = []
 
-    for ml in modify_layers.split("|"):
-        for name, module in modules.items():
-            if re.match(ml, name) and ml not in modified_modules:
-                keep_ratio = (
-                    n_blocks
-                    * (block_size**2)
-                    / (module.in_features * module.out_features)
-                )
-                tot_sparse_params = (
-                    module.in_features * module.out_features * keep_ratio
-                )
-                lora_rank = 1
-                for rank in range(1, module.in_features):
-                    lora_params = calculate_lora_parameters(
-                        module.in_features, module.out_features, rank
-                    )
-                    if lora_params <= tot_sparse_params:
-                        lora_rank = rank
-                    else:
-                        break
-                modified_modules[ml] = {
-                    "module": module,
-                    "keep_ratio": keep_ratio,
-                    "lora_rank": lora_rank,
-                }
-                keep_ratios.append(keep_ratio)
-                lora_ranks.append(lora_rank)
+    for name, module in modules.items():
+        keep_ratio = (
+            n_blocks
+            * (block_size**2)
+            / (module.in_features * module.out_features)
+        )
+        tot_sparse_params = (
+            module.in_features * module.out_features * keep_ratio
+        )
+        lora_rank = 1
+        for rank in range(1, module.in_features):
+            lora_params = calculate_lora_parameters(
+                module.in_features, module.out_features, rank
+            )
+            if lora_params <= tot_sparse_params:
+                lora_rank = rank
+            else:
+                break
+        modified_modules[name] = {
+            "module": module,
+            "keep_ratio": keep_ratio,
+            "lora_rank": lora_rank,
+        }
+        keep_ratios.append(keep_ratio)
+        lora_ranks.append(lora_rank)
     return np.mean(keep_ratios), int(np.mean(lora_ranks))
 
 
@@ -114,11 +112,12 @@ def dummy_batch():
 def benchmark_module(module, runs=100):
     # Set up inputs
     input_data = dummy_batch()
-    input_data = transfer_batch_to_device(input_data, "cuda")
+    input_data = torch.rand(bs, max_seq_len, in_d).to("cuda").to(dtype)
 
     # Warm-up to ensure accurate measurement
     for _ in range(10):
-        loss = module(**input_data).loss
+        out = module(input_data)
+        loss = torch.mean(out)
         loss.backward()
         module.zero_grad()
 
@@ -130,7 +129,8 @@ def benchmark_module(module, runs=100):
         # Forward pass timing
         torch.cuda.synchronize()
         start_time = time.time()
-        loss = module(**input_data).loss
+        out = module(input_data)        
+        loss = torch.mean(out)
         torch.cuda.synchronize()
         forward_time = time.time() - start_time
 
@@ -155,7 +155,8 @@ def benchmark_module(module, runs=100):
     # Measure memory usage
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
-    loss = module(**input_data).loss  # Forward pass to record memory
+    out = module(input_data)  # Forward pass to record memory
+    loss = torch.mean(out)
     loss.backward()  # Backward pass to record memory
     memory_allocated = torch.cuda.max_memory_allocated()
     memory_reserved = torch.cuda.max_memory_reserved()
@@ -174,24 +175,20 @@ def benchmark_module(module, runs=100):
 
 
 def run_benchmark(name, adapter_config):
-    seed_everything(0)
-    model = model_loader_helper(
-        model_name,
-        bf16=True,
-        fp16=False,
-        load_in_4bit=False,
-        load_in_8bit=False,
-        device_map="cpu",
-    )
-    modify_transformer(model, adapter_config)
-    model.to("cuda")
-    n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    seed_everything(0)   
+    if isinstance(adapter_config, LoRAConfig):
+        module = LoRA(adapter_config, layer)
+    else:
+        module = SparseMaskAdapter(adapter_config, layer)
+    
+    module.to("cuda").to(dtype)
+    n_params = sum(p.numel() for p in module.parameters() if p.requires_grad)
 
     runtime, forward_time, backward_time, sparse_alloc, sparse_reserved = (
-        benchmark_module(model, runs=n_iters)
+        benchmark_module(module, runs=n_iters)
     )
     print(
-        f"{name} - Runtime: {runtime:.6f}s, Allocated Memory: {sparse_alloc / 1e6:.2f}MB, Reserved Memory: {sparse_reserved / 1e6:.2f}MB"
+        f"{name} - Runtime: {runtime:.6f}s, Allocated Memory: {sparse_alloc / 1e6:.2f}MB, Reserved Memory: {sparse_reserved / 1e6:.2f}MB, Number of Parameters: {n_params}"
     )
     table.loc[name] = [
         runtime,
@@ -208,6 +205,32 @@ def run_benchmark(name, adapter_config):
 
 adapter_config = LoRAConfig(modify_layers=modify_layers, lora_rank=lora_rank)
 run_benchmark("LoRA", adapter_config)
+
+#################################################################################################################################################################
+# Benchmarking BlcockSparseLinearModule + Dense without spoops
+
+# adapter_config = SparseMaskConfig(
+#     modify_layers=modify_layers,
+#     sps_impl="dense+triton_block_sparse",
+#     sps_type="block_sparse",
+#     keep_ratio=keep_ratio,
+#     reselection_steps=1,
+#     block_size=block_size,
+# )
+# run_benchmark("BlockSparseLinearModule + Dense", adapter_config)
+
+#################################################################################################################################################################
+# Benchmarking BlcockSparseLinearModule without spoops
+
+adapter_config = SparseMaskConfig(
+    modify_layers=modify_layers,
+    sps_impl="triton_block_sparse_scatter",
+    sps_type="block_sparse",
+    keep_ratio=keep_ratio,
+    reselection_steps=1,
+    block_size=block_size,
+)
+run_benchmark("BlockSparseLinearModule (scatter add)", adapter_config)
 
 #################################################################################################################################################################
 # Benchmarking BlcockSparseLinearModule
@@ -227,30 +250,30 @@ run_benchmark("BlockSparseLinearModule", adapter_config)
 # Benchmarking SparseLinearModule
 
 
-adapter_config = SparseMaskConfig(
-    modify_layers=modify_layers,
-    sps_impl="sp_add+sp_mm",
-    sps_type="regular_sparse",
-    keep_ratio=keep_ratio,
-    # mask_updater=mask_updater,
-    reselection_steps=1,
-    block_size=block_size,
-)
-run_benchmark("SparseLinearModule (reg sp.)", adapter_config)
+# adapter_config = SparseMaskConfig(
+#     modify_layers=modify_layers,
+#     sps_impl="sp_add+sp_mm",
+#     sps_type="regular_sparse",
+#     keep_ratio=keep_ratio,
+#     # mask_updater=mask_updater,
+#     reselection_steps=1,
+#     block_size=block_size,
+# )
+# run_benchmark("SparseLinearModule (reg sp.)", adapter_config)
 
-############################################################################################################################################################
-# Benchmarking SparseLinearModule with block sparsity
+# ############################################################################################################################################################
+# # Benchmarking SparseLinearModule with block sparsity
 
 
-adapter_config = SparseMaskConfig(
-    modify_layers=modify_layers,
-    sps_impl="sp_add+sp_mm",
-    sps_type="block_sparse",
-    keep_ratio=keep_ratio,
-    reselection_steps=1,
-    block_size=block_size,
-)
-run_benchmark("SparseLinearModule (block sp.)", adapter_config)
+# adapter_config = SparseMaskConfig(
+#     modify_layers=modify_layers,
+#     sps_impl="sp_add+sp_mm",
+#     sps_type="block_sparse",
+#     keep_ratio=keep_ratio,
+#     reselection_steps=1,
+#     block_size=block_size,
+# )
+# run_benchmark("SparseLinearModule (block sp.)", adapter_config)
 
 #################################################################################################################################################################
 #  Benchmarking SPiEL with regular sparsity kernel
@@ -325,6 +348,8 @@ adapter_config = SparseMaskConfig(
 run_benchmark("ScatteredSparseLinearModule (reg sp.)", adapter_config)
 
 ############################################################################################################################################################
+# orer table by Av. Runtime
+table = table.sort_values("Av. Runtime")
 print(table)
 # write table to a csv file
 table.to_csv("benchmark_results.csv")
