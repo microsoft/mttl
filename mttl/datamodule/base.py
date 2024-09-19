@@ -664,7 +664,7 @@ class DataModule(LightningDataModule, Registrable):
                 ],
                 generator=self.rng,
             )
-            return split_dataset[0], split_dataset[1]
+            return train_dataset, dev_dataset
         else:
             raise ValueError(
                 "Only ArrowDataset and torch.utils.data.Dataset are supported for train/valid split."
