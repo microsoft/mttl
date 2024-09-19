@@ -655,11 +655,12 @@ class DataModule(LightningDataModule, Registrable):
             )
             return split_dataset["train"], split_dataset["test"]
         elif isinstance(dataset, torch.utils.data.Dataset):
-            split_dataset = torch.utils.data.random_split(
+            n_tr_samples = int(len(dataset) * (1 - validation_portion))
+            train_dataset, dev_dataset = torch.utils.data.random_split(
                 dataset,
                 [
-                    int(len(dataset) * (1 - validation_portion)),
-                    int(len(dataset) * validation_portion),
+                    n_tr_samples,
+                    len(dataset) - n_tr_samples,
                 ],
                 generator=self.rng,
             )
