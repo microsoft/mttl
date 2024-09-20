@@ -53,6 +53,8 @@ def main(
     args = {
         "model": model,
         "dataset": dataset,
+        "dataset_type": dataset_type,
+        "dataset_task": dataset_task,
         "block_size": block_size,
         "max_continuation_length": max_continuation_length,
         "num_generations": num_generations,
@@ -73,8 +75,8 @@ def main(
         augmenter.add_task(task)
 
     concat_dataset = []
-    if args.dataset_type == "wiki":
-        dataset = load_dataset(args.dataset, split="train")
+    if dataset_type == "wiki":
+        dataset = load_dataset(dataset, split="train")
 
         for subject in tqdm.tqdm(
             dataset.unique("subject"), desc=f"Generating data for subjects"
@@ -106,7 +108,7 @@ def main(
                 }
             )
             d.save_to_disk(output_path)
-    elif args.dataset_type == "narrativeqa":
+    elif dataset_type == "narrativeqa":
         dataset = load_dataset("deepmind/narrativeqa")
 
         all_sections = []
@@ -116,7 +118,7 @@ def main(
                 document_id = document["id"]
 
                 if (
-                    args.dataset_task is None or document_id == args.dataset_task
+                    dataset_task is None or document_id == dataset_task
                 ) and document_id not in document_ids:
                     # prevent duplicate generation
                     document_ids.add(document_id)
