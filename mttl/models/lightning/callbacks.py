@@ -3,6 +3,7 @@ import os
 import shutil
 import sys
 from abc import ABC, abstractmethod
+from transformers.utils import ModelOutput
 
 import pytorch_lightning as pl
 import torch
@@ -228,6 +229,8 @@ class LossCallback(cb.Callback):
         was_train = pl_module.training
         if was_train:
             pl_module.eval()
+
+        total_loss, deno = 0., 0.
         with torch.no_grad():
             for i, batch in tqdm.tqdm(
                 enumerate(self.dataloader),
@@ -236,12 +239,17 @@ class LossCallback(cb.Callback):
             ):
                 batch = transfer_batch_to_device(batch, pl_module.device)
                 loss = pl_module.forward(**batch, reduction="none")
-                outputs += [(loss.detach().cpu(),)]
-        losses = torch.cat([out[0] for out in outputs], 0)
+                
+                if isinstance(loss, ModelOutput):
+                    loss = loss.loss
+                
+                total_loss += loss.detach().cpu()
+                deno += 1
 
         if was_train:
             pl_module.train()
-        return losses.mean()
+
+        return total_loss / deno
 
     def log_metrics(self, metrics, pl_module: pl.LightningModule, on_step=True):
         pl_module.log(
