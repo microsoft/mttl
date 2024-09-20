@@ -19,7 +19,7 @@ try:
 except Exception as e:
     logger.info(e)
     raise ImportError(
-        "linear_sd not available. You can install it with `pip install -e 'git clone https://github.com/AlanAnsell/peft.git"
+        "linear_sd not available. You can install it with 'pip install git+https://github.com/AlanAnsell/peft.git'"
     )
 
 

@@ -25,4 +25,5 @@ azure-storage-blob
 azure-identity
 einops
 nltk
+git+https://github.com/AlanAnsell/peft.git@main
 # spops @ git+https://github.com/IST-DASLab/spops.git@main
