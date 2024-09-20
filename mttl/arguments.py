@@ -9,7 +9,12 @@ from typing import Dict, List, Type, TypeVar
 
 import torch
 
+# import registrables for args management
+from mttl.datamodule.base import DataModule  # noqa: F401
 from mttl.logging import logger, warn_once
+from mttl.models.containers.selectors.base import Selector  # noqa: F401
+from mttl.models.library.library_transforms import LibraryTransform  # noqa: F401
+from mttl.models.modifiers.base import Modifier  # noqa: F401
 from mttl.registrable import Registrable
 from mttl.serializable import AutoSerializable, Serializable
 from mttl.utils import deprecated
@@ -265,16 +270,12 @@ class AutoArgs(AutoSerializable):
 
 def dataclass_from_registrable(registrable):
     def decorator(cls):
-        module_name, class_name = registrable.rsplit(".", 1)
-        module = importlib.import_module(module_name)
-        registrable_class = getattr(module, class_name)
-
         # Make the union of all the fields across the registered configs
-        to_tuples = dataclasses_union(*registrable_class.registered_configs())
+        to_tuples = dataclasses_union(*registrable.registered_configs())
 
         # Create new dataclass with the union of all the fields
         new_cls = make_dataclass(cls.__name__, to_tuples, bases=(Args,), init=False)
-        new_cls.registrable_class = registrable_class
+        new_cls.registrable_class = registrable
 
         # Copy attributes and methods from the original class
         for k, v in cls.__dict__.items():
@@ -286,22 +287,22 @@ def dataclass_from_registrable(registrable):
     return decorator
 
 
-@dataclass_from_registrable("mttl.datamodule.base.DataModule")
+@dataclass_from_registrable(DataModule)
 class DataArgs(Args):
     pass
 
 
-@dataclass_from_registrable("mttl.models.containers.selectors.base.Selector")
+@dataclass_from_registrable(Selector)
 class SelectorArgs(Args):
     pass
 
 
-@dataclass_from_registrable("mttl.models.modifiers.base.Modifier")
+@dataclass_from_registrable(Modifier)
 class ModifierArgs(Args):
     pass
 
 
-@dataclass_from_registrable("mttl.models.library.library_transforms.LibraryTransform")
+@dataclass_from_registrable(LibraryTransform)
 class TransformArgs(Args):
     pass
 
