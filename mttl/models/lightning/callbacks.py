@@ -14,6 +14,7 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch.optim import Optimizer
 from transformers.utils import ModelOutput
 
+import wandb
 from mttl.datamodule.base import DataModule
 from mttl.evaluators import MMLUEvaluator
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
