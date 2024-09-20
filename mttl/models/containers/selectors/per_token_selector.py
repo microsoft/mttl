@@ -141,7 +141,7 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
         self.metric_logger.update(value_dict=to_store)
 
     @safe_logging
-    def log_in_dist(self, logits):
+    def _log_in_dist(self, logits):
         probs = F.softmax(logits, dim=-1)
         bs, seq_len, _ = probs.size()
         task_names = self.routing_infos.task_names

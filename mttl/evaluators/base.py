@@ -268,7 +268,7 @@ class GenerativeEvaluator(Evaluator):
 
     def generate_for_batch(self, model, batch):
         from mttl.models.expert_model import BaseExpertModel
-        from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
+        from mttl.models.lightning.base_module import LightningEfficientCheckpoint
         from mttl.models.utils import transfer_batch_to_device
 
         # wrapped model
@@ -297,10 +297,8 @@ class GenerativeEvaluator(Evaluator):
         batch = transfer_batch_to_device(batch, device)
 
         with torch.no_grad():
-            if (
-                isinstance(model, ExpertModule)
-                or isinstance(model, MultiExpertModule)
-                or isinstance(model, BaseExpertModel)
+            if isinstance(model, LightningEfficientCheckpoint) or isinstance(
+                model, BaseExpertModel
             ):
                 predictions = model.generate(
                     **batch,
