@@ -39,6 +39,8 @@ from tqdm.asyncio import tqdm as tqdm_async
 def main(
     model,
     dataset,
+    dataset_type,
+    dataset_task,
     block_size,
     max_continuation_length,
     num_generations,
