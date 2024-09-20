@@ -10,11 +10,7 @@ from typing import Dict, List, Type, TypeVar
 import torch
 
 # import registrables for args management
-from mttl.datamodule.base import DataModule  # noqa: F401
 from mttl.logging import logger, warn_once
-from mttl.models.containers.selectors.base import Selector  # noqa: F401
-from mttl.models.library.library_transforms import LibraryTransform  # noqa: F401
-from mttl.models.modifiers.base import Modifier  # noqa: F401
 from mttl.registrable import Registrable
 from mttl.serializable import AutoSerializable, Serializable
 from mttl.utils import deprecated
@@ -268,19 +264,24 @@ class AutoArgs(AutoSerializable):
             return cls.fromdict_legacy(data)
 
 
-class ArgsFromRegistrable(type):
+class FromRegistrable(type):
     """
     Meta class that creates a new dataclass containing fields all the config dataclasses
     in this registrable.
     """
 
-    def __new__(cls, name, bases, attrs, registrable: Type[Registrable] = None):
+    def __new__(cls, name, bases, attrs, registrable: Registrable = None):
+        module_name, class_name = registrable.rsplit(".", 1)
+        module = importlib.import_module(module_name)
+
+        registrable_class = getattr(module, class_name)
+
         # make the union of all the fields across the registered configs
-        to_tuples = dataclasses_union(*registrable.registered_configs())
+        to_tuples = dataclasses_union(*registrable_class.registered_configs())
 
         # create new dataclass with the union of all the fields
         new_cls = make_dataclass(name, to_tuples, bases=(Args,), init=False)
-        new_cls.registrable_class = registrable
+        new_cls.registrable_class = registrable_class
 
         # set functions to be had in the new baby dataclass
         for k, v in {
@@ -291,27 +292,31 @@ class ArgsFromRegistrable(type):
 
 
 @dataclass
-class DataArgs(metaclass=ArgsFromRegistrable, registrable=DataModule):
-    pass
-
-
-@dataclass
-class SelectorArgs(
-    metaclass=ArgsFromRegistrable,
-    registrable=Selector,
+class DataArgs(
+    metaclass=FromRegistrable, registrable="mttl.datamodule.base.DataModule"
 ):
     pass
 
 
 @dataclass
-class ModifierArgs(metaclass=ArgsFromRegistrable, registrable=Modifier):
+class SelectorArgs(
+    metaclass=FromRegistrable,
+    registrable="mttl.models.containers.selectors.base.Selector",
+):
+    pass
+
+
+@dataclass
+class ModifierArgs(
+    metaclass=FromRegistrable, registrable="mttl.models.modifiers.base.Modifier"
+):
     pass
 
 
 @dataclass
 class TransformArgs(
-    metaclass=ArgsFromRegistrable,
-    registrable=LibraryTransform,
+    metaclass=FromRegistrable,
+    registrable="mttl.models.library.library_transforms.LibraryTransform",
 ):
     pass
 
