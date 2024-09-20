@@ -117,9 +117,9 @@ def main(
                 if document["id"] not in document_ids:
                     document_ids[document["id"]] = document["text"]
 
-        # unique document ids
-        if args.dataset_task is not None:
-            document_ids = {args.dataset_task: document_ids[args.dataset_task]}
+        # process only selected document ids
+        if dataset_task is not None:
+            document_ids = {dataset_task: document_ids[args.dataset_task]}
 
         for document_id, text in tqdm.tqdm(
             len(document_ids), desc=f"Generating data for documents"
