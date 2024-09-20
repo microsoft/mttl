@@ -3,7 +3,6 @@ from typing import Tuple
 
 from mttl.logging import logger, warn_once
 from mttl.models.containers.base import ExpertContainer
-from mttl.models.containers.kv_containers import KVExpertContainer
 from mttl.models.containers.lora_containers import (
     CoalescedLoRAExpertContainer,
     LoRAExpertContainer,
@@ -17,7 +16,6 @@ from mttl.models.containers.selectors.base import (
     get_selector,
 )
 from mttl.models.library.expert import Expert
-from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.modifiers.base import Modifier
 from mttl.utils import logger
 
@@ -55,8 +53,6 @@ def get_container_class(modifier: str):
         return CoalescedLoRAExpertContainer
     elif modifier == "peer":
         return PEERMLPContainer
-    elif modifier == "kv_adapter":
-        return KVExpertContainer
     else:
         raise ValueError(f"Cannot find modifier: {modifier}")
 
