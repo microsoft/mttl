@@ -270,7 +270,7 @@ class FromRegistrable(type):
     in this registrable.
     """
 
-    def __new__(cls, name, bases, attrs, registrable: Registrable = None):
+    def __new__(cls, name, bases, attrs, registrable: str = None):
         module_name, class_name = registrable.rsplit(".", 1)
         module = importlib.import_module(module_name)
 
