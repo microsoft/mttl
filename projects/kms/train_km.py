@@ -32,11 +32,14 @@ class DeepContextDistillationTrainer(ExpertModelTrainer):
         self.kl_loss = torch.nn.KLDivLoss(reduction="none")
 
     def compute_loss(self, model, inputs, return_outputs=False):
+        # document + small task prompt + task output (e.g. summary, or question and answer)
         input_ids = inputs["input_ids"]
         labels = inputs["labels"]
         attention_mask = inputs["attention_mask"]
-        nc_labels = inputs["nc_labels"]
+
+        # small task prompt + task output (e.g. summary, or question and answer)
         nc_input_ids = inputs["nc_input_ids"]
+        nc_labels = inputs["nc_labels"]
         nc_attention_mask = inputs["nc_attention_mask"]
 
         with torch.no_grad():
