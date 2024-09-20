@@ -134,9 +134,6 @@ def train_km(training_args):
     if best_model_path:
         logger.info("Best model checkpoint: %s", best_model_path)
 
-    # final test
-    trainer.predict(trainer.dm.test_dataset)
-
 
 if __name__ == "__main__":
     args = KMArguments.parse()
