@@ -230,7 +230,7 @@ class LossCallback(cb.Callback):
         if was_train:
             pl_module.eval()
 
-        total_loss, deno = 0., 0.
+        total_loss, deno = 0.0, 0.0
         with torch.no_grad():
             for i, batch in tqdm.tqdm(
                 enumerate(self.dataloader),
@@ -239,10 +239,10 @@ class LossCallback(cb.Callback):
             ):
                 batch = transfer_batch_to_device(batch, pl_module.device)
                 loss = pl_module.forward(**batch, reduction="none")
-                
+
                 if isinstance(loss, ModelOutput):
                     loss = loss.loss
-                
+
                 total_loss += loss.detach().cpu()
                 deno += 1
 

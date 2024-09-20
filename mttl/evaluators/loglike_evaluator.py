@@ -53,10 +53,12 @@ class LogLikeEvaluator(Evaluator):
             batch_size = len(labels_index)
 
             batch = transfer_batch_to_device(batch, device)
-            
+
             with torch.no_grad():
-                if isinstance(model, ExpertModule) or isinstance(model, MultiExpertModule) or isinstance(
-                    model, BaseExpertModel
+                if (
+                    isinstance(model, ExpertModule)
+                    or isinstance(model, MultiExpertModule)
+                    or isinstance(model, BaseExpertModel)
                 ):
                     logits = model.forward(**batch).logits
                 else:

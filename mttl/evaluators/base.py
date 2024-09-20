@@ -297,7 +297,11 @@ class GenerativeEvaluator(Evaluator):
         batch = transfer_batch_to_device(batch, device)
 
         with torch.no_grad():
-            if isinstance(model, ExpertModule) or isinstance(model, MultiExpertModule) or isinstance(model, BaseExpertModel):
+            if (
+                isinstance(model, ExpertModule)
+                or isinstance(model, MultiExpertModule)
+                or isinstance(model, BaseExpertModel)
+            ):
                 predictions = model.generate(
                     **batch,
                     generation_config=model.generation_config,

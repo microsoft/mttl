@@ -106,7 +106,12 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
         else:
             mean_angle = angle.mean()
 
-        task = self.routing_infos.task_names[0] if self.routing_infos.task_names is not None and len(self.routing_infos.task_names) > 0 else 'default'
+        task = (
+            self.routing_infos.task_names[0]
+            if self.routing_infos.task_names is not None
+            and len(self.routing_infos.task_names) > 0
+            else "default"
+        )
 
         to_store = {"angle": mean_angle.item()}
         self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)
@@ -190,8 +195,10 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
         angle = router_logits / input.norm(p=2, dim=-1, keepdim=True).clamp(min=EPS)
         angle = angle / prototypes.norm(p=2, dim=-1).view(1, 1, -1).clamp(min=EPS)
 
-        task_names = self.routing_infos.task_names 
-        in_dist = task_names is not None and all([t in self.task_to_expert_name for t in task_names])
+        task_names = self.routing_infos.task_names
+        in_dist = task_names is not None and all(
+            [t in self.task_to_expert_name for t in task_names]
+        )
 
         # control entropy of distribution
         router_logits /= temp
