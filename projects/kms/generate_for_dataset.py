@@ -62,7 +62,6 @@ def main(
         "output_path": output_path,
     }
 
-    dataset = load_dataset(args.dataset, split="train")
     augmenter = DatasetAugmenter(
         model,
         block_size,
@@ -75,6 +74,8 @@ def main(
 
     concat_dataset = []
     if args.dataset_type == "wiki":
+        dataset = load_dataset(args.dataset, split="train")
+
         for subject in tqdm.tqdm(
             dataset.unique("subject"), desc=f"Generating data for subjects"
         ):
