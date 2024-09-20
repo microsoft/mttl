@@ -14,7 +14,7 @@ from huggingface_hub import (
     CommitOperationCopy,
     CommitOperationDelete,
 )
-from huggingface_hub.utils._errors import RepositoryNotFoundError
+from huggingface_hub.errors import RepositoryNotFoundError
 
 from mttl.logging import logger
 from mttl.models.library.backend_engine import (
