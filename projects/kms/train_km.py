@@ -43,6 +43,7 @@ class DeepContextDistillationTrainer(ExpertModelTrainer):
         nc_attention_mask = inputs["nc_attention_mask"]
 
         with torch.no_grad():
+            # for the context-aware pass, we need to disable the adapter
             get_original_model(model).disable_adapter()
 
             outputs = model(
@@ -57,6 +58,7 @@ class DeepContextDistillationTrainer(ExpertModelTrainer):
             ]
             target_logits = outputs.logits[labels != -100, :]
 
+        # for the context-less pass, we need to enable the adapter
         get_original_model(model).enable_adapter()
 
         outputs = model(

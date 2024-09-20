@@ -97,7 +97,7 @@ def main(
             )
 
             # concat all datasets
-            concat_dataset.append(output_dataset.to_list())
+            concat_dataset.extend(output_dataset.to_list())
             os.makedirs(output_path, exist_ok=True)
 
             d = DatasetDict(
@@ -111,47 +111,45 @@ def main(
     elif dataset_type == "narrativeqa":
         dataset = load_dataset("deepmind/narrativeqa")
 
-        all_sections = []
-        document_ids = set()
+        document_ids = {}
         for split in ["train", "validation", "test"]:
             for document in dataset[split]["document"]:
-                document_id = document["id"]
+                if document["id"] not in document_ids:
+                    document_ids[document["id"]] = document["text"]
 
-                if (
-                    dataset_task is None or document_id == dataset_task
-                ) and document_id not in document_ids:
-                    # prevent duplicate generation
-                    document_ids.add(document_id)
+        # unique document ids
+        if args.dataset_task is not None:
+            document_ids = {args.dataset_task: document_ids[args.dataset_task]}
 
-                    # narrativeqa related text normalization
-                    text = document["text"]
-                    text = text.split("*** END OF THIS PROJECT")[0]
-                    text = text.split("<pre>")[-1]
-                    text = text.split("</pre>")[0]
-                    text = text.replace("<b>", "").replace("</b>", "")
+        for document_id, text in tqdm.tqdm(
+            len(document_ids), desc=f"Generating data for documents"
+        ):
+            # narrativeqa related text normalization
+            text = text.split("*** END OF THIS PROJECT")[0]
+            text = text.split("<pre>")[-1]
+            text = text.split("</pre>")[0]
+            text = text.replace("<b>", "").replace("</b>", "")
 
-                    # do augmentation
-                    output_dataset = augmenter.augment(
-                        Dataset.from_list([{"text": text}])
+            # do augmentation
+            output_dataset = augmenter.augment(Dataset.from_list([{"text": text}]))
+
+            # add subject column
+            output_dataset = output_dataset.map(
+                lambda x: {"document_id": document_id}, num_proc=16
+            )
+
+            concat_dataset.extend(output_dataset.to_list())
+            os.makedirs(output_path, exist_ok=True)
+
+            d = DatasetDict(
+                {
+                    "train": Dataset.from_list(
+                        concat_dataset,
+                        info=DatasetInfo(description=json.dumps(args)),
                     )
-
-                    # add subject column
-                    output_dataset = output_dataset.map(
-                        lambda x: {"doc_id": document_id}, num_proc=16
-                    )
-
-                    concat_dataset.append(output_dataset.to_list())
-                    os.makedirs(output_path, exist_ok=True)
-
-                    d = DatasetDict(
-                        {
-                            "train": Dataset.from_list(
-                                concat_dataset,
-                                info=DatasetInfo(description=json.dumps(args)),
-                            )
-                        }
-                    )
-                    d.save_to_disk(output_path)
+                }
+            )
+            d.save_to_disk(output_path)
 
     if push_to_hub is not None:
         d.push_to_hub(push_to_hub)
