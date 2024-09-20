@@ -268,42 +268,51 @@ class AutoArgs(AutoSerializable):
             return cls.fromdict_legacy(data)
 
 
-def dataclass_from_registrable(registrable):
-    def decorator(cls):
-        # Make the union of all the fields across the registered configs
+class ArgsFromRegistrable(type):
+    """
+    Meta class that creates a new dataclass containing fields all the config dataclasses
+    in this registrable.
+    """
+
+    def __new__(cls, name, bases, attrs, registrable: Type[Registrable] = None):
+        # make the union of all the fields across the registered configs
         to_tuples = dataclasses_union(*registrable.registered_configs())
 
-        # Create new dataclass with the union of all the fields
-        new_cls = make_dataclass(cls.__name__, to_tuples, bases=(Args,), init=False)
+        # create new dataclass with the union of all the fields
+        new_cls = make_dataclass(name, to_tuples, bases=(Args,), init=False)
         new_cls.registrable_class = registrable
 
-        # Copy attributes and methods from the original class
-        for k, v in cls.__dict__.items():
-            if not k.startswith("__"):
-                setattr(new_cls, k, v)
-
+        # set functions to be had in the new baby dataclass
+        for k, v in {
+            **attrs,
+        }.items():
+            setattr(new_cls, k, v)
         return new_cls
 
-    return decorator
 
-
-@dataclass_from_registrable(DataModule)
-class DataArgs(Args):
+@dataclass
+class DataArgs(metaclass=ArgsFromRegistrable, registrable=DataModule):
     pass
 
 
-@dataclass_from_registrable(Selector)
-class SelectorArgs(Args):
+@dataclass
+class SelectorArgs(
+    metaclass=ArgsFromRegistrable,
+    registrable=Selector,
+):
     pass
 
 
-@dataclass_from_registrable(Modifier)
-class ModifierArgs(Args):
+@dataclass
+class ModifierArgs(metaclass=ArgsFromRegistrable, registrable=Modifier):
     pass
 
 
-@dataclass_from_registrable(LibraryTransform)
-class TransformArgs(Args):
+@dataclass
+class TransformArgs(
+    metaclass=ArgsFromRegistrable,
+    registrable=LibraryTransform,
+):
     pass
 
 
