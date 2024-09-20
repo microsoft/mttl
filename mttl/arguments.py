@@ -390,6 +390,8 @@ class TrainingArgs(DataArgs):
     save_if_loaded_from_ckpt: bool = True
     dataset_type: str = None
 
+    profile: bool = False  # if 'True' will profile the model training
+
     @property
     def dataset_config(self):
         if self.dataset_type is not None:
