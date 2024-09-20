@@ -6,23 +6,28 @@ import torch
 import torch.nn.functional as F
 from scipy.sparse import csr_matrix
 from triton.ops.blocksparse.matmul import _matmul
+from peft.import_utils import is_bnb_available
+
+BNB_AVAILABLE = is_bnb_available()
+if BNB_AVAILABLE:
+    import bitsandbytes as bnb
 
 from mttl.logging import logger
 
 try:
     import linear_sd
-except ImportError:
-
-    logger.info(
-        "linear_sd not available, LinearWithSparseDelta will not work. You can install it from https://github.com/AlanAnsell/peft"
+except Exception as e:
+    logger.info(e)
+    raise ImportError(
+        "linear_sd not available. You can install it with `pip install -e 'git clone https://github.com/AlanAnsell/peft.git"
     )
 
 
 try:
     from spops import csr_add, sddmm
-except ImportError:
-
-    logger.info(
+except Exception as e:
+    logger.info(e)
+    raise ImportError(
         "spops not available. You can install it with `pip install -e 'git+https://github.com/IST-DASLab/spops.git'"
     )
 
