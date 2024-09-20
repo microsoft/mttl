@@ -651,7 +651,7 @@ class DataModule(LightningDataModule, Registrable):
 
         if isinstance(dataset, ArrowDataset):
             split_dataset = dataset.train_test_split(
-                test_size=validation_portion, generator=self.rng
+                test_size=validation_portion, generator=self.rng_numpy
             )
             return split_dataset["train"], split_dataset["test"]
         elif isinstance(dataset, torch.utils.data.Dataset):
@@ -738,13 +738,15 @@ class DataModule(LightningDataModule, Registrable):
         self, config: Union[DatasetConfig, Any], for_generation=False, val_mixin=None
     ):
         super().__init__()
-        self.rng = torch.Generator().manual_seed(1234)
+
         self.config = config
         self._task_names = []
         self._task_to_id = {}
         self.val_mixin = val_mixin
         self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config, for_generation=for_generation)
+        self.rng = torch.Generator().manual_seed(1234)
+        self.rng_numpy = np.random.RandomState(1234)
         self.setup_dataset()
         self.post_setup_dataset()
 
