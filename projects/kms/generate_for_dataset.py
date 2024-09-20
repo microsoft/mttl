@@ -113,7 +113,8 @@ def main(
 
         document_ids = {}
         for split in ["train", "validation", "test"]:
-            for document in dataset[split]["document"]:
+            for document in dataset[split]:
+                document = document["document"]
                 if document["id"] not in document_ids:
                     document_ids[document["id"]] = document["text"]
 
@@ -121,9 +122,11 @@ def main(
         if dataset_task is not None:
             document_ids = {dataset_task: document_ids[args.dataset_task]}
 
-        for document_id, text in tqdm.tqdm(
-            len(document_ids), desc=f"Generating data for documents"
+        for document_id in tqdm.tqdm(
+            list(document_ids.keys()), desc=f"Generating data for documents"
         ):
+            text = document_ids[document_id]
+
             # narrativeqa related text normalization
             text = text.split("*** END OF THIS PROJECT")[0]
             text = text.split("<pre>")[-1]
