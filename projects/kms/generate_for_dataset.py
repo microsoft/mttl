@@ -109,23 +109,21 @@ def main(
             )
             d.save_to_disk(output_path)
     elif dataset_type == "narrativeqa":
-        dataset = load_dataset("deepmind/narrativeqa")
-
-        document_ids = {}
-        for split in ["train", "validation", "test"]:
-            for document in dataset[split]:
-                document = document["document"]
-                if document["id"] not in document_ids:
-                    document_ids[document["id"]] = document["text"]
-
         # process only selected document ids
+        import glob
+
+        # infer docids from txt files in the dataset dir, but strip the extension
+        document_ids = [
+            os.path.basename(f).split(".")[0] for f in glob.glob(f"{dataset}/*.txt")
+        ]
+
         if dataset_task is not None:
-            document_ids = {dataset_task: document_ids[args.dataset_task]}
+            document_ids = [dataset_task]
 
         for document_id in tqdm.tqdm(
-            list(document_ids.keys()), desc=f"Generating data for documents"
+            list(document_ids), desc=f"Generating data for documents"
         ):
-            text = document_ids[document_id]
+            text = open(f"{dataset}/{document_id}.txt").read()
 
             # narrativeqa related text normalization
             text = text.split("*** END OF THIS PROJECT")[0]

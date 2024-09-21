@@ -161,11 +161,11 @@ class DatasetAugmenter:
 
         self.oai = "gpt" in model
         if not self.oai:
-            tokenizer = AutoTokenizer.from_pretrained(model)
+            self.tokenizer = AutoTokenizer.from_pretrained(model)
             self.sampling_params = SamplingParams(
                 n=num_generations,
                 top_p=generation_top_p,
-                stop_token_ids=[tokenizer.eos_token_id],
+                stop_token_ids=[self.tokenizer.eos_token_id],
                 max_tokens=max_continuation_length,
             )
             self.llm = LLM(
