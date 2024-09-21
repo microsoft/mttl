@@ -18,11 +18,7 @@ from vllm import LLM, SamplingParams
 
 from mttl.registrable import Registrable
 
-client = AsyncAzureOpenAI(
-    api_key=os.environ.get("OPENAI_API_KEY"),
-    azure_endpoint=os.environ.get("OPENAI_BASE_URL"),
-    api_version=os.environ.get("OPENAI_API_VERSION"),
-)
+global client
 
 
 @dataclass
@@ -179,6 +175,14 @@ class DatasetAugmenter:
                 tensor_parallel_size=torch.cuda.device_count(),
             )
         else:
+            global client
+
+            client = AsyncAzureOpenAI(
+                api_key=os.environ.get("OPENAI_API_KEY"),
+                azure_endpoint=os.environ.get("OPENAI_BASE_URL"),
+                api_version=os.environ.get("OPENAI_API_VERSION"),
+            )
+
             self.tokenizer = AutoTokenizer.from_pretrained(
                 "microsoft/Phi-3-medium-4k-instruct"
             )
