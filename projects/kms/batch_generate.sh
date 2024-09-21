@@ -3,6 +3,7 @@
 WORKER_IDX=$1
 NUM_WORKERS=$2
 NUM_DOCUMENTS=$3
+DATASET_DIR=$4
 
 DOCS_PER_WORKER=$(((NUM_DOCUMENTS+NUM_WORKERS-1)/NUM_WORKERS))
 FIRST_DOC=$((WORKER_IDX*DOCS_PER_WORKER+1))
@@ -18,7 +19,7 @@ while read DOCUMENT_ID; do
         continue
     fi
     echo "Running for document $DOCUMENT_ID"
-    python generate_for_dataset.py --dataset_type narrativeqa --dataset_task $DOCUMENT_ID --use_prompts summary,qa --output_path $AMLT_OUTPUT_DIR/$DOCUMENT_ID
+    python generate_for_dataset.py --dataset $DATASET_DIR --dataset_type narrativeqa --dataset_task $DOCUMENT_ID --use_prompts summary,qa --output_path $AMLT_OUTPUT_DIR/$DOCUMENT_ID
     if [[ $? == 0 ]]; then
         ((pass++))
     fi
