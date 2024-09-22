@@ -10,7 +10,6 @@ import torch
 import tqdm
 import vllm
 from datasets import Dataset, DatasetDict, DatasetInfo, load_dataset
-from openai import AsyncAzureOpenAI
 from tqdm import tqdm as ttqdm
 from tqdm.asyncio import tqdm as tqdm_async
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -175,6 +174,8 @@ class DatasetAugmenter:
                 tensor_parallel_size=torch.cuda.device_count(),
             )
         else:
+            from openai import AsyncAzureOpenAI
+
             global client
 
             client = AsyncAzureOpenAI(

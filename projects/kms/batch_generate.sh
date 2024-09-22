@@ -19,7 +19,7 @@ while read DOCUMENT_ID; do
         continue
     fi
     echo "Running for document $DOCUMENT_ID"
-    python generate_for_dataset.py --dataset $DATASET_DIR --dataset_type narrativeqa --dataset_task $DOCUMENT_ID --use_prompts summary,qa --output_path $AMLT_OUTPUT_DIR/$DOCUMENT_ID
+    CUDA_VISIBLE_DEVICES=0 python generate_for_dataset.py --dataset $DATASET_DIR --dataset_type narrativeqa --dataset_task $DOCUMENT_ID --use_prompts summary,qa --output_path $AMLT_OUTPUT_DIR/$DOCUMENT_ID
     if [[ $? == 0 ]]; then
         ((pass++))
     fi

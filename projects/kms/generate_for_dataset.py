@@ -11,7 +11,6 @@ import tqdm
 import vllm
 from dataset_augmenter import DatasetAugmenter
 from datasets import Dataset, DatasetDict, DatasetInfo, load_dataset
-from openai import AsyncAzureOpenAI
 from tqdm import tqdm as ttqdm
 from tqdm.asyncio import tqdm as tqdm_async
 
