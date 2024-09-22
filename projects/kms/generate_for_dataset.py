@@ -111,19 +111,33 @@ def main(
         # process only selected document ids
         import glob
 
-        # infer docids from txt files in the dataset dir, but strip the extension
-        document_ids = [
-            os.path.basename(f).split(".")[0] for f in glob.glob(f"{dataset}/*.txt")
-        ]
+        from datasets import disable_caching
+
+        # disable caching
+        disable_caching()
+
+        # flattened nqa dataset
+        dataset = load_dataset(dataset, split="train")
+
+        if "split" not in dataset.column_names:
+            raise ValueError(
+                "Dataset must have a 'split' column, did you call `create_nqa_dataset.py`?"
+            )
 
         if dataset_task is not None:
             document_ids = dataset_task.split(",")
+        else:
+            # infer docids from txt files in the dataset dir, but strip the extension
+            document_ids = dataset.unique("document_id")
 
         texts = []
         for document_id in tqdm.tqdm(
             list(document_ids), desc=f"Generating data for documents"
         ):
-            text = open(f"{dataset}/{document_id}.txt").read()
+            text = dataset.filter(
+                lambda x: x["document_id"] == document_id,
+                num_proc=0,
+            )[0]["text"]
 
             # narrativeqa related text normalization
             text = text.split("*** END OF THIS PROJECT")[0]
