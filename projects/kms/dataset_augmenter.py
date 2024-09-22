@@ -199,7 +199,7 @@ class DatasetAugmenter:
         dataset: Dataset,
     ) -> Dataset:
 
-        prompts, chunks, types, output_dataset = [], [], [], []
+        prompts, chunks, types, output_dataset, rests = [], [], [], [], []
 
         for doc_idx in range(len(dataset)):
             text = dataset[doc_idx]["text"]
@@ -212,6 +212,11 @@ class DatasetAugmenter:
                     prompts.append(
                         task.create_task(chunk, add_chat_template=not self.oai)
                     )
+                    # append the rest of the columns
+                    rests.append({})
+                    for column in dataset.column_names:
+                        if column != "text":
+                            rests[-1][column] = dataset[doc_idx][column]
 
         if not self.oai:
             outputs = self.llm.generate(prompts, self.sampling_params)
@@ -226,13 +231,14 @@ class DatasetAugmenter:
                 )
             )
 
-        for generation_output, chunk, type in zip(outputs, chunks, types):
+        for generation_output, chunk, type, rest in zip(outputs, chunks, types, rests):
             section = {}
             section["input"] = chunk
             section["type"] = type
             section["outputs"] = []
             for i, response in enumerate(generation_output.outputs):
                 section["outputs"].append(response.text)
+            section.update(rest)
             output_dataset.append(section)
 
         d = Dataset.from_list(output_dataset)

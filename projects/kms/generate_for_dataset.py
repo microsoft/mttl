@@ -117,8 +117,9 @@ def main(
         ]
 
         if dataset_task is not None:
-            document_ids = [dataset_task]
+            document_ids = dataset_task.split(",")
 
+        texts = []
         for document_id in tqdm.tqdm(
             list(document_ids), desc=f"Generating data for documents"
         ):
@@ -129,27 +130,21 @@ def main(
             text = text.split("<pre>")[-1]
             text = text.split("</pre>")[0]
             text = text.replace("<b>", "").replace("</b>", "")
+            texts.append({"text": text, "document_id": document_id})
 
-            # do augmentation
-            output_dataset = augmenter.augment(Dataset.from_list([{"text": text}]))
+        # do augmentation
+        concat_dataset = augmenter.augment(Dataset.from_list(texts))
+        os.makedirs(output_path, exist_ok=True)
 
-            # add subject column
-            output_dataset = output_dataset.map(
-                lambda x: {"document_id": document_id}, num_proc=16
-            )
-
-            concat_dataset.extend(output_dataset.to_list())
-            os.makedirs(output_path, exist_ok=True)
-
-            d = DatasetDict(
-                {
-                    "train": Dataset.from_list(
-                        concat_dataset,
-                        info=DatasetInfo(description=json.dumps(args)),
-                    )
-                }
-            )
-            d.save_to_disk(output_path)
+        d = DatasetDict(
+            {
+                "train": Dataset.from_list(
+                    concat_dataset,
+                    info=DatasetInfo(description=json.dumps(args)),
+                )
+            }
+        )
+        d.save_to_disk(output_path)
 
     if push_to_hub is not None:
         d.push_to_hub(push_to_hub)
