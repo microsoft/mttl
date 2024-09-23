@@ -194,12 +194,17 @@ if __name__ == "__main__":
     from mttl.models.containers.selectors import ArrowSelector, ArrowSelectorConfig
     from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
 
+    if not os.getenv("MODEL_PARSER_API"):
+        raise RuntimeError("MODEL_PARSER_API is not set")
+
+    mix_config = MixEvalConfig()
+    mix_config.api_base_url = "https://api.ai-gaochao.cn/v1"
     model = MultiExpertModel.from_pretrained_library(
-        "sordonia/Phi-3.5-mini-instruct-28Aug",
+        "zhan1993/private_library_phi3_flan_embedding_cluster10",
         device_map="cuda:0",
         attn_implementation="flash_attention_2",
         selector_config=ArrowSelectorConfig(top_k=2),
     )
-    MixEvalEvaluator().evaluate(
+    MixEvalEvaluator(mix_config).evaluate(
         model, output_path="/tmp/mixeval_phi_3.5_arrow/", verbose=True, recompute=True
     )
