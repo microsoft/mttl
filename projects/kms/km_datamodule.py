@@ -117,14 +117,6 @@ class KMDatasetModule(DataModule):
                     return_dict[self.config.task_name_field].append(subject)
             return return_dict
 
-        dataset = dataset.map(
-            expand_targets_and_chat,
-            batched=True,
-            batch_size=1000,
-            desc="Applying chat template...",
-            remove_columns=["input", "outputs", "type"],
-        )
-
         (
             self._task_names,
             self._task_to_id,
@@ -136,6 +128,14 @@ class KMDatasetModule(DataModule):
             self.config.task_name_field,
             self.config.finetune_task_name,
             n_proc=n_proc,
+        )
+
+        train_dataset = train_dataset.map(
+            expand_targets_and_chat,
+            batched=True,
+            batch_size=1000,
+            desc="Applying chat template...",
+            remove_columns=["input", "outputs", "type"],
         )
 
         self.train_dataset, self.dev_dataset = self.create_train_valid_split(

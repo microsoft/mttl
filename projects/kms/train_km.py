@@ -129,11 +129,12 @@ def train_km(training_args):
 
     callbacks = []
     if training_args.nqa_dataset is not None:
-        from nqa_callback import NQACallback
+        # load the NQA callback to monitor zero-shot performance
+        from nqa_callback import NQAZeroShotCallback
 
         data_args = copy.deepcopy(training_args)
         data_args.dataset = training_args.nqa_dataset
-        callback = NQACallback(model, data_args)
+        callback = NQAZeroShotCallback(model, data_args)
         callbacks.append(callback)
 
     if training_args.loss_function == "dcd":

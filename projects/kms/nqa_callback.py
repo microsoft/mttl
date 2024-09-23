@@ -14,7 +14,7 @@ from mttl.evaluators.rouge_evaluator import RougeEvaluator
 from mttl.logging import maybe_wandb_log
 
 
-class NQACallback(TrainerCallback):
+class NQAZeroShotCallback(TrainerCallback):
     METRIC_KEY = "nqa"
 
     def __init__(self, model, args) -> None:

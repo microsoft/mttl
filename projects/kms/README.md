@@ -25,3 +25,13 @@ This will create a HF dataset, that can be loaded with `datasets.load_from_disk`
 To read the dataset, we can just use `KMDataloader`.
 
 To train the KMs, just use `python train_km.py -c phi-3.json -k dataset=... -k finetune_task_name=MMLU_SUBJECT expert_name=MMLU_SUBJECT`
+
+### Train KMs on NarrativeQA
+
+Assuming generated data under `./nqa_summary_data`
+
+1. Create a "compact" version of the dataset by `python create_nqa_dataset.py --hf_id your_hf_id/narrativeqa`
+
+2. Use `python train_km.py -c phi-3.json -k dataset=local://nqa_summary_data -k finetune_task_name=NQA_DOCUMENT_ID task_name_field=document_id nqa_dataset=your_hf_id/narrativeqa`
+
+`nqa_dataset` might be left `None` if one doesn't want zero-shot eval during training.
