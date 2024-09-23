@@ -3,6 +3,8 @@ from collections import defaultdict
 from dataclasses import dataclass
 from functools import partial
 
+import numpy as np
+
 from mttl.datamodule.base import DataModule, DatasetConfig, DefaultCollator
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from mttl.logging import logger
@@ -130,6 +132,7 @@ class KMDatasetModule(DataModule):
             n_proc=n_proc,
         )
 
+        out = expand_targets_and_chat(train_dataset[:2])
         train_dataset = train_dataset.map(
             expand_targets_and_chat,
             batched=True,
@@ -138,6 +141,111 @@ class KMDatasetModule(DataModule):
             remove_columns=["input", "outputs", "type"],
         )
 
+        self.train_dataset, self.dev_dataset = self.create_train_valid_split(
+            train_dataset
+        )
+        self.test_dataset = self.dev_dataset
+
+
+@dataclass
+class PrefixDatasetConfig(KMDatasetConfig):
+    # Given a passage, what proportion to use as a label ?
+    label_frac: float = 0.23  # to match summary proportion
+    # Once we have a label / target within a passage, how
+    # many tokens to use as "warmup" ?
+    prefix_length: int = 64
+
+
+class PrefixDataCollator(DefaultCollator):
+    def __call__(self, batch):
+
+        assert "input_ids" in batch[0], "dataset should be tokenized"
+
+        # TODO: Do we want to pack / pad samples differently with / without context ?
+        return self.packed_collate(batch)
+
+
+@DataModule.register("prefix_km", config_cls=PrefixDatasetConfig)
+class PrefixDatasetModule(DataModule):
+    collate_class = PrefixDataCollator
+    # for this dataset, we will always pre-tokenize the inputs
+    # so that we can split prefix / labels in tokens vs words
+
+    def setup_dataset(self):
+        dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
+        n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
+
+        assert "train" in dataset
+
+        def tokenize_datapoint(data):
+            out = {}
+            for key in data.keys():
+                if key == "input":
+                    toked = self.tokenizer(
+                        data[key],
+                        max_length=self.config.prefix_length,
+                        padding="longest",
+                        pad_to_multiple_of=1,
+                        return_tensors="np",
+                    )
+                    out["input_ids"] = toked["input_ids"].squeeze().astype("int64")
+                    out["attention_mask"] = (
+                        toked["attention_mask"].squeeze().astype("float32")
+                    )
+                    out["seq_lens"] = np.array([len(out["input_ids"])])
+                else:
+                    out[key] = data[key]
+            return out
+
+        dataset = dataset.map(tokenize_datapoint, batched=False, num_proc=20)
+
+        # finally, we build the label. First, we filter out any point that is shorter than
+        # the desired prefix length
+        dataset = dataset.filter(
+            lambda x: len(x["input"]) >= self.config.prefix_length, num_proc=20
+        )
+
+        # next, we build `label_ids`
+        def build_label_ids(data):
+            all_tokens = data["input_ids"]
+            label_ids = all_tokens[1:]
+            input_ids = all_tokens[:-1]
+            data["attention_mask"] = data["attention_mask"][:-1]
+
+            # input ids will be split into
+            # [ context ] [warmup] [labels]
+            # where the distillation loss will be measured on the [labels]
+            # the input to the frozen model will be [context] [warmup] [labels]
+            # the input to the KM model will be [warmup] [labels]
+
+            label_start = int(len(input_ids) * self.config.label_frac)
+            warmup_start = label_start - self.config.prefix_length
+
+            # ensure that nothing before `label_start` has loss computed
+            label_ids[:label_start] = [-100] * label_start
+
+            data["input_ids"] = input_ids
+            data["nc_input_ids"] = input_ids[warmup_start:]
+            data["label_ids"] = label_ids
+            data["nc_label_ids"] = label_ids[warmup_start:]
+            data["nc_attention_mask"] = data["attention_mask"][warmup_start:]
+
+            return data
+
+        dataset = dataset.map(build_label_ids, batched=False, num_proc=20)
+
+        (
+            self._task_names,
+            self._task_to_id,
+            train_dataset,
+            _,
+            _,
+        ) = maybe_filter_hf_dataset_by_task(
+            dataset,
+            self.config.task_name_field,
+            self.config.finetune_task_name,
+            n_proc=n_proc,
+        )
         self.train_dataset, self.dev_dataset = self.create_train_valid_split(
             train_dataset
         )
