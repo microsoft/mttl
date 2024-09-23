@@ -4,7 +4,7 @@ datasets>=2.20.0
 pytorch-lightning>=2.3.3
 accelerate
 deepspeed
-huggingface_hub==0.23.2
+huggingface_hub
 click
 wandb
 rouge

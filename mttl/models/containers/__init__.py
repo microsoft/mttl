@@ -16,7 +16,6 @@ from mttl.models.containers.selectors.base import (
     get_selector,
 )
 from mttl.models.library.expert import Expert
-from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.modifiers.base import Modifier
 from mttl.utils import logger
 
