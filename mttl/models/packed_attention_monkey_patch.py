@@ -48,11 +48,11 @@ def flash_attn_varlen_func_wrapper(
     causal,
     **flash_kwargs,
 ):
-    if query_states.shape != key_states.shape:
-        raise ValueError("q and k must have the same shape")
-
     context = InfoContainer.get()
     if context is not None and context.routing_infos.packed_seq_lens is not None:
+        if query_states.shape != key_states.shape:
+            raise ValueError("q and k must have the same shape")
+
         warn_once(
             "\n\n\n\nUsing the Flash Attention 2 Sequence Packing Wrapper\n\n\n\n"
         )

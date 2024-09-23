@@ -19,5 +19,7 @@
     "warmup_proportion": 0.06,
     "max_input_length": 4096,
     "max_output_length": 64,
-    "truncation_side": "left"
+    "padding_side": "left",
+    "truncation_side": "left",
+    "attn_implementation": "flash_attention_2"
 }

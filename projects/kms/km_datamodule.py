@@ -79,14 +79,14 @@ class KMDatasetModule(DataModule):
                 "source": [],
                 "target": [],
                 "prompt": [],
-                "subject": [],
+                self.config.task_name_field: [],
             }
 
             for i in range(len(example["input"])):
                 input = example["input"][i]
                 outputs = example["outputs"][i]
                 type = example["type"][i]
-                subject = example["subject"][i]
+                subject = example[self.config.task_name_field][i]
 
                 prompt = self.tokenizer.apply_chat_template(
                     [
@@ -114,7 +114,7 @@ class KMDatasetModule(DataModule):
                     return_dict["source"].append(source)
                     return_dict["target"].append(output)
                     return_dict["prompt"].append(prompt)
-                    return_dict["subject"].append(subject)
+                    return_dict[self.config.task_name_field].append(subject)
             return return_dict
 
         dataset = dataset.map(

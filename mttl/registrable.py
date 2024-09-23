@@ -13,7 +13,10 @@ class Registrable:
 
         def add_to_registry(subclass):
             if name in registry:
-                raise ValueError(f"Cannot register {name} multiple times.")
+                if subclass != registry[name][0]:
+                    raise ValueError(f"Cannot register {name} multiple times.")
+                else:
+                    return subclass
 
             logger.info(
                 "Registering %s: adding %s as %s", cls.__name__, subclass.__name__, name

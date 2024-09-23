@@ -1,3 +1,4 @@
+import copy
 import logging
 from dataclasses import dataclass
 
@@ -6,7 +7,7 @@ import torch
 import torch.nn.functional as F
 
 # register this datamodule!
-from km_dataloader import KMDatasetModule
+from km_datamodule import KMDatasetModule
 from lightning_fabric import seed_everything
 
 from mttl.arguments import ExpertConfig
@@ -98,6 +99,8 @@ class DeepContextDistillationTrainer(ExpertModelTrainer):
 @dataclass
 class KMArguments(ExpertConfig):
     loss_function: str = "dcd"
+    # set the following if you want to enable the NQA callback during training
+    nqa_dataset: str = "sordonia/narrativeqa"
 
 
 def train_km(training_args):
@@ -116,7 +119,7 @@ def train_km(training_args):
         modifier_config=args.modifier_config,
     )
 
-    module = ExpertModel(
+    model = ExpertModel(
         model_config,
         load_in_4bit=training_args.load_in_4bit,
         load_in_8bit=training_args.load_in_8bit,
@@ -124,10 +127,20 @@ def train_km(training_args):
         attn_implementation=training_args.attn_implementation,
     )
 
+    callbacks = []
+    if training_args.nqa_dataset is not None:
+        from nqa_callback import NQACallback
+
+        data_args = copy.deepcopy(training_args)
+        data_args.dataset = training_args.nqa_dataset
+        callback = NQACallback(model, data_args)
+        callbacks.append(callback)
+
     if training_args.loss_function == "dcd":
         trainer: DeepContextDistillationTrainer = DeepContextDistillationTrainer(
-            model=module,
+            model=model,
             args=training_args,
+            callbacks=callbacks,
         )
     else:
         raise ValueError(f"Unsupported loss function: {training_args.loss_function}")
