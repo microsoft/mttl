@@ -135,7 +135,6 @@ class KMDatasetModule(DataModule):
             n_proc=n_proc,
         )
 
-        out = expand_targets_and_chat(train_dataset[:2])
         train_dataset = train_dataset.map(
             expand_targets_and_chat,
             batched=True,
