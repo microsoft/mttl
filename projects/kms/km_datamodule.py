@@ -174,7 +174,7 @@ class DocumentDataset(torch.utils.data.Dataset):
             for _ in range(self.chunks_per_doc[doc_idx]):
                 self.idx_to_doc.append(doc_idx)
 
-    def build_label_ids(self, datapoint):
+    def build_labels(self, datapoint):
         all_tokens = datapoint["input_ids"]
         label_ids = all_tokens[1:]
         input_ids = all_tokens[:-1]
@@ -186,20 +186,17 @@ class DocumentDataset(torch.utils.data.Dataset):
         # the input to the frozen model will be [context] [warmup] [labels]
         # the input to the KM model will be [warmup] [labels]
 
-        label_start = int(len(input_ids) * self.config.label_frac)
-        warmup_start = label_start - self.config.prefix_length
+        label_start = max(0, int(len(input_ids) * self.config.label_frac))
+        warmup_start = max(0, label_start - self.config.prefix_length)
 
         # ensure that nothing before `label_start` has loss computed
         label_ids[:label_start] = [-100] * label_start
 
         datapoint["input_ids"] = input_ids
         datapoint["nc_input_ids"] = input_ids[warmup_start:]
-        datapoint["label_ids"] = label_ids
-        datapoint["nc_label_ids"] = label_ids[warmup_start:]
+        datapoint["labels"] = label_ids
+        datapoint["nc_labels"] = label_ids[warmup_start:]
         datapoint["nc_attention_mask"] = datapoint["attention_mask"][warmup_start:]
-
-        # adding a dummy `labels` column to trigger `compute_loss` in evalutation step
-        datapoint["labels"] = None
 
         return datapoint
 
@@ -230,7 +227,7 @@ class DocumentDataset(torch.utils.data.Dataset):
             else:
                 output[key] = self.docs[doc_idx][key]
 
-        output = self.build_label_ids(output)
+        output = self.build_labels(output)
         return output
 
     def __len__(self):
@@ -289,7 +286,7 @@ class LMDataModule(DataModule):
                 if key == "text":
                     toked = self.tokenizer(
                         data[key],
-                        max_length=self.config.prefix_length,
+                        max_length=self.config.max_input_length,
                         padding="longest",
                         pad_to_multiple_of=1,
                         return_tensors="np",
