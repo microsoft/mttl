@@ -30,6 +30,7 @@ from transformers.trainer import (
 )
 
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
+from mttl.models.get_scheduler import get_scheduler
 
 if is_accelerate_available():
     from accelerate import Accelerator
@@ -144,6 +145,7 @@ class IterativeDCDTrainer(DeepContextDistillationTrainer):
         num_update_steps_per_epoch = len_dataloader // args.gradient_accumulation_steps
         num_update_steps_per_epoch = max(num_update_steps_per_epoch, 1)
         num_examples = self.num_examples(train_dataloader)
+
         if args.max_steps > 0:
             max_steps = args.max_steps
             num_train_epochs = args.max_steps // num_update_steps_per_epoch + int(
@@ -170,10 +172,19 @@ class IterativeDCDTrainer(DeepContextDistillationTrainer):
 
         delay_optimizer_creation = False
 
-        # We need to reset the scheduler, as its parameters may be different on subsequent calls
-        if self._created_lr_scheduler:
-            self.lr_scheduler = None
-            self._created_lr_scheduler = False
+        self.mttl_args.total_steps = max_steps
+        if self.mttl_args.warmup_steps == -1 or self.mttl_args.warmup_proportion > 0.0:
+            logger.warning(
+                "Warmup proportion is set to {}, has priority over warmup_steps".format(
+                    args.warmup_proportion
+                )
+            )
+
+            self.mttl_args.warmup_steps = int(
+                self.mttl_args.warmup_proportion * max_steps
+            )
+
+        self.lr_scheduler = get_scheduler(self.optimizer, self.mttl_args)
 
         if self.is_deepspeed_enabled:
             raise ValueError("DeepSpeed is not supported in iterative training.")
@@ -355,7 +366,8 @@ class IterativeDCDTrainer(DeepContextDistillationTrainer):
         total_batched_samples = 0
         for epoch in range(epochs_trained, num_train_epochs):
             # every epoch, we create a new datamodule for km training!
-            epoch_iterator = self.get_train_dataloader()
+            if epoch % self.mttl_args.generate_every_n_epoch == 0:
+                epoch_iterator = self.get_train_dataloader()
 
             if hasattr(epoch_iterator, "set_epoch"):
                 epoch_iterator.set_epoch(epoch)
@@ -643,6 +655,7 @@ class IterativeDCDTrainer(DeepContextDistillationTrainer):
 
     def get_eval_dataloader(self, eval_dataset=None):
         if self.current_epoch_datamodule is not None:
+            logger.info("Using current epoch datamodule for evaluation.")
             return self.current_epoch_datamodule.val_dataloader()
         else:
             raise ValueError("No current epoch datamodule found.")
@@ -659,10 +672,8 @@ class IterativeDCDTrainer(DeepContextDistillationTrainer):
         if self.train_dataset is None:
             raise ValueError("Trainer: training requires a train_dataset.")
 
-        current_state_epoch = self.state.epoch or 0
-        dataset_path = (
-            self.mttl_args.output_dir + f"/train_dataset_{current_state_epoch}"
-        )
+        current_state_epoch = int(self.state.epoch or 0)
+        dataset_path = self.mttl_args.output_dir + f"/gen__epoch_{current_state_epoch}"
 
         if not os.path.exists(dataset_path):
             train_dataset = self.generate_epoch_data(self.train_dataset)
@@ -675,6 +686,7 @@ class IterativeDCDTrainer(DeepContextDistillationTrainer):
                 model=self.mttl_args.model,
                 model_family="gpt",
                 padding_side="left",
+                truncation_side="left",
                 task_name_field=self.mttl_args.task_name_field,
                 task_source_field=self.mttl_args.task_source_field,
                 train_batch_size=self.mttl_args.train_batch_size,
@@ -684,7 +696,6 @@ class IterativeDCDTrainer(DeepContextDistillationTrainer):
             )
         )
         self.current_epoch_datamodule = datamodule
-
         return self.accelerator.prepare(datamodule.train_dataloader())
 
     def generate_epoch_data(self, train_dataset):
@@ -698,6 +709,8 @@ class IterativeDCDTrainer(DeepContextDistillationTrainer):
 
         device = self.model.device
 
+        # we need to save the model in the temp directory, this moves it to CPU so that VLLM
+        # doesn't complain, one alternative is to use 2 gpus, one for generation, one for training
         self.model.merge_and_save_base_model(self.temp_directory, device="cpu")
 
         # Generate a set of prompts
@@ -705,14 +718,14 @@ class IterativeDCDTrainer(DeepContextDistillationTrainer):
             self.temp_directory,
             block_size=2048,
             max_continuation_length=768,
-            num_generations=32,
+            num_generations=16,
             generation_top_p=0.95,
         )
         augmenter.add_task("summary")
         augmented_dataset = augmenter.augment(dataset=train_dataset)
-        del augmenter
 
         # Force garbage collection
+        del augmenter
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -726,6 +739,7 @@ class IterKMArguments(ExpertConfig):
     dataset_type: str = "text_dataset"
     dataset: str = "sordonia/narrativeqa"
     nqa_dataset: str = "sordonia/narrativeqa"
+    generate_every_n_epoch: int = 1
 
 
 def train_km(training_args):

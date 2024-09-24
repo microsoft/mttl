@@ -35,7 +35,9 @@ class NQAZeroShotCallback(TrainerCallback):
         **kwargs,
     ):
         if state.is_world_process_zero:
-            rougeL = self.evaluator.evaluate(self.model, split="test")
+            rougeL, predictions = self.evaluator.evaluate(
+                self.model, split="test", return_predictions=True
+            )
             metrics_ = {f"{self.METRIC_KEY}_test/rougeL": rougeL}
 
             # record in log_history
