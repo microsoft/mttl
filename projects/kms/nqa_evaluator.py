@@ -20,7 +20,7 @@ class NQAZeroShotEvaluator(RougeEvaluator):
         )
         super().__init__(datamodule, generation_kwargs=generation_kwargs)
 
-    def evaluate(self, model, split="test"):
+    def evaluate(self, model, split="test", **kwargs):
         if self.datamodule.train_dataset:
             split_ = "train"
         elif self.datamodule.dev_dataset:
@@ -34,4 +34,4 @@ class NQAZeroShotEvaluator(RougeEvaluator):
         if not dataset_:
             split = split_
 
-        return super().evaluate(model, split=split)
+        return super().evaluate(model, split=split, **kwargs)
