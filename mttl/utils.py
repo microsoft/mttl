@@ -28,7 +28,7 @@ def retry(max_retries=10, wait_seconds=60):
                     print(e, type(e), "retrying...")
                     if attempt < max_retries:
                         print(f"Waiting {wait_seconds} seconds before retrying...")
-                        time.sleep(wait_seconds)
+                        sleep(wait_seconds)
             raise RuntimeError(
                 f"Function {wrapper.__name__} failed after {max_retries} attempts."
             )
