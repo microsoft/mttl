@@ -21,7 +21,11 @@ from mttl.models.containers.selectors.base import (
 from mttl.models.expert_config import BaseExpertModelConfig
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.library.expert_library import ExpertLibrary
-from mttl.models.modifiers.base import AutoModifierConfig, Modifier
+from mttl.models.modifiers.base import (
+    AutoModifierConfig,
+    MergeableModifierMixin,
+    Modifier,
+)
 from mttl.models.modifiers.modify_model import modify_transformer
 
 
@@ -54,6 +58,47 @@ class ExpertModel(BaseExpertModel):
         for name, module in self.model.named_modules():
             if isinstance(module, Modifier):
                 module.enable()
+
+    def merge_and_save_base_model(self, output_dir, device="cpu"):
+        """
+        Merge loaded adapters and save the base model in the huggingface format
+        to the output directory. Moves the model to the specified device before merging.
+        """
+        import copy
+
+        from transformers import AutoTokenizer
+
+        # move model to cpu to avoid memory issues
+        self.model.to(device)
+
+        merged = []
+        model_copy = copy.deepcopy(self.model)
+
+        for name, module in model_copy.named_modules():
+            for c_name, child in module.named_children():
+                if isinstance(child, Modifier):
+                    if isinstance(child, MergeableModifierMixin):
+                        # merge the adapter with the layer
+                        child.merge_with_layer()
+                        # remove the modifier and set the layer
+                        setattr(
+                            module,
+                            c_name,
+                            child.layer,
+                        )
+                        merged.append(name)
+                    else:
+                        raise ValueError(
+                            "Modifier {} is not mergeable!".format(child.__class__)
+                        )
+
+        logger.info("Merged layers: %s" % ", ".join(merged))
+        logger.info("Saving merged model to: %s" % output_dir)
+
+        model_copy.save_pretrained(output_dir)
+        tokenizer = AutoTokenizer.from_pretrained(
+            self.config.base_model
+        ).save_pretrained(output_dir)
 
     def as_expert(self, training_config=None):
         state_dict = self.state_dict()
