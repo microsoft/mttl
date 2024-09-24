@@ -14,7 +14,7 @@ from mttl.arguments import ExpertConfig
 from mttl.logging import setup_logging
 from mttl.models.expert_model import ExpertModel, ExpertModelConfig
 from mttl.models.hf.trainer import ExpertModelTrainer
-from mttl.utils import remote_login
+from mttl.utils import create_library, remote_login, upload_library
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -175,6 +175,11 @@ def train_km(training_args):
     best_model_path = trainer.state.best_model_checkpoint
     if best_model_path:
         logger.info("Best model checkpoint: %s", best_model_path)
+
+    # Maybe save to Expert Library
+    if args.library_id:
+        expert_library = create_library(args)
+        upload_library(expert_library, model)
 
 
 if __name__ == "__main__":
