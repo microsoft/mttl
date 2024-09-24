@@ -96,71 +96,21 @@ class DeepContextDistillationTrainer(ExpertModelTrainer):
         return (loss, outputs.logits) if return_outputs else loss
 
 
-class TruncatedContextTrainer(DeepContextDistillationTrainer):
-    def compute_loss(self, model, inputs, return_outputs=False):
+class LMTrainer(ExpertModelTrainer):
+    """Standard next-token prediction objective"""
 
-        # document chunk
+    def compute_loss(self, model, inputs, return_outputs=False):
         input_ids = inputs["input_ids"]
-        labels = inputs["label_ids"]
+        labels = inputs["labels"]
         attention_mask = inputs["attention_mask"]
 
-        # subset of the document chunk
-        nc_input_ids = inputs["nc_input_ids"]
-        nc_labels = inputs["nc_label_ids"]
-        nc_attention_mask = inputs["nc_attention_mask"]
-
-        # do a forward pass on the full input
-        with torch.no_grad():
-            # for the context-aware pass, we need to disable the adapter
-            get_original_model(model).disable_adapter()
-
-            outputs = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                output_hidden_states=True,
-                return_dict=True,
-            )
-            target_hidden_states = [
-                hidden_state[labels != -100, ...]
-                for hidden_state in outputs.hidden_states
-            ]
-            target_logits = outputs.logits[labels != -100, :]
-
-        # for the context-less pass, we need to enable the adapter
-        get_original_model(model).enable_adapter()
-
         outputs = model(
-            input_ids=nc_input_ids,
-            attention_mask=nc_attention_mask,
-            output_hidden_states=True,
-            return_dict=True,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=labels,
         )
 
-        losses = []
-        for actual_states, target_states in zip(
-            outputs.hidden_states, target_hidden_states
-        ):
-            actual_states = actual_states[nc_labels != -100, :]
-
-            # Calculate mean magnitude of target states
-            mean = torch.sum(torch.abs(target_states)) / (actual_states.size(-1))
-
-            losses.append(
-                # Loss is the mean abs difference between target and predicted states,
-                # normalised by mean magnitude of target states
-                torch.sum(torch.abs(actual_states - target_states))
-                / (mean * np.prod(target_states.shape))
-            )
-
-        loss = torch.mean(torch.stack(losses))
-
-        # Add KL divergence between target and predicted output distributions to loss
-        target_probs = F.softmax(target_logits, dim=-1)
-        preds = F.log_softmax(outputs.logits[nc_labels != -100, ...], dim=-1)
-        kl_loss = self.kl_loss(preds, target_probs).sum(dim=-1).mean()
-        loss = loss + kl_loss
-
-        return (loss, outputs.logits) if return_outputs else loss
+        return (outputs.loss, outputs.logits) if return_outputs else outputs.loss
 
 
 @dataclass
@@ -210,8 +160,8 @@ def train_km(training_args):
             args=training_args,
             callbacks=callbacks,
         )
-    elif training_args.loss_function == "tcd":
-        trainer: TruncatedContextTrainer = TruncatedContextTrainer(
+    elif training_args.loss_function == "lm":
+        trainer: LMTrainer = LMTrainer(
             model=model,
             args=training_args,
             callbacks=callbacks,
