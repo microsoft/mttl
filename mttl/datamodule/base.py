@@ -553,7 +553,7 @@ class DataModule(LightningDataModule, Registrable):
             train_dataset,
             batch_size=self.config.train_batch_size,
             shuffle=True,
-            num_workers=8,
+            num_workers=0,
             pin_memory=True,
             persistent_workers=False,
             collate_fn=self.collate_fn,
@@ -568,7 +568,7 @@ class DataModule(LightningDataModule, Registrable):
             dev_dataset,
             batch_size=self.config.predict_batch_size,
             shuffle=shuffle,
-            num_workers=8,
+            num_workers=0,
             pin_memory=False,
             persistent_workers=False,
             collate_fn=self.collate_fn,
@@ -879,6 +879,8 @@ class DataModule(LightningDataModule, Registrable):
                 dataset = getattr(self, f"{split}_dataset")
 
                 logger.info(f"Packing sequences for {split} dataset")
+
+                # TODO: check that dataset has not already been tokenized
                 dataset = self.tokenize_dataset(dataset)
                 dataset = self.pack_sequences(
                     dataset, max_sequences=self.config.max_seq_per_pack

@@ -96,6 +96,23 @@ class DeepContextDistillationTrainer(ExpertModelTrainer):
         return (loss, outputs.logits) if return_outputs else loss
 
 
+class LMTrainer(ExpertModelTrainer):
+    """Standard next-token prediction objective"""
+
+    def compute_loss(self, model, inputs, return_outputs=False):
+        input_ids = inputs["input_ids"]
+        labels = inputs["labels"]
+        attention_mask = inputs["attention_mask"]
+
+        outputs = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=labels,
+        )
+
+        return (outputs.loss, outputs.logits) if return_outputs else outputs.loss
+
+
 @dataclass
 class KMArguments(ExpertConfig):
     loss_function: str = "dcd"
@@ -139,6 +156,12 @@ def train_km(training_args):
 
     if training_args.loss_function == "dcd":
         trainer: DeepContextDistillationTrainer = DeepContextDistillationTrainer(
+            model=model,
+            args=training_args,
+            callbacks=callbacks,
+        )
+    elif training_args.loss_function == "lm":
+        trainer: LMTrainer = LMTrainer(
             model=model,
             args=training_args,
             callbacks=callbacks,
