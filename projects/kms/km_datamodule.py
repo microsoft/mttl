@@ -22,7 +22,7 @@ class KMDatasetConfig(DatasetConfig):
     # there might be multiple types, i.e. "qa", "summary", or maybe else in the future
     use_only_type: str = None
     # for each input example, we could have several outputs (e.g. several summaries or QA pairs), we can only use N of these
-    num_outputs_per_chunk: int = 4
+    num_outputs_per_chunk: int = -1
     # field in the dataset that contains the task name
     task_name_field: str = "subject"
     # field in the dataset that contains the task source
@@ -61,12 +61,14 @@ class KMDatasetModule(DataModule):
         def filter_targets(example, n):
             return {"outputs": example["outputs"][:n]}
 
-        logger.info(
-            f"Keeping only {self.config.num_outputs_per_chunk} outputs per document."
-        )
-        dataset = dataset.map(
-            partial(filter_targets, n=self.config.num_outputs_per_chunk), num_proc=20
-        )
+        if self.config.num_outputs_per_chunk > 0:
+            logger.info(
+                f"Keeping only {self.config.num_outputs_per_chunk} outputs per document."
+            )
+            dataset = dataset.map(
+                partial(filter_targets, n=self.config.num_outputs_per_chunk),
+                num_proc=20,
+            )
 
         if self.config.use_only_type:
             # filter types (e.g. use only summary, or use only qas)
@@ -139,7 +141,7 @@ class KMDatasetModule(DataModule):
             batched=True,
             batch_size=1000,
             desc="Applying chat template...",
-            remove_columns=["input", "outputs", "type"],
+            remove_columns=train_dataset.column_names,
         )
 
         self.train_dataset, self.dev_dataset = self.create_train_valid_split(
