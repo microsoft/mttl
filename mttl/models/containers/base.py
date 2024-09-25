@@ -1,6 +1,7 @@
 import abc
 from typing import List, Union
 
+import torch
 from pyparsing import abstractmethod
 from torch import nn
 
@@ -21,6 +22,12 @@ class Container(abc.ABC):
 
     @abc.abstractmethod
     def __len__(self):
+        pass
+
+
+class MergeableContainer(abc.ABC):
+    @abstractmethod
+    def merge_expert(self, expert_name):
         pass
 
 
@@ -183,3 +190,12 @@ class ExpertContainer(nn.Module, Container):
 
     def __len__(self):
         return len(self.expert_names)
+
+
+def clear_containers(model: torch.nn.Module) -> torch.nn.Module:
+    """Clears all containers in the model."""
+    for mn, m in model.named_modules():
+        for cn, c in m.named_children():
+            if isinstance(c, ExpertContainer):
+                setattr(m, cn, c.layer)
+    return model

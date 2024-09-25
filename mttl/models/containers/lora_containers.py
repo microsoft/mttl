@@ -3,7 +3,7 @@ from pyparsing import Union
 from torch import Tensor, nn
 
 from mttl.logging import warn_once
-from mttl.models.containers.base import ExpertContainer
+from mttl.models.containers.base import ExpertContainer, MergeableContainer
 from mttl.models.containers.selectors.selector_output import (
     BatchExpertsAndWeightsSelectorOutput,
     BatchExpertsSelectorOutput,
@@ -16,7 +16,7 @@ from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoR
 from mttl.models.modifiers.modify_model import get_modifier_name
 
 
-class LoRAExpertContainer(ExpertContainer):
+class LoRAExpertContainer(ExpertContainer, MergeableContainer):
     __supports_configs__ = [LoRAConfig]
 
     def __init__(
@@ -39,6 +39,17 @@ class LoRAExpertContainer(ExpertContainer):
 
         self.merged_expert_names = []
         self.experts = nn.ModuleDict({})
+
+    def merge_expert(self, expert_name):
+        if expert_name not in self.expert_infos:
+            raise ValueError(
+                "Expert {} not found in the list of experts".format(expert_name)
+            )
+
+        self.experts[expert_name].merge_with_layer()
+        self.expert_infos.pop(expert_name)
+        self.experts.pop(expert_name)
+        self.merged_expert_names.append(expert_name)
 
     def on_add_expert(
         self,
@@ -77,12 +88,8 @@ class LoRAExpertContainer(ExpertContainer):
         if not len(self.experts):
             return
 
-        for expert_name, expert_module in self.experts.items():
-            expert_module.merge_with_layer()
-
-        self.merged_expert_names.extend(self.experts)
-        self.expert_infos.clear()
-        self.experts.clear()
+        for expert_name in list(self.expert_infos.keys()):
+            self.merge_expert(expert_name)
 
     def _convert_expert_names_to_indices(
         self, expert_names, use_default_expert=True
