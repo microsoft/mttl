@@ -468,7 +468,9 @@ class TrainingArgs(DataArgs):
         from transformers import TrainingArguments
 
         return TrainingArguments(
-            run_name=self.wandb_run_name or self.expert_name or self.finetune_task_name,
+            run_name=self.wandb_run_name
+            or self.expert_name
+            or str(self.finetune_task_name),
             use_cpu=self.compute_strategy == "cpu",
             overwrite_output_dir=True,
             output_dir=self.output_dir,
