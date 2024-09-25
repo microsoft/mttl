@@ -72,3 +72,20 @@ class ExpertModelTrainer(Trainer):
         # Good practice: save your training arguments together with the trained model
         torch.save(self.args, os.path.join(output_dir, TRAINING_ARGS_NAME))
         torch.save(self.mttl_args.asdict(), os.path.join(output_dir, MTTL_ARGS_NAME))
+
+
+class LMTrainer(ExpertModelTrainer):
+    """Standard next-token prediction objective"""
+
+    def compute_loss(self, model, inputs, return_outputs=False):
+        input_ids = inputs["input_ids"]
+        labels = inputs["labels"]
+        attention_mask = inputs["attention_mask"]
+
+        outputs = model(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=labels,
+        )
+
+        return (outputs.loss, outputs.logits) if return_outputs else outputs.loss
