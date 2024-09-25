@@ -251,8 +251,12 @@ def create_library(args):
     return expert_library
 
 
+def generate_random_string(str_len=10):
+    return "".join(random.choices(string.ascii_uppercase, k=str_len))
+
+
 @rank_zero_only_and_wait(before=False, after=True)
-def upload_library(expert_library, module, expert_name=None):
+def upload_library(expert_library, module_or_path, expert_name=None):
     from mttl.models.expert_model import ExpertModel, MultiExpertModel
     from mttl.models.lightning.base_module import LightningEfficientCheckpoint
 
@@ -261,21 +265,19 @@ def upload_library(expert_library, module, expert_name=None):
         expert_library.refresh_from_remote()
 
         # TODO: handle the case where `module.model` is a MultiExpertModel
-        if isinstance(module, LightningEfficientCheckpoint):
+        if isinstance(module_or_path, LightningEfficientCheckpoint):
             module = module.model
 
-        if isinstance(module, MultiExpertModel):
+        if isinstance(module_or_path, MultiExpertModel):
             with expert_library.batched_commit():
-                for expert_name in module.experts_names:
-                    expert = module.get_expert_instance(expert_name)
+                for expert_name in module_or_path.experts_names:
+                    expert = module_or_path.get_expert_instance(expert_name)
                     expert_library.add_expert(expert, expert_name)
-        elif isinstance(module, ExpertModel):
-            expert = module.as_expert()
+        elif isinstance(module_or_path, ExpertModel):
+            expert = module_or_path.as_expert()
             expert_name = expert_name or generate_random_string()
             expert_library.add_expert(expert, expert_name)
+        elif isinstance(module_or_path, str):
+            expert_library.add_expert_from_ckpt(module_or_path, expert_name)
         else:
             raise ValueError("Model class not recognized")
-
-
-def generate_random_string(str_len=10):
-    return "".join(random.choices(string.ascii_uppercase, k=str_len))
