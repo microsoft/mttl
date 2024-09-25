@@ -29,8 +29,8 @@ from mttl.models.utils import model_loader_helper, transfer_batch_to_device
 
 device = "cuda"
 logger.setLevel(logging.ERROR)
-block_size = 128
-n_blocks = 16
+block_size = 128  # 16
+n_blocks = 16  # 1024
 
 in_d = 2048
 out_d = 8192
@@ -82,7 +82,9 @@ def find_hyperpaams():
 
 
 keep_ratio, lora_rank = find_hyperpaams()
-print(f"Keep ratio: {keep_ratio}, LoRA rank: {lora_rank}")
+print(
+    f"Keep ratio: {keep_ratio}, LoRA rank: {lora_rank}, Lora params: {calculate_lora_parameters(in_d, out_d, lora_rank)}, Sparse params: {in_d * out_d * keep_ratio}"
+)
 x = torch.randn(bs, max_seq_len, in_d, dtype=dtype, device=device)
 
 
@@ -407,19 +409,6 @@ def blk_sparse_merge_and_forward_triton(
 
 @torch.autocast(device_type="cuda", dtype=dtype)
 def blk_sparse_merge_and_forward_stk(block_sparse_weights, x, W_base, W_merge):
-    """
-    Perform the merging of sparse adapters and compute the forward pass. This uses triton dds kernel with precomputed layour (see prepare_triton_bs_op).
-
-    Parameters:
-    - block_sparse_ops: List[triton.ops.blocksparse.matmul], each of shape [input_dim, output_dim] in CSR format.
-    - block_sparse_weights: List[torch.Tensor], each of shape [input_dim, output_dim] in BSR format (these are only non-zero blocks).
-    - x: torch.Tensor, input of shape [bs, max_seq_len, input_dim].
-    - W_base: torch.Tensor, base model weights of shape [input_dim, output_dim].
-    - W_merge: torch.Tensor, merging weights of shape [bs, max_seq_len, K].
-
-    Returns:
-    - y: torch.Tensor, output of shape [bs, max_seq_len, output_dim].
-    """
     bs, max_seq_len, input_dim = x.shape
     output_dim = W_base.shape[1]
     K = W_merge.shape[2]
