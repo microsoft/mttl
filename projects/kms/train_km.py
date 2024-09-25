@@ -13,7 +13,7 @@ from lightning_fabric import seed_everything
 from mttl.arguments import ExpertConfig
 from mttl.logging import setup_logging
 from mttl.models.expert_model import ExpertModel, ExpertModelConfig
-from mttl.models.hf.trainer import ExpertModelTrainer
+from mttl.models.hf.trainer import ExpertModelTrainer, LMTrainer
 from mttl.utils import create_library, remote_login, upload_library
 
 logger = logging.getLogger(__name__)
@@ -96,23 +96,6 @@ class DeepContextDistillationTrainer(ExpertModelTrainer):
         return (loss, outputs.logits) if return_outputs else loss
 
 
-class LMTrainer(ExpertModelTrainer):
-    """Standard next-token prediction objective"""
-
-    def compute_loss(self, model, inputs, return_outputs=False):
-        input_ids = inputs["input_ids"]
-        labels = inputs["labels"]
-        attention_mask = inputs["attention_mask"]
-
-        outputs = model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            labels=labels,
-        )
-
-        return (outputs.loss, outputs.logits) if return_outputs else outputs.loss
-
-
 @dataclass
 class KMArguments(ExpertConfig):
     loss_function: str = "dcd"
@@ -179,7 +162,11 @@ def train_km(training_args):
     # Maybe save to Expert Library
     if args.library_id:
         expert_library = create_library(args)
-        upload_library(expert_library, model, expert_name=args.finetune_task_name)
+        upload_library(
+            expert_library,
+            best_model_path or model,
+            expert_name=args.finetune_task_name,
+        )
 
 
 if __name__ == "__main__":
