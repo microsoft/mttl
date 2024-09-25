@@ -176,7 +176,7 @@ class IterativeDCDTrainer(DeepContextDistillationTrainer):
         if self.mttl_args.warmup_steps == -1 or self.mttl_args.warmup_proportion > 0.0:
             logger.warning(
                 "Warmup proportion is set to {}, has priority over warmup_steps".format(
-                    args.warmup_proportion
+                    self.mttl_args.warmup_proportion
                 )
             )
 
@@ -672,7 +672,7 @@ class IterativeDCDTrainer(DeepContextDistillationTrainer):
         if self.train_dataset is None:
             raise ValueError("Trainer: training requires a train_dataset.")
 
-        current_state_epoch = int(self.state.epoch or 0)
+        current_state_epoch = math.ceil(self.state.epoch or 0)
         dataset_path = self.mttl_args.output_dir + f"/gen__epoch_{current_state_epoch}"
 
         if not os.path.exists(dataset_path):
@@ -740,6 +740,7 @@ class IterKMArguments(ExpertConfig):
     dataset: str = "sordonia/narrativeqa"
     nqa_dataset: str = "sordonia/narrativeqa"
     generate_every_n_epoch: int = 1
+    accumulate_datasets: bool = False
 
 
 def train_km(training_args):
