@@ -587,6 +587,7 @@ class MoEModel(BaseExpertModel, MultiExpertMixin):
             self.moe_num_experts = self.config.moe_num_experts
         else:
             expert_library = ExpertLibrary.get_expert_library(self.config.library_id)
+            assert len(expert_library) > 0, "No experts found in the library."
             for i, expert in enumerate(sorted(list(expert_library.keys()))):
                 self.add_expert_instance(expert_library[expert], expert_name=expert)
 
