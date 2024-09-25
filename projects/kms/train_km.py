@@ -179,10 +179,9 @@ def train_km(training_args):
     # Maybe save to Expert Library
     if args.library_id:
         expert_library = create_library(args)
-        upload_library(expert_library, model)
+        upload_library(expert_library, model, expert_name=args.finetune_task_name)
 
 
 if __name__ == "__main__":
     args = KMArguments.parse()
-
     train_km(args)
