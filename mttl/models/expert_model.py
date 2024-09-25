@@ -422,9 +422,19 @@ class MultiExpertMixin:
 
 @dataclass
 class MultiExpertModelConfig(BaseExpertModelConfig):
+    # if default_expert_name is not None, then we set it as the default expert
     default_expert_name: str = None
+    # if expert_infos is not None, then we load experts from the expert_infos
     expert_infos: List[ExpertInfo] = None
+    # if selector_config is not None, then we use it to select experts during inference
     selector_config: AutoSelectorConfig = None
+
+    def __post_init__(self):
+        # error out if neither library_id nor expert_infos is set and default_expert_name is set
+        if self.expert_infos is None and self.default_expert_name is not None:
+            raise ValueError(
+                "Cannot set `default_expert_name` if neither `library_id` nor `expert_infos` is set."
+            )
 
 
 @BaseExpertModel.register("multi_expert_model", config_cls=MultiExpertModelConfig)
@@ -438,10 +448,27 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
 
         return MultiExpertModel(config, model_object=model)
 
+    def _clear_library_id_from_selector_config(self) -> SelectorConfig:
+        import copy
+
+        selector_config = copy.deepcopy(self.selector_config)
+
+        if selector_config is not None:
+            if isinstance(selector_config, MultiSelectorConfig):
+                for key, config in selector_config.items():
+                    if isinstance(config, LoadableSelectorConfig):
+                        config.library_id = None
+            elif isinstance(selector_config, LoadableSelectorConfig):
+                selector_config.library_id = None
+
+        return selector_config
+
     def save_pretrained(self, save_directory, **kwargs):
         # need to make sure that config is in sync with the model before saving
         self.config.expert_infos = list(self.experts_infos.values())
-        self.config.selector_config = self.selector_config
+        # if we save the model, and we have a library_id in the selector config, we need to clear it
+        # because the weights will be save in the checkpoint
+        self.config.selector_config = self._clear_library_id_from_selector_config()
         super().save_pretrained(save_directory, **kwargs)
 
     def __init__(self, config, **loading_kwargs):
