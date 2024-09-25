@@ -588,7 +588,7 @@ class MoEModel(BaseExpertModel, MultiExpertMixin):
         else:
             expert_library = ExpertLibrary.get_expert_library(self.config.library_id)
             for i, expert in enumerate(sorted(list(expert_library.keys()))):
-                self.add_expert_instance(expert_library[expert], expert_name=f"e{i}")
+                self.add_expert_instance(expert_library[expert], expert_name=expert)
 
             self.moe_num_experts = i + 1
 
