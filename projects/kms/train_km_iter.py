@@ -11,6 +11,7 @@ import numpy as np
 import torch
 import vllm
 from lightning_fabric import seed_everything
+from transformers import AutoModelForCausalLM
 from transformers.trainer import (
     TRAINER_STATE_NAME,
     TRAINING_ARGS_NAME,
@@ -116,6 +117,7 @@ class IterativeDCDTrainer(DeepContextDistillationTrainer):
 
         self.temp_directory = f"/tmp/{np.random.randint(0, 1e6)}"
         self.current_epoch_datamodule = None
+        self.reference_model = model
 
     def _inner_training_loop(
         self,
@@ -660,6 +662,9 @@ class IterativeDCDTrainer(DeepContextDistillationTrainer):
         else:
             raise ValueError("No current epoch datamodule found.")
 
+    def get_reference_model(self, model):
+        return self.reference_model
+
     def get_train_dataloader(self) -> DataLoader:
         """
         Returns the training [`~torch.utils.data.DataLoader`].
@@ -704,10 +709,14 @@ class IterativeDCDTrainer(DeepContextDistillationTrainer):
 
         from dataset_augmenter import DatasetAugmenter
 
+        from mttl.models.utils import model_loader_helper
+
         shutil.rmtree(self.temp_directory, ignore_errors=True)
         os.makedirs(self.temp_directory, exist_ok=True)
 
         device = self.model.device
+        if self.reference_model:
+            self.reference_model.to("cpu")
 
         # we need to save the model in the temp directory, this moves it to CPU so that VLLM
         # doesn't complain, one alternative is to use 2 gpus, one for generation, one for training
@@ -728,8 +737,16 @@ class IterativeDCDTrainer(DeepContextDistillationTrainer):
         del augmenter
         gc.collect()
         torch.cuda.empty_cache()
-
         self.model.to(device)
+
+        # reloading the reference model, this is with the previous adapter merged!
+        self.reference_model = model_loader_helper(
+            self.temp_directory,
+            device_map=device,
+            bf16=self.mttl_args.precision == "bf16",
+            fp16=self.mttl_args.precision == "fp16",
+            attn_implementation=self.mttl_args.attn_implementation,
+        )
         return DatasetDict({"train": augmented_dataset})
 
 
@@ -739,7 +756,7 @@ class IterKMArguments(ExpertConfig):
     dataset_type: str = "text_dataset"
     dataset: str = "sordonia/narrativeqa"
     nqa_dataset: str = "sordonia/narrativeqa"
-    generate_every_n_epoch: int = 1
+    generate_every_n_epoch: int = 5
     accumulate_datasets: bool = False
 
 

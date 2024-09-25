@@ -32,6 +32,16 @@ class DeepContextDistillationTrainer(ExpertModelTrainer):
 
         self.kl_loss = torch.nn.KLDivLoss(reduction="none")
 
+    def get_reference_model(self, model):
+        model = get_original_model(model)
+        model.disable_adapter()
+        return model
+
+    def get_student_model(self, model):
+        model = get_original_model(model)
+        model.enable_adapter()
+        return model
+
     def compute_loss(self, model, inputs, return_outputs=False):
         # document + small task prompt + task output (e.g. summary, or question and answer)
         input_ids = inputs["input_ids"]
@@ -45,9 +55,9 @@ class DeepContextDistillationTrainer(ExpertModelTrainer):
 
         with torch.no_grad():
             # for the context-aware pass, we need to disable the adapter
-            get_original_model(model).disable_adapter()
+            ref_model = self.get_reference_model(model)
 
-            outputs = model(
+            outputs = ref_model(
                 input_ids=input_ids,
                 attention_mask=attention_mask,
                 output_hidden_states=True,
@@ -60,9 +70,9 @@ class DeepContextDistillationTrainer(ExpertModelTrainer):
             target_logits = outputs.logits[labels != -100, :]
 
         # for the context-less pass, we need to enable the adapter
-        get_original_model(model).enable_adapter()
+        stu_model = self.get_student_model(model)
 
-        outputs = model(
+        outputs = stu_model(
             input_ids=nc_input_ids,
             attention_mask=nc_attention_mask,
             output_hidden_states=True,
