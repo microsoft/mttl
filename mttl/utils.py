@@ -257,18 +257,19 @@ def generate_random_string(str_len=10):
 
 @rank_zero_only_and_wait(before=False, after=True)
 def upload_library(expert_library, module_or_path, expert_name=None):
-    from mttl.models.expert_model import ExpertModel, MultiExpertModel
+    from mttl.models.expert_model import ExpertModel, MultiExpertMixin
+    from mttl.models.library.expert import Expert
     from mttl.models.lightning.base_module import LightningEfficientCheckpoint
 
+    breakpoint()
     if expert_library is not None:
         # refresh expert library: so we dont overwrite the readme if the remote has changed.
         expert_library.refresh_from_remote()
 
-        # TODO: handle the case where `module.model` is a MultiExpertModel
         if isinstance(module_or_path, LightningEfficientCheckpoint):
             module = module.model
 
-        if isinstance(module_or_path, MultiExpertModel):
+        if isinstance(module_or_path, MultiExpertMixin):
             with expert_library.batched_commit():
                 for expert_name in module_or_path.experts_names:
                     expert = module_or_path.get_expert_instance(expert_name)
@@ -277,6 +278,9 @@ def upload_library(expert_library, module_or_path, expert_name=None):
             expert = module_or_path.as_expert()
             expert_name = expert_name or generate_random_string()
             expert_library.add_expert(expert, expert_name)
+        elif isinstance(module_or_path, Expert):
+            expert_name = expert_name or generate_random_string()
+            expert_library.add_expert(module_or_path, expert_name)
         elif isinstance(module_or_path, str):
             expert_library.add_expert_from_ckpt(module_or_path, expert_name)
         else:
