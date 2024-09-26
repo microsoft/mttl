@@ -26,7 +26,7 @@ def get_original_model(model):
     return model
 
 
-class DeepContextDistillationTrainer(ExpertModelTrainer):
+class DCDTrainer(ExpertModelTrainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
@@ -165,7 +165,7 @@ def train_km(training_args):
         callbacks.append(callback)
 
     if training_args.loss_function == "dcd":
-        trainer: DeepContextDistillationTrainer = DeepContextDistillationTrainer(
+        trainer: DCDTrainer = DCDTrainer(
             model=model,
             args=training_args,
             callbacks=callbacks,

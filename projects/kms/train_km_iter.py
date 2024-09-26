@@ -63,7 +63,7 @@ from torch import distributed as dist
 from torch import functional as F
 from torch import nn
 from torch.utils.data import DataLoader
-from train_km import DeepContextDistillationTrainer
+from train_km import DCDTrainer
 
 from mttl.arguments import ExpertConfig
 from mttl.datamodule.base import DataModule, DatasetConfig, get_datamodule
@@ -109,7 +109,7 @@ class TextDatamodule(DataModule):
         self.test_dataset = None
 
 
-class IterativeDCDTrainer(DeepContextDistillationTrainer):
+class IterativeDCDTrainer(DCDTrainer):
     """Iterative DCD trainer that generates new datasets and distills the model in each epoch."""
 
     def __init__(self, model, args, **kwargs):
@@ -654,6 +654,73 @@ class IterativeDCDTrainer(DeepContextDistillationTrainer):
             self._deactivate_neftune(self.model)
 
         return TrainOutput(self.state.global_step, train_loss, metrics)
+
+    def compute_loss(self, model, inputs, return_outputs=False):
+        # document + small task prompt + task output (e.g. summary, or question and answer)
+        input_ids = inputs["input_ids"]
+        labels = inputs["labels"]
+        attention_mask = inputs["attention_mask"]
+
+        # small task prompt + task output (e.g. summary, or question and answer)
+        nc_input_ids = inputs["nc_input_ids"]
+        nc_labels = inputs["nc_labels"]
+        nc_attention_mask = inputs["nc_attention_mask"]
+
+        with torch.no_grad():
+            # for the context-aware pass, we need to disable the adapter
+            ref_model = self.get_reference_model(model)
+
+            outputs = ref_model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                output_hidden_states=True,
+                return_dict=True,
+            )
+            target_hidden_states = [
+                hidden_state[labels != -100, ...]
+                for hidden_state in outputs.hidden_states
+            ]
+            target_logits = outputs.logits[labels != -100, :]
+
+        # for the context-less pass, we need to enable the adapter
+        stu_model = self.get_student_model(model)
+
+        outputs = stu_model(
+            input_ids=nc_input_ids,
+            attention_mask=nc_attention_mask,
+            output_hidden_states=True,
+            return_dict=True,
+        )
+
+        losses = []
+        for actual_states, target_states in zip(
+            outputs.hidden_states, target_hidden_states
+        ):
+            actual_states = actual_states[nc_labels != -100, :]
+
+            # Calculate mean magnitude of target states
+            mean = torch.sum(torch.abs(target_states)) / (actual_states.size(-1))
+
+            losses.append(
+                # Loss is the mean abs difference between target and predicted states,
+                # normalised by mean magnitude of target states
+                torch.sum(torch.abs(actual_states - target_states))
+                / (mean * np.prod(target_states.shape))
+            )
+
+        loss = torch.mean(torch.stack(losses))
+
+        # Add KL divergence between target and predicted output distributions to loss
+        ref_logprobs = F.log_softmax(target_logits, dim=-1)
+        logprobs = F.log_softmax(outputs.logits[nc_labels != -100, ...], dim=-1)
+        log_ratio = ref_logprobs - logprobs
+
+        # jscho kl divergence
+        prob_ratio = torch.exp(log_ratio.sum(dim=-1, keepdim=True))
+        kl_loss = (prob_ratio - log_ratio - 1).mean()
+        loss = loss + kl_loss
+
+        return (loss, outputs.logits) if return_outputs else loss
 
     def get_eval_dataloader(self, eval_dataset=None):
         if self.current_epoch_datamodule is not None:
