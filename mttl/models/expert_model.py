@@ -9,7 +9,11 @@ import torch
 from mttl.logging import logger
 from mttl.models.base_model import BaseExpertModel
 from mttl.models.containers import add_expert_to_transformer
-from mttl.models.containers.base import ContainerFullException, ExpertContainer
+from mttl.models.containers.base import (
+    ContainerFullException,
+    ExpertContainer,
+    MergeableContainer,
+)
 from mttl.models.containers.selectors.base import (
     AutoSelectorConfig,
     LoadableSelectorConfig,
@@ -487,10 +491,9 @@ class MultiExpertMixin:
 
     def clear_experts(self):
         """Removes all experts and containers from the huggingface model."""
-        for mn, m in self.model.named_modules():
-            for cn, c in m.named_children():
-                if isinstance(c, ExpertContainer):
-                    setattr(m, cn, c.layer)
+        from mttl.models.containers.base import clear_containers
+
+        clear_containers(self.model)
 
         self.experts_infos.clear()
         self.selector_cache.clear()
@@ -539,6 +542,50 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
                 selector_config.library_id = None
 
         return selector_config
+
+    def merge_and_save_base_model(self, output_dir, expert_name, device="cpu"):
+        """
+        Merge the specific expert and save the base model in the huggingface format
+        to the output directory. Moves the model to the specified device before merging.
+        """
+        import copy
+
+        from transformers import AutoTokenizer
+
+        from mttl.models.containers.base import clear_containers
+
+        if expert_name not in self.experts_infos:
+            raise ValueError(f"Expert {expert_name} not found in the model.")
+
+        # move model to cpu to avoid memory issues
+        self.model.to(device)
+
+        merged = []
+        model_copy = copy.deepcopy(self.model)
+
+        # get the modifier type of the expert name
+        modifier_name = self.experts_infos[expert_name].expert_config.modifier_name
+
+        containers = self.experts_containers
+        for container in containers:
+            if expert_name in container.expert_infos:
+                if not isinstance(container, MergeableContainer):
+                    raise ValueError(
+                        "Cannot merge expert loaded in a non-mergeable container. Either change container type or expert type."
+                    )
+                container.merge_expert(expert_name)
+                merged.append(container.layer_name)
+
+        # now clear all containers and save the model
+        clear_containers(model_copy)
+
+        logger.info("Merged layers: %s" % ", ".join(merged))
+        logger.info("Saving merged model to: %s" % output_dir)
+
+        model_copy.save_pretrained(output_dir)
+        tokenizer = AutoTokenizer.from_pretrained(
+            self.config.base_model
+        ).save_pretrained(output_dir)
 
     def save_pretrained(self, save_directory, **kwargs):
         # need to make sure that config is in sync with the model before saving
