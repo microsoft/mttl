@@ -13,6 +13,7 @@ from mttl.models.containers.base import (
     ContainerFullException,
     ExpertContainer,
     MergeableContainer,
+    containers_iterator,
 )
 from mttl.models.containers.selectors.base import (
     AutoSelectorConfig,
@@ -566,13 +567,13 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
         # get the modifier type of the expert name
         modifier_name = self.experts_infos[expert_name].expert_config.modifier_name
 
-        containers = self.experts_containers
-        for container in containers:
+        for container in containers_iterator(model_copy):
             if expert_name in container.expert_infos:
                 if not isinstance(container, MergeableContainer):
                     raise ValueError(
                         "Cannot merge expert loaded in a non-mergeable container. Either change container type or expert type."
                     )
+
                 container.merge_expert(expert_name)
                 merged.append(container.layer_name)
 

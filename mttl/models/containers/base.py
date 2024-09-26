@@ -192,10 +192,16 @@ class ExpertContainer(nn.Module, Container):
         return len(self.expert_names)
 
 
-def clear_containers(model: torch.nn.Module) -> torch.nn.Module:
-    """Clears all containers in the model."""
+def containers_iterator(model: torch.nn.Module, return_parent=False):
+    """Iterates over all containers in the model."""
     for mn, m in model.named_modules():
         for cn, c in m.named_children():
             if isinstance(c, ExpertContainer):
-                setattr(m, cn, c.layer)
+                yield (m, cn, c) if return_parent else c
+
+
+def clear_containers(model: torch.nn.Module) -> torch.nn.Module:
+    """Clears all containers in the model, just reassigning the layer to the model."""
+    for m, cn, c in containers_iterator(model, return_parent=True):
+        setattr(m, cn, c.layer)
     return model
