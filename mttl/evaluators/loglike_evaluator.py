@@ -23,7 +23,7 @@ class LogLikeEvaluator(Evaluator):
         output_path=None,
     ):
         from mttl.models.expert_model import BaseExpertModel
-        from mttl.models.lightning.expert_module import ExpertModule
+        from mttl.models.lightning.base_module import LightningEfficientCheckpoint
         from mttl.models.utils import transfer_batch_to_device
 
         dataloader = self.get_dataloader(split, subsample, shuffle=shuffle)
@@ -55,7 +55,7 @@ class LogLikeEvaluator(Evaluator):
             batch = transfer_batch_to_device(batch, device)
 
             with torch.no_grad():
-                if isinstance(model, ExpertModule) or isinstance(
+                if isinstance(model, LightningEfficientCheckpoint) or isinstance(
                     model, BaseExpertModel
                 ):
                     logits = model.forward(**batch).logits
