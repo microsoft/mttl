@@ -229,6 +229,7 @@ class LoRAExpertContainer(ExpertContainer):
 
         if add_base_forward:
             if base_out.ndim == 2:
+                # squeeze again sequence dimension ("l") if needed
                 module_output = module_output.squeeze(1)
 
             module_output = base_out + module_output
@@ -448,6 +449,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             raise ValueError("Unknown selection type.")
 
         if add_base_forward:
+            # squeeze again sequence dimension ("l") if needed
             if base_out.ndim == 2:
                 module_output = module_output.squeeze(1)
 

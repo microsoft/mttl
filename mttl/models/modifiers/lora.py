@@ -193,7 +193,6 @@ class LoRA(Modifier, MergeableModifierMixin, ModifyMixin):
                 * scaling[:, None, None]
             )
 
-        # return layer_out + adapter_out.to(dtype=input.dtype)
         return adapter_out.to(dtype=input.dtype)
 
     def reset_parameters(self):
@@ -477,12 +476,6 @@ class SkilledLoRA(LoRA):
 
         adapter_out = adapter_out * scaling
 
-        # squeeze again sequence dimension ("l") if needed
-        # if layer_out.ndim == 2:
-        #     adapter_out = adapter_out.squeeze(1)
-
-        # adapter out is float32
-        # return layer_out + adapter_out.to(dtype=input.dtype)
         return adapter_out.to(dtype=input.dtype)
 
 

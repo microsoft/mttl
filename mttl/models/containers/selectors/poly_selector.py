@@ -1,4 +1,3 @@
-from collections import defaultdict
 from dataclasses import dataclass
 from typing import Dict, List, Union
 
@@ -15,9 +14,6 @@ from mttl.models.containers.selectors.base import (
     SelectorConfig,
     SelectorOutput,
     forward_with_cache,
-)
-from mttl.models.containers.selectors.selector_output import (
-    SequenceSelectorOutputsContainer,
 )
 from mttl.models.library.expert import ExpertInfo
 
