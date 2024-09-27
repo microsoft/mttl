@@ -48,7 +48,7 @@ class LightningEfficientCheckpoint(OnLogCallback, PushToHubMixin, LightningModul
         PushToHubMixin.__init__(self)
 
         self.model_object = model_object
-        self.save_hyperparameters(kwargs)
+        self.save_hyperparameters(kwargs, ignore="model_object")
 
         self.loss_plugins = {}
         # If True, do not delete any parameters that were loaded in a
