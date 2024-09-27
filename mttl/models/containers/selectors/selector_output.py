@@ -132,7 +132,17 @@ class BatchSequenceExpertsSplitsAndWeightsSelectorOutput(
 
 @dataclass
 class SelectorOutputsContainer:
-    """A container for multiple SelectorOutputs."""
+    """A container for multiple SelectorOutputs.
+
+    1. `selector_outputs` : List of SelectorOutputs
+    2. `selector_indices` : Dict of indices for each SelectorOutput
+    3. `dim_index` : Dimension index to split across SelectorOutputs
+
+    For example, given an input of shape `bs, seq_len, D` you could process
+    the first 5 and and the last 5 sequence tokens with different experts.
+    by setting `dim_index` = 1 and
+    `selector_indices` = {0: Tensor([0, 1, 2, 3, 4]), 1: Tensor([-1, -2, -3, -4, -5])}
+    """
 
     selector_outputs: List[SelectorOutput]
     selector_indices: Dict[int, torch.Tensor] = None
@@ -150,6 +160,7 @@ class SelectorOutputsContainer:
 
 
 class SequenceSelectorOutputsContainer(SelectorOutputsContainer):
+    """A container for multiple SelectorOutputs that are split across the sequence dimension."""
 
     def __post_init__(self):
         super().__post_init__()

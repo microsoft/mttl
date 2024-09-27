@@ -109,13 +109,19 @@ class LoRAExpertContainer(ExpertContainer):
 
     def route(self, input, selection, add_base_forward=True, **kwargs):
 
-        # We compute the base model's forward pass here, to leverage the
-        # contiguity of the current input (which might be split later)
+        # We optionally compute the base model's forward pass here, instead of in
+        # `parallel_linear_weighted_forward` (see CoalascedLoRAExpertContainer)
+        # `route` method for more details
+
         if add_base_forward:
             base_out = self.experts.layer(input).to(input.dtype)
 
         """Depending on the selection output, we and merge differently."""
         from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRAView
+
+        assert not isinstance(
+            selection, SelectorOutputsContainer
+        ), "Use CoalascedLoRAExpertContainer to leverage SelectorOutputsContainer."
 
         if isinstance(selection, ExpertsAndWeightsSelectorOutput):
             # In this case, we have a list of experts and their weights
@@ -329,15 +335,29 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
 
     def route(self, input, selection, add_base_forward=True, **kwargs):
 
-        # We compute the base model's forward pass here, to leverage the
-        # contiguity of the current input (which might be split later)
+        # We optionally compute the base model's forward pass here, instead of in
+        # `parallel_linear_weighted_forward` to ensure it's computed on a contiguous
+        # input tensor. This is important for the cases we split the input to process
+        # it with different experts later on
+
         if add_base_forward:
             base_out = self.experts.layer(input).to(input.dtype)
         else:
             base_out = 0.0
 
         if isinstance(selection, SelectorOutputsContainer):
-            assert add_base_forward
+            # Case where input is split into multiple parts
+            # Here, `SelectorOutputsContainer` contains :
+            # 1. `selector_outputs` : List of SelectorOutputs
+            # 2. `selector_indices` : Dict of indices for each SelectorOutput
+            # 3. `dim_index` : Dimension index to split across SelectorOutputs
+            # For example, given an input of shape `bs, seq_len, D` you could process
+            # the first 5 and and the last 5 sequence tokens with different experts.
+            # by setting `dim_index` = 1 and `selector_indices` = {0: [0, 1, 2, 3, 4], 1: [-1, -2, -3, -4, -5]}
+
+            assert (
+                add_base_forward
+            ), "Base forward must be precomputed when input is split."
             assert base_out.ndim == 3
 
             output = base_out
@@ -355,7 +375,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
                     **kwargs,
                 )
 
-                # add the output to the right place
+                # Once the output is processed, we add it back to the output tensor
                 output = output.index_add(selection.dim_index, selector_idx, mod_out)
 
             return output
