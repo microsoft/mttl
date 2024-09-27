@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, Union
+from typing import Dict, List, Union
 
 import torch
 
@@ -128,3 +128,55 @@ class BatchSequenceExpertsSplitsAndWeightsSelectorOutput(
     @property
     def dim_names(self):
         return ["batch", "sequence", "splits", "experts"]
+
+
+@dataclass
+class SelectorOutputsContainer:
+    """A container for multiple SelectorOutputs.
+
+    1. `selector_outputs` : List of SelectorOutputs
+    2. `selector_indices` : Dict of indices for each SelectorOutput
+    3. `dim_index` : Dimension index to split across SelectorOutputs
+
+    For example, given an input of shape `bs, seq_len, D` you could process
+    the first 5 and and the last 5 sequence tokens with different experts.
+    by setting `dim_index` = 1 and
+    `selector_indices` = {0: Tensor([0, 1, 2, 3, 4]), 1: Tensor([-1, -2, -3, -4, -5])}
+    """
+
+    selector_outputs: List[SelectorOutput]
+    selector_indices: Dict[int, torch.Tensor] = None
+
+    def __post_init__(self):
+        # make sure that all selector outputs are of the same type
+        if len(set(type(so) for so in self.selector_outputs)) != 1:
+            raise ValueError("All selector outputs should be of the same type.")
+
+    @property
+    def dim_index(self):
+        raise NotImplementedError(
+            "dim_index needs to be specified in order to know which dimension to split across SelectorOutputs"
+        )
+
+
+class SequenceSelectorOutputsContainer(SelectorOutputsContainer):
+    """A container for multiple SelectorOutputs that are split across the sequence dimension."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        if any(
+            so.dim_names[self.dim_index] == "sequence" for so in self.selector_outputs
+        ):
+            raise ValueError(
+                "All selector outputs should not have 'sequence', as we are splitting across this dimension"
+            )
+
+        # make sure that indices don't overlap across different selector outputs
+        all_indices = torch.cat(self.selector_indices)
+        assert all_indices.unique().size(0) == all_indices.size(
+            0
+        ), "Indices should not overlap across different selector outputs"
+
+    @property
+    def dim_index(self):
+        return 1

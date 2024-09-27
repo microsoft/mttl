@@ -4,10 +4,9 @@ import torch
 import torch.nn.functional as F
 from pytorch_lightning import seed_everything
 
-from mttl.models.expert_context import InfoContainer
+from mttl.models.expert_context import InfoContainer, RoutingInfo
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.prompt_tuning import ExtendedEmbedding, PromptTuningConfig
-from mttl.models.modifiers.routing import RoutingInfo
 
 
 def test_prefix_prompt_tuning():
