@@ -253,7 +253,7 @@ class SkilledLoRA(LoRA):
 
         self.lora_b.data[skill_index] = lora.lora_b.data.reshape(
             1, self.rank, self.n_splits, self.out_features // self.n_splits
-        ).to(device=self.lora_a.device, dtype=self.lora_a.dtype)
+        ).to(device=self.lora_b.device, dtype=self.lora_b.dtype)
 
     def add_skill(self, lora: Union[LoRA, "SkilledLoRA"]) -> None:
         """Adds a skill to the skilled lora by copying the weights of the given lora."""
