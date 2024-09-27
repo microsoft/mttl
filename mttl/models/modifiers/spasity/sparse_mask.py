@@ -4,13 +4,13 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
-from scipy.sparse import csr_matrix
+from scipy.sparse import bsr_matrix, csr_matrix
 from torch import nn
 from triton.ops.blocksparse.matmul import dsd_lut, sdd_lut
 
 from mttl.logging import logger
 from mttl.models.modifiers.base import Modifier, ModifierConfig, ModifyMixin
-from mttl.models.modifiers.sparse_utils.utils import (
+from mttl.models.modifiers.spasity.sparse_utils.utils import (
     BlcokSparseLinearFunction_SP_ADD,
     BlcokSparseLinearFunction_SP_SCATTER,
     LinearWithSparseDelta,
@@ -135,6 +135,12 @@ class SparseWeights(nn.Module):
 
         self.set_sparse_idxs(_sparse_csr_representation)
 
+        self.init_random()
+
+    def init_random(self):
+        # init 1D tensor of values
+        nn.init.normal_(self.sparse_weights, mean=0.0, std=0.1)
+
     @property
     def device(self):
         return self.sparse_weights.device
@@ -197,7 +203,7 @@ class SparseWeights(nn.Module):
         """
         return get_2d_indices_from_csr_matrix(self.scipy_representation)
 
-    def to_dense(self):
+    def to_dense(self) -> torch.Tensor:
         """
         Returns dense representation of the sparse weights.
         """
@@ -227,9 +233,24 @@ class BlockSparseWeights(SparseWeights):
 
     def __init__(self, config: SparseMaskConfig, shape, dtype, device, **kwargs):
         super().__init__(config, shape, dtype, device, **kwargs)
+
         self.sparse_weights = nn.Parameter(
             self.sparse_weights.data.view(-1, self.block_size, self.block_size),
             requires_grad=True,
+        )
+        bsr_indices, bsr_indptr = self.get_to_bsr_indices()
+        self.register_buffer("bsr_indices", bsr_indices)
+        self.register_buffer("bsr_indptr", bsr_indptr)
+
+    def get_to_bsr_indices(self) -> bsr_matrix:
+        """
+        Returns the sparse weights in BSR format.
+        """
+        bsr = bsr_matrix(
+            self.scipy_representation, blocksize=(self.block_size, self.block_size)
+        )
+        return torch.tensor(bsr.indices, dtype=torch.int32), torch.tensor(
+            bsr.indptr, dtype=torch.int32
         )
 
     @property

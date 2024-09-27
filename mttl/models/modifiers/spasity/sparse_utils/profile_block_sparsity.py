@@ -9,8 +9,8 @@ import triton as tn
 from spops import csr_add, sddmm
 from triton.ops.blocksparse import matmul
 
-from mttl.models.modifiers.sparse_mask import SparseMaskConfig, SparseWeights
 from mttl.models.modifiers.sparse_utils.utils import init_sparse_weights
+from mttl.models.modifiers.spasity.sparse_mask import SparseMaskConfig, SparseWeights
 
 n_blocks = 4
 BLOCK_SIZE = 128
@@ -73,9 +73,9 @@ def prepare_triton_bs_op(X, W):
         matrix = matrix.flatten(2, 3).sum(dim=-1)
         return matrix.cpu().bool().to(torch.int64)
 
-    layout = to_block_sparse_layout(W, BLOCK_SIZE).unsqueeze(0)
+    layout = to_block_sparse_layout(W, block_size).unsqueeze(0)
     # creat inputs
-    op = matmul(layout, BLOCK_SIZE, op_mode, trans_a=AT, trans_b=BT, device="cuda")
+    op = matmul(layout, block_size, op_mode, trans_a=AT, trans_b=BT, device="cuda")
     return op
 
 

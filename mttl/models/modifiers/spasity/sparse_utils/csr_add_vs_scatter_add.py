@@ -7,8 +7,8 @@ import triton as tn
 from spops import csr_add, sddmm
 from triton.ops.blocksparse import matmul
 
-from mttl.models.modifiers.sparse_mask import SparseMaskConfig, SparseWeights
 from mttl.models.modifiers.sparse_utils.utils import init_sparse_weights
+from mttl.models.modifiers.spasity.sparse_mask import SparseMaskConfig, SparseWeights
 
 n_blocks = 8
 BLOCK_SIZE = 128

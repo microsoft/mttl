@@ -283,7 +283,9 @@ def init_sparse_weights(sps_type, keep_ratio, shape, block_size=None):
 
 
 def make_sparse_model_during_training(module, batch):
-    from mttl.models.modifiers.sparse_mask import SparseMaskAdapter as SparseMaskModule
+    from mttl.models.modifiers.spasity.sparse_mask import (
+        SparseMaskAdapter as SparseMaskModule,
+    )
 
     for m in module.modules():
         if isinstance(m, SparseMaskModule):

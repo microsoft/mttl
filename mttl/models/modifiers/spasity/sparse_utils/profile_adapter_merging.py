@@ -18,7 +18,7 @@ from mttl.logging import logger
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.base import Modifier
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
-from mttl.models.modifiers.sparse_mask import (
+from mttl.models.modifiers.spasity.sparse_mask import (
     MaskedLinear,
     ScatteredSparseLinearModule,
     SparseLinearModule,
@@ -29,8 +29,8 @@ from mttl.models.utils import model_loader_helper, transfer_batch_to_device
 
 device = "cuda"
 logger.setLevel(logging.ERROR)
-block_size = 128  # 16
-n_blocks = 16  # 1024
+block_size = 16  # 128  # 16
+n_blocks = 1024  # 16  # 1024
 
 in_d = 2048
 out_d = 8192
@@ -512,7 +512,7 @@ def prepare_triton_bs_op(W, op_mode):
 @tn.testing.perf_report(
     tn.testing.Benchmark(
         x_names=["K"],  # Argument names to use as an x-axis for the plot.
-        x_vals=[2, 3, 4],  # Different possible values for `x_name`.
+        x_vals=[2, 3, 4, 10, 64, 128],  # Different possible values for `x_name`.
         x_log=False,  # x axis is logarithmic.
         line_arg="provider",  # Argument name whose value corresponds to a different line in the plot.
         line_vals=[

@@ -7,7 +7,7 @@ import torch.nn as nn
 from pytorch_lightning import seed_everything
 
 from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.sparse_mask import (
+from mttl.models.modifiers.spasity.sparse_mask import (
     MaskedLinear,
     ScatteredSparseLinearModule,
     SNIPMaskUpdateWrapper,
