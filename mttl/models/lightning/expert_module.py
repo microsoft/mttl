@@ -267,7 +267,9 @@ class MoEModule(LightningEfficientCheckpoint, LightningTrainingMixin):
             selector_config=selector_config,
             **ckpt["hyper_parameters"],
         )
-        model.load_state_dict(ckpt["state_dict"], strict=False)
+        load_out = model.load_state_dict(ckpt["state_dict"], strict=False)
+        assert len(load_out.unexpected_keys) == 0, load_out.unexpected_keys
+
         return model
 
     def training_step(self, batch, _):
