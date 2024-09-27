@@ -395,7 +395,7 @@ class SkilledLoRA(LoRA):
         *   : [[a, d, f]]     [[0.1, 0.2, 0.7],
                                [0.3, 0.4, 0.3]]
 
-        We handle all these scenarios at once, by creating a weights tensor of size ["batch", "skills", "splits", "experts"]
+        We handle all these scenarios at once, by creating a weights tensor of size ["batch", "sequence", "splits", "experts"]
 
         dim_names specifies the names of the dimensions currently in the weights tensor, e.g. ["batch", "experts"],
         we unsqueeze the remaining dimensions.
