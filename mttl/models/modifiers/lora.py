@@ -406,6 +406,7 @@ class SkilledLoRA(LoRA):
         if len(dim_names) != weights.ndim:
             raise ValueError("Not all dimensions are present in the weights tensor.")
 
+        input_ndims = input.ndim
         device = skilled_loras[0].lora_a.device
         n_skills = skilled_loras[0].lora_a.shape[0]
         assert np.all(skl.n_skills == n_skills for skl in skilled_loras)
@@ -475,6 +476,10 @@ class SkilledLoRA(LoRA):
             adapter_out = torch.einsum("blr,blrd->bld", (partial_out, B))
 
         adapter_out = adapter_out * scaling
+
+        # squeeze again sequence dimension ("l") if needed
+        if input_ndims == 2:
+            adapter_out = adapter_out.squeeze(1)
 
         return adapter_out.to(dtype=input.dtype)
 

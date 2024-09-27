@@ -114,7 +114,9 @@ class LoRAExpertContainer(ExpertContainer):
         # `route` method for more details
 
         if add_base_forward:
-            base_out = self.experts.layer(input).to(input.dtype)
+            base_out = (
+                self.experts[next(iter(self.experts))].layer(input).to(input.dtype)
+            )
 
         """Depending on the selection output, we and merge differently."""
         from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRAView
@@ -228,10 +230,6 @@ class LoRAExpertContainer(ExpertContainer):
             module_output = module_output.view(input.shape[0], input.shape[1], -1)
 
         if add_base_forward:
-            if base_out.ndim == 2:
-                # squeeze again sequence dimension ("l") if needed
-                module_output = module_output.squeeze(1)
-
             module_output = base_out + module_output
 
         return module_output
@@ -449,10 +447,6 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             raise ValueError("Unknown selection type.")
 
         if add_base_forward:
-            # squeeze again sequence dimension ("l") if needed
-            if base_out.ndim == 2:
-                module_output = module_output.squeeze(1)
-
             module_output = base_out + module_output
 
         return module_output
