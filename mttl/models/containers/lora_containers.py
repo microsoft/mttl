@@ -110,7 +110,7 @@ class LoRAExpertContainer(ExpertContainer):
     def route(self, input, selection, add_base_forward=True, **kwargs):
 
         # We optionally compute the base model's forward pass here, instead of in
-        # `parallel_linear_weighted_forward` (see CoalascedLoRAExpertContainer)
+        # `parallel_linear_weighted_forward` (see CoalescedLoRAExpertContainer)
         # `route` method for more details
 
         if add_base_forward:
@@ -121,7 +121,7 @@ class LoRAExpertContainer(ExpertContainer):
 
         assert not isinstance(
             selection, SelectorOutputsContainer
-        ), "Use CoalascedLoRAExpertContainer to leverage SelectorOutputsContainer."
+        ), "Use CoalescedLoRAExpertContainer to leverage SelectorOutputsContainer."
 
         if isinstance(selection, ExpertsAndWeightsSelectorOutput):
             # In this case, we have a list of experts and their weights
