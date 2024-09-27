@@ -1,6 +1,6 @@
 import torch
+from stk.matrix import Matrix
 
-from mttl.models.modifiers.spasity import Matrix
 from mttl.models.modifiers.spasity.stk import functions
 
 

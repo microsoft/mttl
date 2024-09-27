@@ -112,7 +112,7 @@ def _sdd_adamerge(
         A += BLOCK_K * stride_ak
         B += BLOCK_K * stride_bk
     # Store to sparse matrix
-    acc = acc.to(C.dtype.element_ty)
+    acc = acc.to(OUT.dtype.element_ty)
     # remember, in OUT we only store the non-zero elements, so no need to map it to dense matrix
     OUT = (
         OUT + pid * BLOCK_ELEMENTS + (cm[:, None] * stride_cm + cn[None, :] * stride_cn)

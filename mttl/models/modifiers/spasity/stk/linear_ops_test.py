@@ -3,11 +3,12 @@ import os
 import unittest
 
 import numpy as np
+import stk
 import torch
 from absl.testing import parameterized
+from stk.matrix import Matrix
 
-from mttl.models.modifiers.spasity import Matrix
-from mttl.models.modifiers.spasity.stk import linear_ops, matrix_ops, random_ops
+from mttl.models.modifiers.spasity.stk import linear_ops, matrix_ops
 
 # os.environ["TRITON_INTERPRET"] = "1"
 
@@ -65,9 +66,9 @@ _LINEAR_OP_TESTS = _generate_testcases()
 
 
 def _dense_and_sparse(rows, cols, sparsity, blocking, dtype, std=0.1):
-    mask = random_ops.dense_mask(rows, cols, sparsity, blocking)
+    mask = stk.random.dense_mask(rows, cols, sparsity, blocking)
     dense = (torch.randn(rows, cols) * std * mask).type(dtype)
-    sparse = matrix_ops.to_sparse(dense, blocking)
+    sparse = stk.ops.to_sparse(dense, blocking)
     cuda_device = torch.device("cuda")
     return (
         dense.to(cuda_device).requires_grad_(True),
@@ -88,9 +89,9 @@ def _dense_2x(rows, cols, dtype):
 
 def _mmm_with_adapters(a, W_base, topo, adapters):
     b = W_base.repeat(1, len(adapters))
-    adaps_as_dense = [matrix_ops.to_dense(adap) for adap in adapters]
+    adaps_as_dense = [stk.ops.to_dense(adap) for adap in adapters]
     b = b + torch.cat(adaps_as_dense, dim=1)
-    mask = matrix_ops.to_dense(matrix_ops.ones_like(topo))
+    mask = stk.ops.to_dense(stk.ops.ones_like(topo))
     return torch.mm(a, b) * mask
 
 
@@ -127,15 +128,15 @@ class LinearOpsTest(parameterized.TestCase):
         expected_out = _mmm_with_adapters(acp, W_basecp, out_topo, adapters)
 
         adapters_as_dense = torch.cat(
-            [matrix_ops.to_dense(adap) for adap in adapters], dim=1
+            [stk.ops.to_dense(adap) for adap in adapters], dim=1
         )
-        adaps_as_dense = matrix_ops.to_dense(adaps)
+        adaps_as_dense = stk.ops.to_dense(adaps)
         assert (
             torch.sum(adapters_as_dense != adaps_as_dense) == 0
         ), "adapters and adaps should be the same"
 
         # Validate the results.
-        out = matrix_ops.to_dense(out)
+        out = stk.ops.to_dense(out)
         self.assertEqual(out.dim(), 2)
         self.assertEqual(expected_out.size()[0], out.size()[0])
         self.assertEqual(expected_out.size()[1], out.size()[1])

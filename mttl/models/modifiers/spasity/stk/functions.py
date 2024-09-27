@@ -1,8 +1,8 @@
 import torch
+from stk.backend.autocast import custom_bwd, custom_fwd
+from stk.matrix import Matrix
 
 import mttl.models.modifiers.spasity.stk.triton_kernels as backend
-from mttl.models.modifiers.spasity.matrix import Matrix
-from mttl.models.modifiers.spasity.stk.autocast import custom_bwd, custom_fwd
 
 
 class RowIndices(torch.autograd.Function):
