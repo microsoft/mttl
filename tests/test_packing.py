@@ -5,8 +5,7 @@ from mttl.datamodule.mt_seq_to_seq_module import (
     FlatMultiTaskConfig,
     FlatMultiTaskModule,
 )
-from mttl.models.expert_context import InfoContainer
-from mttl.models.modifiers.routing import RoutingInfo
+from mttl.models.expert_context import InfoContainer, RoutingInfo
 
 
 def test_packing_and_attn(tiny_flan_id):
