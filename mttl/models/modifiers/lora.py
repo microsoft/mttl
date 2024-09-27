@@ -253,7 +253,7 @@ class SkilledLoRA(LoRA):
 
         self.lora_b.data[skill_index] = lora.lora_b.data.reshape(
             1, self.rank, self.n_splits, self.out_features // self.n_splits
-        ).to(device=self.lora_a.device, dtype=self.lora_a.dtype)
+        ).to(device=self.lora_b.device, dtype=self.lora_b.dtype)
 
     def add_skill(self, lora: Union[LoRA, "SkilledLoRA"]) -> None:
         """Adds a skill to the skilled lora by copying the weights of the given lora."""
@@ -395,7 +395,7 @@ class SkilledLoRA(LoRA):
         *   : [[a, d, f]]     [[0.1, 0.2, 0.7],
                                [0.3, 0.4, 0.3]]
 
-        We handle all these scenarios at once, by creating a weights tensor of size ["batch", "skills", "splits", "experts"]
+        We handle all these scenarios at once, by creating a weights tensor of size ["batch", "sequence", "splits", "experts"]
 
         dim_names specifies the names of the dimensions currently in the weights tensor, e.g. ["batch", "experts"],
         we unsqueeze the remaining dimensions.
