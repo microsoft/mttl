@@ -655,73 +655,6 @@ class IterativeDCDTrainer(DCDTrainer):
 
         return TrainOutput(self.state.global_step, train_loss, metrics)
 
-    def compute_loss(self, model, inputs, return_outputs=False):
-        # document + small task prompt + task output (e.g. summary, or question and answer)
-        input_ids = inputs["input_ids"]
-        labels = inputs["labels"]
-        attention_mask = inputs["attention_mask"]
-
-        # small task prompt + task output (e.g. summary, or question and answer)
-        nc_input_ids = inputs["nc_input_ids"]
-        nc_labels = inputs["nc_labels"]
-        nc_attention_mask = inputs["nc_attention_mask"]
-
-        with torch.no_grad():
-            # for the context-aware pass, we need to disable the adapter
-            ref_model = self.get_reference_model(model)
-
-            outputs = ref_model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                output_hidden_states=True,
-                return_dict=True,
-            )
-            target_hidden_states = [
-                hidden_state[labels != -100, ...]
-                for hidden_state in outputs.hidden_states
-            ]
-            target_logits = outputs.logits[labels != -100, :]
-
-        # for the context-less pass, we need to enable the adapter
-        stu_model = self.get_student_model(model)
-
-        outputs = stu_model(
-            input_ids=nc_input_ids,
-            attention_mask=nc_attention_mask,
-            output_hidden_states=True,
-            return_dict=True,
-        )
-
-        losses = []
-        for actual_states, target_states in zip(
-            outputs.hidden_states, target_hidden_states
-        ):
-            actual_states = actual_states[nc_labels != -100, :]
-
-            # Calculate mean magnitude of target states
-            mean = torch.sum(torch.abs(target_states)) / (actual_states.size(-1))
-
-            losses.append(
-                # Loss is the mean abs difference between target and predicted states,
-                # normalised by mean magnitude of target states
-                torch.sum(torch.abs(actual_states - target_states))
-                / (mean * np.prod(target_states.shape))
-            )
-
-        loss = torch.mean(torch.stack(losses))
-
-        # Add KL divergence between target and predicted output distributions to loss
-        ref_logprobs = F.log_softmax(target_logits, dim=-1)
-        logprobs = F.log_softmax(outputs.logits[nc_labels != -100, ...], dim=-1)
-        log_ratio = ref_logprobs - logprobs
-
-        # jscho kl divergence
-        prob_ratio = torch.exp(log_ratio.sum(dim=-1, keepdim=True))
-        kl_loss = (prob_ratio - log_ratio - 1).mean()
-        loss = loss + kl_loss
-
-        return (loss, outputs.logits) if return_outputs else loss
-
     def get_eval_dataloader(self, eval_dataset=None):
         if self.current_epoch_datamodule is not None:
             logger.info("Using current epoch datamodule for evaluation.")
@@ -729,8 +662,11 @@ class IterativeDCDTrainer(DCDTrainer):
         else:
             raise ValueError("No current epoch datamodule found.")
 
-    def get_reference_model(self, model):
-        return self.reference_model
+    def create_datamodule_for_generated_data(self, dataset_path):
+        args_copy = copy.deepcopy(self.mttl_args)
+        args_copy.dataset = "local://" + dataset_path
+        args_copy.dataset_type = "dcd_km"
+        return get_datamodule(args_copy)
 
     def get_train_dataloader(self) -> DataLoader:
         """
@@ -751,22 +687,7 @@ class IterativeDCDTrainer(DCDTrainer):
             train_dataset = self.generate_epoch_data(self.train_dataset)
             train_dataset.save_to_disk(dataset_path)
 
-        # re-create the datamodule for km training for this epoch
-        datamodule = KMDatasetModule(
-            KMDatasetConfig(
-                dataset="local://" + dataset_path,
-                model=self.mttl_args.model,
-                model_family="gpt",
-                padding_side="left",
-                truncation_side="left",
-                task_name_field=self.mttl_args.task_name_field,
-                task_source_field=self.mttl_args.task_source_field,
-                train_batch_size=self.mttl_args.train_batch_size,
-                predict_batch_size=self.mttl_args.predict_batch_size,
-                max_input_length=self.mttl_args.max_input_length,
-                max_output_length=self.mttl_args.max_output_length,
-            )
-        )
+        datamodule = self.create_datamodule_for_generated_data(dataset_path)
         self.current_epoch_datamodule = datamodule
         return self.accelerator.prepare(datamodule.train_dataloader())
 
@@ -807,13 +728,13 @@ class IterativeDCDTrainer(DCDTrainer):
         self.model.to(device)
 
         # reloading the reference model, this is with the previous adapter merged!
-        self.reference_model = model_loader_helper(
-            self.temp_directory,
-            device_map=device,
-            bf16=self.mttl_args.precision == "bf16",
-            fp16=self.mttl_args.precision == "fp16",
-            attn_implementation=self.mttl_args.attn_implementation,
-        )
+        # self.reference_model = model_loader_helper(
+        #    self.temp_directory,
+        #    device_map=device,
+        #    bf16=self.mttl_args.precision == "bf16",
+        #    fp16=self.mttl_args.precision == "fp16",
+        #    attn_implementation=self.mttl_args.attn_implementation,
+        # )
         return DatasetDict({"train": augmented_dataset})
 
 
@@ -866,6 +787,7 @@ def train_km(training_args):
         args=training_args,
         callbacks=callbacks,
     )
+
     trainer.train()
 
     # Get the best checkpoint
