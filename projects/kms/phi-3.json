@@ -12,7 +12,6 @@
     "train_batch_size": 16,
     "predict_batch_size": 2,
     "precision": "bf16",
-    "dataset_type": "dcd_km",
     "model": "microsoft/Phi-3-mini-4k-instruct",
     "model_family": "gpt",
     "optimizer": "adamw",
