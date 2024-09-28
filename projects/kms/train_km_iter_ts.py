@@ -192,11 +192,14 @@ class TeacherStudentDCDTrainer(IterativeDCDTrainer):
             student_logprobs, 1, nc_labels[nc_labels_mask].unsqueeze(1)
         ).view(-1)
 
+        # compute rewards for the teacher, stuff that student doesn't get right but teacher does
         rewards = student_nll - reference_nll
         rewards = torch.clamp(rewards - rewards.mean(), -1.0, 1.0)
 
-        # compute teacher loss only on top_k tokens
+        # policy-gradient loss
         teacher_loss = (rewards.detach() * teacher_nll).mean()
+
+        # ppo-style kl divergence to the teacher loss
         teacher_kl = torch.kl_div(reference_logprobs, teacher_logprobs, log_target=True)
 
         if teacher_kl.ndim == 2:
