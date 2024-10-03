@@ -1,16 +1,19 @@
 from typing import List
 
 import numpy as np
+import stk.ops
 import torch
 from stk.matrix import Matrix
 
 
-def merge_adapters(adapters: List[Matrix]) -> Matrix:
+def _merge_adapters (adapters: List[Matrix]) -> Matrix:
     """
     Merges a list of adapters into a single adapter along the second dimention.
+    Also changes the block size by padding blocks iwht 0s if necessary.
+    
     """
-    col_indices_list = [adap.column_indices for adap in adapters]
-    row_indices_list = [adap.row_indices for adap in adapters]
+    col_indices_list = [adap.column_indices.to(torch.int32) for adap in adapters]
+    # row_indices_list = [adap.row_indices for adap in adapters]
     offsets_list = [adap.offsets for adap in adapters]
     data_list = [adap.data for adap in adapters]
 
@@ -20,6 +23,7 @@ def merge_adapters(adapters: List[Matrix]) -> Matrix:
     ), "All adapters must have the same number of rows"
 
     block_size = adapters[0].blocking
+    
     K, N = adapters[0].size()
     col_offset = N // block_size  # assuming all have same number of cols
     n_adaps = len(adapters)
@@ -29,7 +33,9 @@ def merge_adapters(adapters: List[Matrix]) -> Matrix:
         adjusted_col_indices.append(col_idx + e * col_offset)
 
     merged_col_indices = torch.cat(adjusted_col_indices)
-    row_indices = torch.cat([adap.row_indices for adap in adapters], dim=0)
+    row_indices = torch.cat(
+        [adap.row_indices.to(torch.int32) for adap in adapters], dim=0
+    )
     data = torch.cat([adap.data for adap in adapters], dim=0)
 
     indices = torch.stack([row_indices, merged_col_indices], dim=1)
@@ -54,6 +60,28 @@ def merge_adapters(adapters: List[Matrix]) -> Matrix:
     offsets = offsets.contiguous()
 
     return Matrix((K, n_adaps * N), data, row_indices, col_indices, offsets)
+
+def change_block_size(M: Matrix, new_blk_size) -> Matrix:
+    raise NotImplementedError("change_block_size is not implemented yet")
+    return 
+
+        
+        
+    
+
+
+def merge_adapters(adapters: List[Matrix], blk_size = None) -> Matrix:
+    """
+    Merges a list of adapters into a single adapter along the second dimention.
+    Also changes the block size by padding blocks iwht 0s if necessary.
+    
+    """
+    
+    out = _merge_adapters(adapters) # merges the adapters into a single Matrix() without changing the block size
+    if blk_size is not None:
+        out = change_block_size(out, blk_size)    
+    return out
+
 
 
 def create_ada_layout(matix: Matrix):
