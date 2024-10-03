@@ -177,4 +177,4 @@ for bs, d, h, E, k, sparsity, blocking, dtype in SC_MOE_TEST:
     lora_a = torch.randn(E, d, lora_rank, dtype=dtype).cuda().contiguous()
     lora_b = torch.randn(E, lora_rank, h, dtype=dtype).cuda().contiguous()
     func_lora = partial(lora_merge, lora_a=lora_a, lora_b=lora_b, x=X, W_base=W, W_merge=weights)
-    # benchmark_module("LoRA merge (our current vanila)", func_lora)
+    benchmark_module("LoRA merge (our current vanila)", func_lora)
