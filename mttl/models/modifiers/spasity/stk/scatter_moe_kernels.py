@@ -247,7 +247,7 @@ def _scatter2scatter_sp(
     adaW_stride_e,
     adaW_stride_m,
     adaW_stride_n,
-    base_act,
+    base_acts,
     column_indices_t, # gives the row index column by column (row indexes sorted by column starting witht he first one etc.)
     column_indices_t_offset,
     offsets_t, # offsets for columns: i.e. the diff between two consecutive gives the number of blocks per column. It indexes column_indices_t, block_offsets_t
@@ -326,7 +326,7 @@ def _scatter2scatter_sp(
             
             # tl.store(OWW, w)
     
-    base_act_ptr = base_act + M_in_idx[:, None] * stride_ym + N_block[None, :] * stride_yn
+    base_act_ptr = base_acts + M_in_idx[:, None] * stride_ym + N_block[None, :] * stride_yn
     base_act = tl.load(base_act_ptr, mask=E_mask[:, None] & N_mask[None, :])
     acc *= gate[:, None]
     acc += base_act
@@ -454,7 +454,7 @@ def _scatter2scatter_sp_optimized(
     adaW_stride_e,
     adaW_stride_m,
     adaW_stride_n,
-    base_act,
+    base_acts,
     column_indices_t, # gives the row index column by column (row indexes sorted by column starting witht he first one etc.)
     column_indices_t_offset,
     offsets_t, # offsets for columns: i.e. the diff between two consecutive gives the number of blocks per column. It indexes column_indices_t, block_offsets_t
@@ -527,7 +527,7 @@ def _scatter2scatter_sp_optimized(
             w = tl.load(W, mask=N_mask[None, :]) 
             acc += tl.dot(x, w, out_dtype=ACC_TYPE)
     
-    base_act_ptr = base_act + M_in_idx[:, None] * stride_ym + N_block[None, :] * stride_yn
+    base_act_ptr = base_acts + M_in_idx[:, None] * stride_ym + N_block[None, :] * stride_yn
     base_act = tl.load(base_act_ptr, mask=E_mask[:, None] & N_mask[None, :])
     acc *= gate[:, None]
     acc += base_act
