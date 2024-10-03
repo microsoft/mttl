@@ -124,7 +124,7 @@ class ParalleLinear(torch.autograd.Function):
         sorted_expert_idxs,
         sorted_scattered_idxs,
         padded_block_idxs,
-        gates
+        gates,
     ):
 
         output = scatter2scatter_sparse(
@@ -149,7 +149,6 @@ class ParalleLinear(torch.autograd.Function):
 
 
 parallel_linear = ParalleLinear.apply
-
 
 
 class ParalleLinear2(torch.autograd.Function):

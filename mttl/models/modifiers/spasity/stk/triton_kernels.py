@@ -36,7 +36,11 @@ def _validate_matmul_dims(M: int, K: int, N: int):
             num_warps=TritonConfig.NUM_WARPS,
         ),
     ],
-    key=["M", "N", "K"], # uses these keys to decide wether to re-evaluate the choise of best config
+    key=[
+        "M",
+        "N",
+        "K",
+    ],  # uses these keys to decide wether to re-evaluate the choise of best config
 )
 @triton.jit  # this is understood
 def _sdd_adamerge(
@@ -166,7 +170,7 @@ def sdd_spmerge(
         ACC_TYPE = tl.float32
     else:
         raise ValueError(f"Unsupported dtype: {out.dtype}")
-    
+
     # launch kernel
     nnz_blocks = len(row_indices)
     grid = lambda META: (nnz_blocks,)  # this just alunches 61 threadblocks
@@ -199,9 +203,10 @@ def sdd_spmerge(
 
 # this is from https://github.com/databricks/megablocks/blob/7b0337fa7278d224bf0c9be71c3a92c392fdd340/megablocks/backend/kernels.py#L107
 
+
 def assert_is_tensor(x, ndim):
     if x.ndim != ndim:
-        raise ValueError(f'Expected {ndim}-tensor but got {x.ndim}-tensor')
+        raise ValueError(f"Expected {ndim}-tensor but got {x.ndim}-tensor")
 
 
 def assert_is_matrix(x):
@@ -210,12 +215,14 @@ def assert_is_matrix(x):
 
 def assert_is_vector(x):
     if x.ndim != 1:
-        raise ValueError(f'Expected 1-tensor but got {x.ndim}-tensor')
+        raise ValueError(f"Expected 1-tensor but got {x.ndim}-tensor")
 
 
 def assert_equal(a, b):
     if a != b:
-        raise ValueError(f'Expected dimensions to be equal but got {a} and {b}.',)
+        raise ValueError(
+            f"Expected dimensions to be equal but got {a} and {b}.",
+        )
 
 
 # a: (tokens, hidden_size), real.
@@ -226,13 +233,13 @@ def assert_equal(a, b):
 # padded_bins: (num_experts), integer.
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK_X': 64}, num_warps=2),
-        triton.Config({'BLOCK_X': 128}, num_warps=2),
-        triton.Config({'BLOCK_X': 256}, num_warps=2),
-        triton.Config({'BLOCK_X': 128}, num_warps=4),
-        triton.Config({'BLOCK_X': 256}, num_warps=4),
+        triton.Config({"BLOCK_X": 64}, num_warps=2),
+        triton.Config({"BLOCK_X": 128}, num_warps=2),
+        triton.Config({"BLOCK_X": 256}, num_warps=2),
+        triton.Config({"BLOCK_X": 128}, num_warps=4),
+        triton.Config({"BLOCK_X": 256}, num_warps=4),
     ],
-    key=['NUM_COLUMNS'],
+    key=["NUM_COLUMNS"],
 )
 @triton.jit
 def _padded_copy(
@@ -409,13 +416,13 @@ def scatter(x, indices, bin_ids, weights, bins, top_k):
 # padded_bins: (num_experts), integer.
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK_X': 64}, num_warps=2),
-        triton.Config({'BLOCK_X': 128}, num_warps=2),
-        triton.Config({'BLOCK_X': 256}, num_warps=2),
-        triton.Config({'BLOCK_X': 128}, num_warps=4),
-        triton.Config({'BLOCK_X': 256}, num_warps=4),
+        triton.Config({"BLOCK_X": 64}, num_warps=2),
+        triton.Config({"BLOCK_X": 128}, num_warps=2),
+        triton.Config({"BLOCK_X": 256}, num_warps=2),
+        triton.Config({"BLOCK_X": 128}, num_warps=4),
+        triton.Config({"BLOCK_X": 256}, num_warps=4),
     ],
-    key=['NUM_COLUMNS'],
+    key=["NUM_COLUMNS"],
 )
 @triton.jit
 def _padded_copy_wgrad(
@@ -507,13 +514,13 @@ def scatter_wgrad(x, grad, indices, bin_ids, bins, top_k):
 # bins: (num_experts), integer.
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK_X': 64}, num_warps=2),
-        triton.Config({'BLOCK_X': 128}, num_warps=2),
-        triton.Config({'BLOCK_X': 256}, num_warps=2),
-        triton.Config({'BLOCK_X': 128}, num_warps=4),
-        triton.Config({'BLOCK_X': 256}, num_warps=4),
+        triton.Config({"BLOCK_X": 64}, num_warps=2),
+        triton.Config({"BLOCK_X": 128}, num_warps=2),
+        triton.Config({"BLOCK_X": 256}, num_warps=2),
+        triton.Config({"BLOCK_X": 128}, num_warps=4),
+        triton.Config({"BLOCK_X": 256}, num_warps=4),
     ],
-    key=['NUM_COLUMNS'],
+    key=["NUM_COLUMNS"],
 )
 @triton.jit
 def _binned_copy(
@@ -593,7 +600,9 @@ def binned_gather(x, indices, weights, bins, expert_capacity, top_k):
         assert_equal(weights.shape[0], x.shape[0] * top_k)
 
     num_experts = bins.shape[0]
-    out = torch.zeros((num_experts, expert_capacity, x.shape[1]), dtype=x.dtype, device=x.device)
+    out = torch.zeros(
+        (num_experts, expert_capacity, x.shape[1]), dtype=x.dtype, device=x.device
+    )
 
     _binned_copy[(num_experts, expert_capacity)](
         x,
@@ -649,13 +658,13 @@ def binned_scatter(x, indices, weights, bins, top_k):
 # bins: (num_experts), integer.
 @triton.autotune(
     configs=[
-        triton.Config({'BLOCK_X': 64}, num_warps=2),
-        triton.Config({'BLOCK_X': 128}, num_warps=2),
-        triton.Config({'BLOCK_X': 256}, num_warps=2),
-        triton.Config({'BLOCK_X': 128}, num_warps=4),
-        triton.Config({'BLOCK_X': 256}, num_warps=4),
+        triton.Config({"BLOCK_X": 64}, num_warps=2),
+        triton.Config({"BLOCK_X": 128}, num_warps=2),
+        triton.Config({"BLOCK_X": 256}, num_warps=2),
+        triton.Config({"BLOCK_X": 128}, num_warps=4),
+        triton.Config({"BLOCK_X": 256}, num_warps=4),
     ],
-    key=['NUM_COLUMNS'],
+    key=["NUM_COLUMNS"],
 )
 @triton.jit
 def _binned_copy_wgrad(

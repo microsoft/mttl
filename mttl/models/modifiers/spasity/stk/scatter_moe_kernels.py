@@ -58,15 +58,17 @@ def _scatter2scatter(
     NO_K_MASK: tl.constexpr,
     NO_N_MASK: tl.constexpr,
     ADA_BLOCK: tl.constexpr,
-    ADA_BLCKS_PER_TILE_K: tl.constexpr, # how many ada blocks in one tile in K direction
-    ADA_BLCKS_PER_TILE_N: tl.constexpr, # how many ada blocks in one tile in N direction
+    ADA_BLCKS_PER_TILE_K: tl.constexpr,  # how many ada blocks in one tile in K direction
+    ADA_BLCKS_PER_TILE_N: tl.constexpr,  # how many ada blocks in one tile in N direction
 ):
     pid = tl.program_id(axis=0)
 
     N_BLOCK_COUNT = tl.cdiv(
         N, BLOCK_N
     )  # is 2? numbe of blocks per expert's output dimension
-    M_block_id = pid // N_BLOCK_COUNT # which expert are we in? (actually block, since there might be multiple blocks per expert)
+    M_block_id = (
+        pid // N_BLOCK_COUNT
+    )  # which expert are we in? (actually block, since there might be multiple blocks per expert)
     N_block_id = pid % N_BLOCK_COUNT  # which block in the out. dim are we in?
     # Determine the block indices along the M and N dimensions for this program.
 
@@ -99,10 +101,12 @@ def _scatter2scatter(
 
     X_blk_ptrs = X_ptr + M_in_idx[:, None] * stride_xm + K_block[None, :] * stride_xk
     W_blk_ptrs = W_ptr + K_block[:, None] * stride_wk + N_block[None, :] * stride_wn
-    
+
     L_BLOCK_K = tl.arange(0, ADA_BLCKS_PER_TILE_K)
     L_BLOCK_N = tl.arange(0, ADA_BLCKS_PER_TILE_N)
-    additive_idx_blocks = (tl.arange(0, ADA_BLOCK))[:, None] * ADA_BLOCK + (tl.arange(0, ADA_BLOCK))[None, :]
+    additive_idx_blocks = (tl.arange(0, ADA_BLOCK))[:, None] * ADA_BLOCK + (
+        tl.arange(0, ADA_BLOCK)
+    )[None, :]
     L_blck_ptrs = (
         ada_layout
         + L_BLOCK_K[:, None] * stride_layout_m
@@ -110,7 +114,7 @@ def _scatter2scatter(
         + N_block_id * ADA_BLCKS_PER_TILE_N
         + E_idx * stride_layout_e
     )
-    
+
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
     iters = tl.cdiv(K, BLOCK_K)
     for K_block_id in range(0, iters):
@@ -129,17 +133,30 @@ def _scatter2scatter(
         # BETTER TO RESAHPE MEMORY ADDRESSES, NOT THE LOADED DATA?
         mask = layout_tile >= 0
         base_addresses = adaW + (layout_tile * (ADA_BLOCK * ADA_BLOCK))
-        full_addresses = base_addresses[:,None,:,None] + additive_idx_blocks[None,:,None,:]
-        full_addresses = full_addresses.reshape(ADA_BLCKS_PER_TILE_K * ADA_BLOCK, ADA_BLCKS_PER_TILE_N * ADA_BLOCK)
-        mask = mask[:, None, :, None] * (tl.zeros((1, ADA_BLOCK, 1, ADA_BLOCK), dtype=ACC_TYPE) + 1.0)
-        mask = mask.reshape(ADA_BLCKS_PER_TILE_K * ADA_BLOCK, ADA_BLCKS_PER_TILE_N * ADA_BLOCK) > 0.0
-        
+        full_addresses = (
+            base_addresses[:, None, :, None] + additive_idx_blocks[None, :, None, :]
+        )
+        full_addresses = full_addresses.reshape(
+            ADA_BLCKS_PER_TILE_K * ADA_BLOCK, ADA_BLCKS_PER_TILE_N * ADA_BLOCK
+        )
+        mask = mask[:, None, :, None] * (
+            tl.zeros((1, ADA_BLOCK, 1, ADA_BLOCK), dtype=ACC_TYPE) + 1.0
+        )
+        mask = (
+            mask.reshape(
+                ADA_BLCKS_PER_TILE_K * ADA_BLOCK, ADA_BLCKS_PER_TILE_N * ADA_BLOCK
+            )
+            > 0.0
+        )
+
         adaW_tile = tl.load(
             full_addresses,
             mask=mask,
             other=0.0,
-        )        
-        w = w + adaW_tile #.reshape(ADA_BLCKS_PER_TILE_K * ADA_BLOCK, ADA_BLCKS_PER_TILE_N * ADA_BLOCK)
+        )
+        w = (
+            w + adaW_tile
+        )  # .reshape(ADA_BLCKS_PER_TILE_K * ADA_BLOCK, ADA_BLCKS_PER_TILE_N * ADA_BLOCK)
         L_blck_ptrs += ADA_BLCKS_PER_TILE_K * stride_layout_m
         X_blk_ptrs += BLOCK_K * stride_xk
         W_blk_ptrs += BLOCK_K * stride_wk
@@ -175,7 +192,7 @@ def scatter2scatter(
     else:
         assert out.size(0) == L_scattered and out.size(1) == y_dim
         O = out
-    
+
     def grid(META):
         grid_num = (
             padded_block_idxs.size(0) * triton.cdiv(META["N"], META["BLOCK_N"]),
@@ -193,8 +210,8 @@ def scatter2scatter(
     # sorted_expert_idxs = sorted_expert_idxs.to(torch.int32)
     # sorted_scattered_idxs = sorted_scattered_idxs.to(torch.int32)
     # padded_block_idxs = padded_block_idxs.to(torch.int32)
-    
-    # with torch.cuda.device(X.device):  
+
+    # with torch.cuda.device(X.device):
     _scatter2scatter[grid](
         X,
         X.stride(0),
@@ -227,6 +244,7 @@ def scatter2scatter(
     )
     return O
 
+
 def _scatter2scatter_sp_configs():
     return [
         # triton.Config({"BLOCK_K": 128}, num_stages=4, num_warps=4),
@@ -248,11 +266,11 @@ def _scatter2scatter_sp(
     adaW_stride_m,
     adaW_stride_n,
     base_acts,
-    column_indices_t, # gives the row index column by column (row indexes sorted by column starting witht he first one etc.)
+    column_indices_t,  # gives the row index column by column (row indexes sorted by column starting witht he first one etc.)
     column_indices_t_offset,
-    offsets_t, # offsets for columns: i.e. the diff between two consecutive gives the number of blocks per column. It indexes column_indices_t, block_offsets_t
+    offsets_t,  # offsets for columns: i.e. the diff between two consecutive gives the number of blocks per column. It indexes column_indices_t, block_offsets_t
     offsets_t_offset,
-    block_offsets_t, # indices of blocks sorted by column
+    block_offsets_t,  # indices of blocks sorted by column
     block_offsets_t_offset,
     Y_ptr,
     stride_ym,
@@ -275,15 +293,21 @@ def _scatter2scatter_sp(
     N_BLOCK_COUNT = tl.cdiv(
         N, BLOCK_N
     )  # is 2? numbe of blocks per expert's output dimension
-    M_block_id = pid // N_BLOCK_COUNT # which expert are we in? (actually block, since there might be multiple blocks per expert)
+    M_block_id = (
+        pid // N_BLOCK_COUNT
+    )  # which expert are we in? (actually block, since there might be multiple blocks per expert)
     N_block_id = pid % N_BLOCK_COUNT  # which block in the out. dim are we in?
     # Determine the block indices along the M and N dimensions for this program.
 
     M_range = tl.arange(0, BLOCK_M)
-    block_start_idx = tl.load(padded_block_idxs + M_block_id)  # Load the index of the  starting token for this block
+    block_start_idx = tl.load(
+        padded_block_idxs + M_block_id
+    )  # Load the index of the  starting token for this block
     # M_block = tl.max_contiguous((block_start_idx + M_range) % OUT_M, BLOCK_M)
     M_block = tl.max_contiguous(block_start_idx + M_range, BLOCK_M)  # max tokens
-    E_idxs = tl.load(sorted_expert_idxs + M_block, mask=M_block < (FAN_OUT * M), other=E)  # expert_idxs_ptr is sorted by expert! so this loads expert indices of tokens
+    E_idxs = tl.load(
+        sorted_expert_idxs + M_block, mask=M_block < (FAN_OUT * M), other=E
+    )  # expert_idxs_ptr is sorted by expert! so this loads expert indices of tokens
     E_idx = tl.min(E_idxs)
     E_mask = E_idxs == E_idx
     M_idx = tl.load(sorted_scattered_idxs + M_block, mask=E_mask, other=0)
@@ -296,45 +320,68 @@ def _scatter2scatter_sp(
     start_inx = tl.load(offsets_t + (E_idx * offsets_t_offset) + N_block_id)
     end_inx = tl.load(offsets_t + (E_idx * offsets_t_offset) + N_block_id + 1)
     num_blocks_column = end_inx - start_inx
-    iters = num_blocks_column #tl.cdiv(num_blocks_column, tl.cdiv(BLOCK_K, ADA_BLOCK)) # n_blocks_column
+    iters = num_blocks_column  # tl.cdiv(num_blocks_column, tl.cdiv(BLOCK_K, ADA_BLOCK)) # n_blocks_column
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    
+
     gate = tl.load(gates + M_idx, mask=E_mask)
-    
+
     if iters > 0:
         # pointers to dense matrix
         X_blk_ptr = X_ptr + M_in_idx[:, None] * stride_xm + K_block[None, :] * stride_xk
-        
+
         # pointers to sparse matrix
-        rn = tl.arange(0, BLOCK_N) #...16
-        rbk = tl.arange(0, BLOCK_K) # ... 16
-        W_blk_ptr = adaW + (rbk[:, None] * adaW_stride_m) + (rn[None, :] * adaW_stride_n) + (E_idx * adaW_stride_e)
+        rn = tl.arange(0, BLOCK_N)  # ...16
+        rbk = tl.arange(0, BLOCK_K)  # ... 16
+        W_blk_ptr = (
+            adaW
+            + (rbk[:, None] * adaW_stride_m)
+            + (rn[None, :] * adaW_stride_n)
+            + (E_idx * adaW_stride_e)
+        )
         BLOCK_SIZE = BLOCK_K * BLOCK_N
         ak_block_incr = stride_xk * BLOCK_K
-        
+
         # OW_block_ptr = OW + (rbk[:, None] * adaW_stride_m) + (rn[None, :] * adaW_stride_n) + (E_idx * adaW_stride_e)
 
-        for K_block_id in range(0, iters):    
-            X = X_blk_ptr + tl.load(column_indices_t + (E_idx * column_indices_t_offset) + start_inx + K_block_id) * ak_block_incr
-            
-            W = W_blk_ptr + tl.load(block_offsets_t + (E_idx * block_offsets_t_offset) + start_inx + K_block_id) * BLOCK_SIZE
+        for K_block_id in range(0, iters):
+            X = (
+                X_blk_ptr
+                + tl.load(
+                    column_indices_t
+                    + (E_idx * column_indices_t_offset)
+                    + start_inx
+                    + K_block_id
+                )
+                * ak_block_incr
+            )
+
+            W = (
+                W_blk_ptr
+                + tl.load(
+                    block_offsets_t
+                    + (E_idx * block_offsets_t_offset)
+                    + start_inx
+                    + K_block_id
+                )
+                * BLOCK_SIZE
+            )
             # OWW = OW_block_ptr + tl.load(block_offsets_t + (E_idx * block_offsets_t_offset) + start_inx + K_block_id) * BLOCK_SIZE
-            
+
             x = tl.load(X, mask=E_mask[:, None])
-            w = tl.load(W, mask=N_mask[None, :])    
+            w = tl.load(W, mask=N_mask[None, :])
             acc += tl.dot(x, w, out_dtype=ACC_TYPE)
-            
+
             # tl.store(OWW, w)
-    
-    base_act_ptr = base_acts + M_in_idx[:, None] * stride_ym + N_block[None, :] * stride_yn
+
+    base_act_ptr = (
+        base_acts + M_in_idx[:, None] * stride_ym + N_block[None, :] * stride_yn
+    )
     base_act = tl.load(base_act_ptr, mask=E_mask[:, None] & N_mask[None, :])
     acc *= gate[:, None]
     acc += base_act
-                    
+
     Y_blk_ptrs = Y_ptr + (M_out_idx[:, None] * stride_ym + N_block[None, :] * stride_yn)
     tl.store(Y_blk_ptrs, acc, mask=E_mask[:, None] & N_mask[None, :])
-
-
 
 
 def scatter2scatter_sparse(
@@ -366,8 +413,7 @@ def scatter2scatter_sparse(
     assert sorted_scattered_idxs.is_contiguous()
     assert padded_block_idxs.is_contiguous()
     assert gates.is_contiguous()
-    
-    
+
     # Pre-kernel setup
     x_dim = X.size(-1)
     y_dim = base_act.size(-1)
@@ -378,6 +424,7 @@ def scatter2scatter_sparse(
     else:
         assert out.size(0) == L_scattered and out.size(1) == y_dim
         O = out
+
     # OW = torch.empty_like(ada_weights, device=X.device, dtype=ada_weights.dtype)
     def grid(META):
         grid_num = (
@@ -388,7 +435,7 @@ def scatter2scatter_sparse(
     M, K = X.size()
     N = y_dim
     E = ada_weights.size(0)
-    with torch.cuda.device(X.device):  
+    with torch.cuda.device(X.device):
         _scatter2scatter_sp[grid](
             X,
             X.stride(0),
@@ -401,7 +448,7 @@ def scatter2scatter_sparse(
             base_act,
             col_idxs_t,
             col_idxs_t.stride(0),
-            offsets_t, # column offsets shapre is (E, N//ada_block + 1)
+            offsets_t,  # column offsets shapre is (E, N//ada_block + 1)
             offsets_t.stride(0),
             block_offsets_t,
             block_offsets_t.stride(0),
@@ -419,7 +466,7 @@ def scatter2scatter_sparse(
             BLOCK_M=BLOCK_M,
             BLOCK_K=ada_block,
             BLOCK_N=ada_block,
-            ACC_TYPE=tl.float32
+            ACC_TYPE=tl.float32,
         )
         return O
 
@@ -430,13 +477,10 @@ def scatter2scatter_sparse(
         triton.Config({"GROUP_M": 4, "BLOCK_M": 128}, num_stages=4, num_warps=4),
         triton.Config({"GROUP_M": 32, "BLOCK_M": 128}, num_stages=4, num_warps=4),
         triton.Config({"GROUP_M": 128, "BLOCK_M": 128}, num_stages=4, num_warps=4),
-        
         triton.Config({"GROUP_M": 1, "BLOCK_M": 64}, num_stages=4, num_warps=4),
         triton.Config({"GROUP_M": 4, "BLOCK_M": 64}, num_stages=4, num_warps=4),
         triton.Config({"GROUP_M": 32, "BLOCK_M": 64}, num_stages=4, num_warps=4),
         triton.Config({"GROUP_M": 128, "BLOCK_M": 64}, num_stages=4, num_warps=4),
-        
-        
         triton.Config({"GROUP_M": 1, "BLOCK_M": 256}, num_stages=4, num_warps=4),
         triton.Config({"GROUP_M": 4, "BLOCK_M": 256}, num_stages=4, num_warps=4),
         triton.Config({"GROUP_M": 32, "BLOCK_M": 256}, num_stages=4, num_warps=4),
@@ -455,11 +499,11 @@ def _scatter2scatter_sp_optimized(
     adaW_stride_m,
     adaW_stride_n,
     base_acts,
-    column_indices_t, # gives the row index column by column (row indexes sorted by column starting witht he first one etc.)
+    column_indices_t,  # gives the row index column by column (row indexes sorted by column starting witht he first one etc.)
     column_indices_t_offset,
-    offsets_t, # offsets for columns: i.e. the diff between two consecutive gives the number of blocks per column. It indexes column_indices_t, block_offsets_t
+    offsets_t,  # offsets for columns: i.e. the diff between two consecutive gives the number of blocks per column. It indexes column_indices_t, block_offsets_t
     offsets_t_offset,
-    block_offsets_t, # indices of blocks sorted by column
+    block_offsets_t,  # indices of blocks sorted by column
     block_offsets_t_offset,
     Y_ptr,
     stride_ym,
@@ -478,19 +522,23 @@ def _scatter2scatter_sp_optimized(
     GROUP_M: tl.constexpr,
 ):
     pid_m = tl.program_id(axis=0)
-    pid_n = tl.program_id(axis=1) 
+    pid_n = tl.program_id(axis=1)
 
     num_pid_m = tl.num_programs(0)
     num_pid_n = tl.num_programs(1)
     pid_n, pid_m = tl.swizzle2d(pid_n, pid_m, num_pid_n, num_pid_m, GROUP_M)
-    
-    M_block_id = pid_m # which expert are we in? (actually block, since there might be multiple blocks per expert)
-    N_block_id =pid_n  # which block in the out. dim are we in?
+
+    M_block_id = pid_m  # which expert are we in? (actually block, since there might be multiple blocks per expert)
+    N_block_id = pid_n  # which block in the out. dim are we in?
     M_range = tl.arange(0, BLOCK_M)
-    block_start_idx = tl.load(padded_block_idxs + M_block_id)  # Load the index of the  starting token for this block
+    block_start_idx = tl.load(
+        padded_block_idxs + M_block_id
+    )  # Load the index of the  starting token for this block
     # M_block = tl.max_contiguous((block_start_idx + M_range) % OUT_M, BLOCK_M)
     M_block = tl.max_contiguous(block_start_idx + M_range, BLOCK_M)  # max tokens
-    E_idxs = tl.load(sorted_expert_idxs + M_block, mask=M_block < (FAN_OUT * M), other=E)  # expert_idxs_ptr is sorted by expert! so this loads expert indices of tokens
+    E_idxs = tl.load(
+        sorted_expert_idxs + M_block, mask=M_block < (FAN_OUT * M), other=E
+    )  # expert_idxs_ptr is sorted by expert! so this loads expert indices of tokens
     E_idx = tl.min(E_idxs)
     E_mask = E_idxs == E_idx
     M_idx = tl.load(sorted_scattered_idxs + M_block, mask=E_mask, other=0)
@@ -503,40 +551,65 @@ def _scatter2scatter_sp_optimized(
     start_inx = tl.load(offsets_t + (E_idx * offsets_t_offset) + N_block_id)
     end_inx = tl.load(offsets_t + (E_idx * offsets_t_offset) + N_block_id + 1)
     num_blocks_column = end_inx - start_inx
-    iters = num_blocks_column #tl.cdiv(num_blocks_column, tl.cdiv(BLOCK_K, ADA_BLOCK)) # n_blocks_column
+    iters = num_blocks_column  # tl.cdiv(num_blocks_column, tl.cdiv(BLOCK_K, ADA_BLOCK)) # n_blocks_column
     acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    
+
     gate = tl.load(gates + M_idx, mask=E_mask)
-    
+
     if iters > 0:
         # pointers to dense matrix
-        X_blk_ptr = X_ptr + M_in_idx[:, None] * stride_xm + K_block[None, :] * stride_xk        
+        X_blk_ptr = X_ptr + M_in_idx[:, None] * stride_xm + K_block[None, :] * stride_xk
         # pointers to sparse matrix
-        rn = tl.arange(0, BLOCK_N) #...16
-        rbk = tl.arange(0, BLOCK_K) # ... 16
-        W_blk_ptr = adaW + (rbk[:, None] * adaW_stride_m) + (rn[None, :] * adaW_stride_n) + (E_idx * adaW_stride_e)
+        rn = tl.arange(0, BLOCK_N)  # ...16
+        rbk = tl.arange(0, BLOCK_K)  # ... 16
+        W_blk_ptr = (
+            adaW
+            + (rbk[:, None] * adaW_stride_m)
+            + (rn[None, :] * adaW_stride_n)
+            + (E_idx * adaW_stride_e)
+        )
         BLOCK_SIZE = BLOCK_K * BLOCK_N
         ak_block_incr = stride_xk * BLOCK_K
 
-        for K_block_id in range(0, iters):    
-            X = X_blk_ptr + tl.load(column_indices_t + (E_idx * column_indices_t_offset) + start_inx + K_block_id) * ak_block_incr
-            
-            W = W_blk_ptr + tl.load(block_offsets_t + (E_idx * block_offsets_t_offset) + start_inx + K_block_id) * BLOCK_SIZE
-            
+        for K_block_id in range(0, iters):
+            X = (
+                X_blk_ptr
+                + tl.load(
+                    column_indices_t
+                    + (E_idx * column_indices_t_offset)
+                    + start_inx
+                    + K_block_id
+                )
+                * ak_block_incr
+            )
+
+            W = (
+                W_blk_ptr
+                + tl.load(
+                    block_offsets_t
+                    + (E_idx * block_offsets_t_offset)
+                    + start_inx
+                    + K_block_id
+                )
+                * BLOCK_SIZE
+            )
+
             x = tl.load(X, mask=E_mask[:, None])
-            w = tl.load(W, mask=N_mask[None, :]) 
+            w = tl.load(W, mask=N_mask[None, :])
             acc += tl.dot(x, w, out_dtype=ACC_TYPE)
-    
-    base_act_ptr = base_acts + M_in_idx[:, None] * stride_ym + N_block[None, :] * stride_yn
+
+    base_act_ptr = (
+        base_acts + M_in_idx[:, None] * stride_ym + N_block[None, :] * stride_yn
+    )
     base_act = tl.load(base_act_ptr, mask=E_mask[:, None] & N_mask[None, :])
     acc *= gate[:, None]
     acc += base_act
-                    
+
     Y_blk_ptrs = Y_ptr + (M_out_idx[:, None] * stride_ym + N_block[None, :] * stride_yn)
     tl.store(Y_blk_ptrs, acc, mask=E_mask[:, None] & N_mask[None, :])
     # tl.atomic_add(Y_blk_ptrs, acc, mask=E_mask[:, None] & N_mask[None, :], scope="cta")
-    
-    
+
+
 def scatter2scatter_sparse_optimized(
     X,
     base_act,
@@ -552,7 +625,7 @@ def scatter2scatter_sparse_optimized(
     padded_block_idxs,
     gates,
     out=None,
-    ):
+):
     assert sorted_scattered_idxs.size(0) == sorted_expert_idxs.size(0)
     assert sorted_scattered_idxs.size(0) == X.size(0) * k
     assert X.is_contiguous()
@@ -566,8 +639,7 @@ def scatter2scatter_sparse_optimized(
     assert sorted_scattered_idxs.is_contiguous()
     assert padded_block_idxs.is_contiguous()
     assert gates.is_contiguous()
-    
-    
+
     # Pre-kernel setup
     x_dim = X.size(-1)
     y_dim = base_act.size(-1)
@@ -577,17 +649,18 @@ def scatter2scatter_sparse_optimized(
     else:
         assert out.size(0) == L_scattered and out.size(1) == y_dim
         O = out
-        
+
     def grid(META):
         grid_num = (
-            padded_block_idxs.size(0), triton.cdiv(META["N"], META["BLOCK_N"]),
+            padded_block_idxs.size(0),
+            triton.cdiv(META["N"], META["BLOCK_N"]),
         )
         return grid_num
 
     M, K = X.size()
     N = y_dim
     E = ada_weights.size(0)
-    with torch.cuda.device(X.device):  
+    with torch.cuda.device(X.device):
         _scatter2scatter_sp_optimized[grid](
             X,
             X.stride(0),
@@ -600,7 +673,7 @@ def scatter2scatter_sparse_optimized(
             base_act,
             col_idxs_t,
             col_idxs_t.stride(0),
-            offsets_t, # column offsets shapre is (E, N//ada_block + 1)
+            offsets_t,  # column offsets shapre is (E, N//ada_block + 1)
             offsets_t.stride(0),
             block_offsets_t,
             block_offsets_t.stride(0),

@@ -58,6 +58,7 @@ def benchmark_module(name, function, runs=100):
 def calculate_lora_parameters(input_dim, output_dim, rank):
     return input_dim * rank + output_dim * rank
 
+
 def find_lora_hyperpaams(d_in, d_out, tot_sparse_params):
     lora_ranks = []
     lora_rank = 1
@@ -70,8 +71,9 @@ def find_lora_hyperpaams(d_in, d_out, tot_sparse_params):
     lora_ranks.append(lora_rank)
     return int(np.mean(lora_ranks))
 
+
 SC_MOE_TEST = {
-    # bs, d, h, E, k, sparsity, blocking, dtype 
+    # bs, d, h, E, k, sparsity, blocking, dtype
     (1024, 2048, 8192, 20, 2, 0.995, 16, torch.float16),
     (1024, 2048, 8192, 20, 2, 0.9, 128, torch.float16),
     (1024, 2048, 8192, 100, 2, 0.995, 16, torch.float16),
@@ -161,20 +163,21 @@ for bs, d, h, E, k, sparsity, blocking, dtype in SC_MOE_TEST:
     )
     benchmark_module("BS kernel optimized", func)
     lora_rank = find_lora_hyperpaams(d, h, np.prod(ada_data.shape[1:]))
-    
-        
+
     def lora_merge(lora_a, lora_b, x, W_base, W_merge):
         # LoRA does not profit from lower top-k in this vanila form
         # merge into 1 lora
         A = torch.einsum("be,edr->bdr", (W_merge, lora_a))
         B = torch.einsum("be,erd->brd", (W_merge, lora_b))
         # lora forward
-        partial_out = torch.einsum("bd,bdr->br", (x, A))    
+        partial_out = torch.einsum("bd,bdr->br", (x, A))
         adapter_out = torch.einsum("br,brd->bd", (partial_out, B))
         dense_out = x @ W_base
         return adapter_out + dense_out
-    
+
     lora_a = torch.randn(E, d, lora_rank, dtype=dtype).cuda().contiguous()
     lora_b = torch.randn(E, lora_rank, h, dtype=dtype).cuda().contiguous()
-    func_lora = partial(lora_merge, lora_a=lora_a, lora_b=lora_b, x=X, W_base=W, W_merge=weights)
+    func_lora = partial(
+        lora_merge, lora_a=lora_a, lora_b=lora_b, x=X, W_base=W, W_merge=weights
+    )
     benchmark_module("LoRA merge (our current vanila)", func_lora)

@@ -157,6 +157,7 @@ SC_MOE_TEST = {
     (8, 128, 256, 10, 2, 0.8, 16, torch.float32),
 }
 
+
 def dumb_forward(base_act, x, expert_p, expert_idxs, adaps):
     output = torch.stack(
         [
@@ -219,8 +220,7 @@ class ScatteredMoETest(parameterized.TestCase):
             padded_block_idxs=padded_block_idxs,
             gates=k_weights,
         )
-        
-        
+
         out2 = functions.parallel_linear_optimized(
             x=X,
             base_act=base_act,
@@ -236,9 +236,7 @@ class ScatteredMoETest(parameterized.TestCase):
             padded_block_idxs=padded_block_idxs,
             gates=k_weights,
         )
-        
-        
-        
+
         out_dumb = dumb_forward(base_act, X, k_weights, expert_idxs, adaps_dense)
         err_Y = torch.abs(out - out_dumb)
         tolerance = 1e-2

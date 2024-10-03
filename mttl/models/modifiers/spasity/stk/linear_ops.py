@@ -78,6 +78,7 @@ def scattergather_adamerge(
     )
     return out
 
+
 def scattergather_adamerge2(
     x,
     base_act,
