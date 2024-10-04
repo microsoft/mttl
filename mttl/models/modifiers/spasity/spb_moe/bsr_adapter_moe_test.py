@@ -33,6 +33,7 @@ SC_MOE_TEST = {
     (8, 128, 256, 10, 2, 0.8, 16, torch.float32),
 }
 
+
 def dumb_forward(base_act, x, expert_p, expert_idxs, adaps):
     output = torch.stack(
         [
@@ -57,7 +58,10 @@ class ScatteredMoETest(parameterized.TestCase):
         weights = torch.softmax(logits.float(), axis=-1).cuda().to(dtype)
         X = torch.randn(bs, d, dtype=dtype, requires_grad=True).cuda()
         W = torch.randn(d, h, dtype=dtype, requires_grad=True).cuda()
-        adaps = [matrix_ops._dense_and_sparse(d, h, sparsity, blocking, dtype) for _ in range(E)]
+        adaps = [
+            matrix_ops._dense_and_sparse(d, h, sparsity, blocking, dtype)
+            for _ in range(E)
+        ]
         adaps_sparse = [adap[1] for adap in adaps]
         adaps_dense = [adap[0] for adap in adaps]
         ada_data = torch.stack([adap.data for adap in adaps_sparse], dim=0)

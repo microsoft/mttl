@@ -548,8 +548,12 @@ def padded_gather(x, indices, E, block_size=16):
     indices_flat = indices.view(-1)  # [batch_size * seq_len * top_k]
 
     # Step 2: Expand x to match indices
-    x_flat_expanded = x_flat.unsqueeze(1).expand(-1, top_k, -1)  # [batch_size * seq_len, top_k, d_model]
-    x_expert = x_flat_expanded.reshape(-1, d_model)  # [batch_size * seq_len * top_k, d_model]
+    x_flat_expanded = x_flat.unsqueeze(1).expand(
+        -1, top_k, -1
+    )  # [batch_size * seq_len, top_k, d_model]
+    x_expert = x_flat_expanded.reshape(
+        -1, d_model
+    )  # [batch_size * seq_len * top_k, d_model]
 
     # Step 3: Sort indices and x_expert to group tokens by expert
     indices_expert, sort_order = indices_flat.sort()
@@ -559,13 +563,17 @@ def padded_gather(x, indices, E, block_size=16):
     num_tokens_per_expert = torch.bincount(indices_expert, minlength=E)  # [E]
 
     # Step 5: Compute padded number of tokens per expert
-    padded_num_tokens_per_expert = ((num_tokens_per_expert + block_size - 1) // block_size) * block_size  # [E]
+    padded_num_tokens_per_expert = (
+        (num_tokens_per_expert + block_size - 1) // block_size
+    ) * block_size  # [E]
     max_tokens_per_expert = padded_num_tokens_per_expert.max().item()
 
     # Step 6: Compute positions within each expert
     def compute_positions_in_group(indices_expert):
         unique_indices, counts = indices_expert.unique_consecutive(return_counts=True)
-        positions_in_expert = torch.cat([torch.arange(count, device=indices_expert.device) for count in counts])
+        positions_in_expert = torch.cat(
+            [torch.arange(count, device=indices_expert.device) for count in counts]
+        )
         return positions_in_expert
 
     positions_in_expert = compute_positions_in_group(indices_expert)
@@ -586,15 +594,17 @@ def padded_gather(x, indices, E, block_size=16):
         padding = padding_needed[e].item()
 
         # Get the indices and positions for the current expert
-        indices_e = indices_expert[current_idx:current_idx+count]
-        positions_e = positions_in_expert[current_idx:current_idx+count]
-        x_expert_e = x_expert_sorted[current_idx:current_idx+count]
+        indices_e = indices_expert[current_idx : current_idx + count]
+        positions_e = positions_in_expert[current_idx : current_idx + count]
+        x_expert_e = x_expert_sorted[current_idx : current_idx + count]
 
         # Append original tokens
         indices_expert_padded.append(indices_e)
         positions_in_expert_padded.append(positions_e)
         x_expert_padded.append(x_expert_e)
-        padding_mask.append(torch.ones(count, dtype=torch.bool, device=indices_expert.device))
+        padding_mask.append(
+            torch.ones(count, dtype=torch.bool, device=indices_expert.device)
+        )
 
         # If padding is needed, duplicate the last token 'padding' times
         if padding > 0:
@@ -606,7 +616,9 @@ def padded_gather(x, indices, E, block_size=16):
             indices_expert_padded.append(indices_e_pad)
             positions_in_expert_padded.append(positions_e_pad)
             x_expert_padded.append(x_expert_e_pad)
-            padding_mask.append(torch.zeros(padding, dtype=torch.bool, device=indices_expert.device))
+            padding_mask.append(
+                torch.zeros(padding, dtype=torch.bool, device=indices_expert.device)
+            )
 
         current_idx += count
 
@@ -623,10 +635,19 @@ def padded_gather(x, indices, E, block_size=16):
     output[indices_expert_padded, positions_in_expert_padded] = x_expert_padded
 
     # Return additional information for padded_scatter
-    return output, num_tokens_per_expert, sort_order, indices_expert_padded, positions_in_expert_padded, padding_mask
+    return (
+        output,
+        num_tokens_per_expert,
+        sort_order,
+        indices_expert_padded,
+        positions_in_expert_padded,
+        padding_mask,
+    )
 
 
-def padded_scatter(x, num_tokens_per_expert, sort_order, batch_size, seq_len, top_k, d_model):
+def padded_scatter(
+    x, num_tokens_per_expert, sort_order, batch_size, seq_len, top_k, d_model
+):
     """
     Un-permute tokens back to their original positions.
 
@@ -649,8 +670,12 @@ def padded_scatter(x, num_tokens_per_expert, sort_order, batch_size, seq_len, to
     x_flat = x.view(-1, d_model)  # [E * max_tokens_per_expert, d_model]
 
     # Step 2: Build indices for valid tokens
-    expert_indices = torch.repeat_interleave(torch.arange(E, device=device), num_tokens_per_expert)
-    positions_in_expert = torch.cat([torch.arange(n, device=device) for n in num_tokens_per_expert])
+    expert_indices = torch.repeat_interleave(
+        torch.arange(E, device=device), num_tokens_per_expert
+    )
+    positions_in_expert = torch.cat(
+        [torch.arange(n, device=device) for n in num_tokens_per_expert]
+    )
     valid_positions = expert_indices * max_tokens_per_expert + positions_in_expert
 
     # Step 3: Select valid tokens
@@ -660,7 +685,9 @@ def padded_scatter(x, num_tokens_per_expert, sort_order, batch_size, seq_len, to
     x_expert_sorted = x_valid
 
     # Step 5: Reconstruct x_expert using inverse of sort_order
-    x_expert = torch.empty((batch_size * seq_len * top_k, d_model), device=device, dtype=x.dtype)
+    x_expert = torch.empty(
+        (batch_size * seq_len * top_k, d_model), device=device, dtype=x.dtype
+    )
     x_expert[sort_order] = x_expert_sorted
 
     # Step 6: Reshape to [batch_size, seq_len, top_k, d_model]

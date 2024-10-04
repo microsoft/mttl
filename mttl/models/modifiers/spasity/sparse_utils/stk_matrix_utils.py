@@ -12,7 +12,6 @@ def _dense(rows, cols, dtype, std=0.1):
     return out.to(cuda_device).requires_grad_(True)
 
 
-
 def _dense_and_sparse(rows, cols, sparsity, blocking, dtype, std=0.1):
     mask = stk.random.dense_mask(rows, cols, sparsity, blocking)
     dense = (torch.randn(rows, cols) * std * mask).type(dtype)
@@ -22,6 +21,7 @@ def _dense_and_sparse(rows, cols, sparsity, blocking, dtype, std=0.1):
         dense.to(cuda_device).requires_grad_(True),
         sparse.to(cuda_device).requires_grad_(True),
     )
+
 
 def _merge_adapters(adapters: List[Matrix]) -> Matrix:
     """

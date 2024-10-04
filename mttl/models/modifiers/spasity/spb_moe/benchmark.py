@@ -94,7 +94,9 @@ for bs, d, h, E, k, sparsity, blocking, dtype in SC_MOE_TEST:
     weights = torch.softmax(logits.float(), axis=-1).cuda().to(dtype)
     X = torch.randn(bs, d, dtype=dtype, requires_grad=True).cuda()
     W = torch.randn(d, h, dtype=dtype, requires_grad=True).cuda()
-    adaps = [matrix_ops._dense_and_sparse(d, h, sparsity, blocking, dtype) for _ in range(E)]
+    adaps = [
+        matrix_ops._dense_and_sparse(d, h, sparsity, blocking, dtype) for _ in range(E)
+    ]
     adaps_sparse = [adap[1] for adap in adaps]
     adaps_dense = [adap[0] for adap in adaps]
     ada_data = torch.stack([adap.data for adap in adaps_sparse], dim=0)
@@ -178,4 +180,4 @@ for bs, d, h, E, k, sparsity, blocking, dtype in SC_MOE_TEST:
     func_lora = partial(
         lora_merge, lora_a=lora_a, lora_b=lora_b, x=X, W_base=W, W_merge=weights
     )
-    benchmark_module("LoRA merge (our current vanila)", func_lora)
+    # benchmark_module("LoRA merge (our current vanila)", func_lora)

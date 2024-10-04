@@ -520,6 +520,7 @@ def _scatter2scatter_sp_optimized(
     BLOCK_M: tl.constexpr,
     ACC_TYPE: tl.constexpr,
     GROUP_M: tl.constexpr,
+    MAX_K_ITERS: tl.constexpr,
 ):
     pid_m = tl.program_id(axis=0)
     pid_n = tl.program_id(axis=1)
@@ -556,47 +557,51 @@ def _scatter2scatter_sp_optimized(
 
     gate = tl.load(gates + M_idx, mask=E_mask)
 
-    if iters > 0:
-        # pointers to dense matrix
-        X_blk_ptr = X_ptr + M_in_idx[:, None] * stride_xm + K_block[None, :] * stride_xk
-        # pointers to sparse matrix
-        rn = tl.arange(0, BLOCK_N)  # ...16
-        rbk = tl.arange(0, BLOCK_K)  # ... 16
-        W_blk_ptr = (
-            adaW
-            + (rbk[:, None] * adaW_stride_m)
-            + (rn[None, :] * adaW_stride_n)
-            + (E_idx * adaW_stride_e)
+    # pointers to dense matrix
+    X_blk_ptr = X_ptr + M_in_idx[:, None] * stride_xm + K_block[None, :] * stride_xk
+    # pointers to sparse matrix
+    rn = tl.arange(0, BLOCK_N)
+    rbk = tl.arange(0, BLOCK_K)
+    W_blk_ptr = (
+        adaW
+        + (rbk[:, None] * adaW_stride_m)
+        + (rn[None, :] * adaW_stride_n)
+        + (E_idx * adaW_stride_e)
+    )
+    BLOCK_SIZE = BLOCK_K * BLOCK_N
+    ak_block_incr = stride_xk * BLOCK_K
+
+    for K_block_id in tl.range(0, MAX_K_ITERS):
+        valid = K_block_id < iters
+        X = (
+            X_blk_ptr
+            + tl.load(
+                column_indices_t
+                + (E_idx * column_indices_t_offset)
+                + start_inx
+                + K_block_id,
+                mask=valid,
+                other=0,
+            )
+            * ak_block_incr
         )
-        BLOCK_SIZE = BLOCK_K * BLOCK_N
-        ak_block_incr = stride_xk * BLOCK_K
 
-        for K_block_id in range(0, iters):
-            X = (
-                X_blk_ptr
-                + tl.load(
-                    column_indices_t
-                    + (E_idx * column_indices_t_offset)
-                    + start_inx
-                    + K_block_id
-                )
-                * ak_block_incr
+        W = (
+            W_blk_ptr
+            + tl.load(
+                block_offsets_t
+                + (E_idx * block_offsets_t_offset)
+                + start_inx
+                + K_block_id,
+                mask=valid,
+                other=0,
             )
+            * BLOCK_SIZE
+        )
 
-            W = (
-                W_blk_ptr
-                + tl.load(
-                    block_offsets_t
-                    + (E_idx * block_offsets_t_offset)
-                    + start_inx
-                    + K_block_id
-                )
-                * BLOCK_SIZE
-            )
-
-            x = tl.load(X, mask=E_mask[:, None])
-            w = tl.load(W, mask=N_mask[None, :])
-            acc += tl.dot(x, w, out_dtype=ACC_TYPE)
+        x = tl.load(X, mask=valid & E_mask[:, None], other=0.0)
+        w = tl.load(W, mask=valid & N_mask[None, :], other=0.0)
+        acc += tl.dot(x, w, out_dtype=ACC_TYPE)
 
     base_act_ptr = (
         base_acts + M_in_idx[:, None] * stride_ym + N_block[None, :] * stride_yn
@@ -607,7 +612,7 @@ def _scatter2scatter_sp_optimized(
 
     Y_blk_ptrs = Y_ptr + (M_out_idx[:, None] * stride_ym + N_block[None, :] * stride_yn)
     tl.store(Y_blk_ptrs, acc, mask=E_mask[:, None] & N_mask[None, :])
-    # tl.atomic_add(Y_blk_ptrs, acc, mask=E_mask[:, None] & N_mask[None, :], scope="cta")
+    # tl.atomic_add(Y_blk_ptrs, acc, mask=E_mask[:, None] & N_mask[None, :], scope="cta") # <- could be used to fuse the merging op into the kernel, but it snot working for soem reason
 
 
 def scatter2scatter_sparse_optimized(
@@ -660,6 +665,7 @@ def scatter2scatter_sparse_optimized(
     M, K = X.size()
     N = y_dim
     E = ada_weights.size(0)
+    MAX_ITERS = (K + ada_block - 1) // ada_block
     with torch.cuda.device(X.device):
         _scatter2scatter_sp_optimized[grid](
             X,
@@ -691,5 +697,6 @@ def scatter2scatter_sparse_optimized(
             BLOCK_K=ada_block,
             BLOCK_N=ada_block,
             ACC_TYPE=tl.float32,
+            MAX_K_ITERS=MAX_ITERS,
         )
         return O

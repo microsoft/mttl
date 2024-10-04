@@ -137,8 +137,12 @@ def create_block_diagonal_matrix(bs_m, bs_n, n_blocks):
     nb_m_pb = bs_m // block_size
     nb_n_pb = bs_n // block_size
 
-    col_indices_1blk = torch.arange(nb_n_pb, device=device, dtype=torch.int32).repeat(nb_m_pb)
-    row_indices_1blk = torch.arange(nb_m_pb, device=device, dtype=torch.int32).repeat_interleave(nb_n_pb)
+    col_indices_1blk = torch.arange(nb_n_pb, device=device, dtype=torch.int32).repeat(
+        nb_m_pb
+    )
+    row_indices_1blk = torch.arange(
+        nb_m_pb, device=device, dtype=torch.int32
+    ).repeat_interleave(nb_n_pb)
     offsets = torch.arange(0, Mb * nb_n_pb + nb_n_pb, nb_n_pb, device=device)
 
     col_idx = torch.cat([col_indices_1blk + i * nb_n_pb for i in range(n_blocks)])
