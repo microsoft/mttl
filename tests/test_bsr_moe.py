@@ -9,12 +9,12 @@ from mttl.models.modifiers.sparsity.spb_moe.benchmark import dumb_forward
 
 blocksize = 16
 
-SC_MOE_TEST = {
+SC_MOE_TEST = [
     (4, 32, 64, 10, 2, 0.8, 16, torch.float32),
     (1024, 1024, 8192, 20, 2, 0.8, 16, torch.float32),
     (1024, 1024, 2048, 20, 2, 0.8, 16, torch.float32),
     (8, 128, 256, 10, 2, 0.8, 16, torch.float32),
-}
+]
 
 
 @pytest.mark.skipif(
