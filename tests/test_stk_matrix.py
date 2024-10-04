@@ -7,6 +7,9 @@ from stk.matrix import Matrix
 from mttl.models.modifiers.sparsity.sparse_utils import stk_matrix_utils as matrix_ops
 
 
+@pytest.mark.skipif(
+    torch.cuda.is_available() is False, reason="CUDA must be available for this test."
+)
 @pytest.mark.parametrize(
     "K, rows, cols, sparsity, blocking",
     [
