@@ -75,9 +75,7 @@ class ScatteredMoETest(parameterized.TestCase):
         )
 
         k_weights, expert_idxs = torch.topk(weights, k)
-        sorted_expert_idxs, sorted_scattered_idxs = ops.flatten_and_sort(
-            expert_idxs
-        )
+        sorted_expert_idxs, sorted_scattered_idxs = ops.flatten_and_sort(expert_idxs)
         padded_block_idxs, expert_offsets = ops.padded_block_indices(
             sorted_expert_idxs, E
         )

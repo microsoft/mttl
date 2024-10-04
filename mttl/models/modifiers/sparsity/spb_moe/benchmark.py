@@ -111,9 +111,7 @@ for bs, d, h, E, k, sparsity, blocking, dtype in SC_MOE_TEST:
 
     def call_with_baseact_and_idxs_computation(X, W, expert_idxs, function, **kwargs):
         base_act = torch.matmul(X, W)
-        sorted_expert_idxs, sorted_scattered_idxs = ops.flatten_and_sort(
-            expert_idxs
-        )
+        sorted_expert_idxs, sorted_scattered_idxs = ops.flatten_and_sort(expert_idxs)
         padded_block_idxs, expert_offsets = ops.padded_block_indices(
             sorted_expert_idxs, E
         )
