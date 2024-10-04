@@ -6,6 +6,23 @@ import torch
 from stk.matrix import Matrix
 
 
+def _dense(rows, cols, dtype, std=0.1):
+    cuda_device = torch.device("cuda")
+    out = (torch.randn(rows, cols) * std).type(dtype)
+    return out.to(cuda_device).requires_grad_(True)
+
+
+
+def _dense_and_sparse(rows, cols, sparsity, blocking, dtype, std=0.1):
+    mask = stk.random.dense_mask(rows, cols, sparsity, blocking)
+    dense = (torch.randn(rows, cols) * std * mask).type(dtype)
+    sparse = stk.ops.to_sparse(dense, blocking)
+    cuda_device = torch.device("cuda")
+    return (
+        dense.to(cuda_device).requires_grad_(True),
+        sparse.to(cuda_device).requires_grad_(True),
+    )
+
 def _merge_adapters(adapters: List[Matrix]) -> Matrix:
     """
     Merges a list of adapters into a single adapter along the second dimention.

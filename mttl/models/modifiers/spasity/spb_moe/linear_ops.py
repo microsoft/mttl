@@ -1,7 +1,7 @@
 import torch
 from stk.matrix import Matrix
 
-from mttl.models.modifiers.spasity.stk import functions
+from mttl.models.modifiers.spasity.spb_moe import functions
 
 
 def sdd_adamerge(a, b, out_topo: Matrix, out_adaps: Matrix, layout):
@@ -79,7 +79,7 @@ def scattergather_adamerge(
     return out
 
 
-def scattergather_adamerge2(
+def scattergather_adamerge_opt(
     x,
     base_act,
     k,

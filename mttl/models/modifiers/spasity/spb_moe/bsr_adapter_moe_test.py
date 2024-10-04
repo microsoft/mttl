@@ -10,9 +10,10 @@ from absl.testing import parameterized
 from pytorch_lightning import seed_everything
 from stk.matrix import Matrix
 
-from mttl.models.modifiers.spasity.stk import functions, linear_ops, matrix_ops
+from mttl.models.modifiers.spasity.sparse_utils import stk_matrix_utils as matrix_ops
+from mttl.models.modifiers.spasity.spb_moe import linear_ops
 
-# os.environ["TRITON_INTERPRET"] = "1"
+# os.environ["TRITON_INTERPRET"] = "1" #
 
 
 def allclose(x, y, pct=0.25):
@@ -26,30 +27,11 @@ def allclose(x, y, pct=0.25):
 
 blocksize = 16
 
-
-def _dense_and_sparse(rows, cols, sparsity, blocking, dtype, std=0.1):
-    mask = stk.random.dense_mask(rows, cols, sparsity, blocking)
-    dense = (torch.randn(rows, cols) * std * mask).type(dtype)
-    sparse = stk.ops.to_sparse(dense, blocking)
-    cuda_device = torch.device("cuda")
-    return (
-        dense.to(cuda_device).requires_grad_(True),
-        sparse.to(cuda_device).requires_grad_(True),
-    )
-
-
-def _dense(rows, cols, dtype, std=0.1):
-    cuda_device = torch.device("cuda")
-    out = (torch.randn(rows, cols) * std).type(dtype)
-    return out.to(cuda_device).requires_grad_(True)
-
-
 SC_MOE_TEST = {
     (1024, 1024, 8192, 20, 2, 0.8, 16, torch.float32),
     (1024, 1024, 2048, 20, 2, 0.8, 16, torch.float32),
     (8, 128, 256, 10, 2, 0.8, 16, torch.float32),
 }
-
 
 def dumb_forward(base_act, x, expert_p, expert_idxs, adaps):
     output = torch.stack(
@@ -75,7 +57,7 @@ class ScatteredMoETest(parameterized.TestCase):
         weights = torch.softmax(logits.float(), axis=-1).cuda().to(dtype)
         X = torch.randn(bs, d, dtype=dtype, requires_grad=True).cuda()
         W = torch.randn(d, h, dtype=dtype, requires_grad=True).cuda()
-        adaps = [_dense_and_sparse(d, h, sparsity, blocking, dtype) for _ in range(E)]
+        adaps = [matrix_ops._dense_and_sparse(d, h, sparsity, blocking, dtype) for _ in range(E)]
         adaps_sparse = [adap[1] for adap in adaps]
         adaps_dense = [adap[0] for adap in adaps]
         ada_data = torch.stack([adap.data for adap in adaps_sparse], dim=0)
@@ -114,7 +96,7 @@ class ScatteredMoETest(parameterized.TestCase):
         #     gates=k_weights,
         # )
 
-        out2 = linear_ops.scattergather_adamerge2(
+        out2 = linear_ops.scattergather_adamerge_opt(
             x=X,
             base_act=base_act,
             k=k,

@@ -30,7 +30,7 @@ from mttl.models.modifiers.spasity.sparse_utils.utils import (
     padded_gather,
     padded_scatter,
 )
-from mttl.models.modifiers.spasity.stk import linear_ops, matrix_ops
+from mttl.models.modifiers.spasity.spb_moe import _matrix_ops, linear_ops
 from mttl.models.utils import model_loader_helper, transfer_batch_to_device
 
 device = "cuda"
@@ -162,7 +162,7 @@ W_mege = torch.randn(bs, max_seq_len, K, dtype=dtype, device=device)
 loras = create_adapter_set(adapter_config_lora, layer, K)
 sparse_modules = create_adapter_set(adapter_config_bs, layer, K)
 sparse_mtxs = sparsemodules_to_stkmatrix_list(sparse_modules)
-adaptersMatrix: Matrix = matrix_ops.merge_adapters(sparse_mtxs).to(device)
+adaptersMatrix: Matrix = _matrix_ops.merge_adapters(sparse_mtxs).to(device)
 
 W_mege = W_mege.to(dtype=loras[0].lora_a.dtype)
 top_k_indices = torch.topk(torch.abs(W_mege), top_k, dim=-1).indices
@@ -174,7 +174,7 @@ top_k_indices = torch.topk(torch.abs(W_mege), top_k, dim=-1).indices
     positions_in_expert_padded,
     padding_mask,
 ) = padded_gather(x, top_k_indices, K)
-layout = matrix_ops.create_ada_layout(adaptersMatrix).to(device)
+layout = _matrix_ops.create_ada_layout(adaptersMatrix).to(device)
 
 out_blck_size = x.shape[1]
 x = x.reshape(-1, in_d).contiguous()
