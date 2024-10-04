@@ -4,14 +4,26 @@ from functools import partial
 import numpy as np
 import stk
 import torch
-import torch.nn.functional as F
-from absl.testing import parameterized
 from pytorch_lightning import seed_everything
 from stk.matrix import Matrix
 
 from mttl.models.modifiers.sparsity.sparse_utils import stk_matrix_utils as matrix_ops
 from mttl.models.modifiers.sparsity.spb_moe import ops
-from mttl.models.modifiers.sparsity.spb_moe.bsr_adapter_moe_test import dumb_forward
+
+
+def dumb_forward(base_act, x, expert_p, expert_idxs, adaps):
+    output = torch.stack(
+        [
+            sum(
+                base_act[i]
+                + (expert_p[i, j] * torch.matmul(x[i], (adaps[expert_idxs[i, j]])))
+                for j in range(expert_idxs.size(1))
+            )
+            for i in range(expert_idxs.size(0))
+        ],
+        dim=0,
+    )
+    return output
 
 
 def benchmark_module(name, function, runs=100):
@@ -70,7 +82,7 @@ def find_lora_hyperpaams(d_in, d_out, tot_sparse_params):
     return int(np.mean(lora_ranks))
 
 
-SC_MOE_TEST = {
+MOE_TESTCASES = {
     # bs, d, h, E, k, sparsity, blocking, dtype
     (1024, 2048, 8192, 20, 2, 0.995, 16, torch.float16),
     (1024, 2048, 8192, 20, 2, 0.9, 128, torch.float16),
@@ -81,101 +93,108 @@ SC_MOE_TEST = {
     # (8, 128, 256, 10, 2, 0.8, 16, torch.float16),
 }
 
-
-for bs, d, h, E, k, sparsity, blocking, dtype in SC_MOE_TEST:
-    print("=====================================================================")
-    print(
-        f"*****   Running test with bs={bs}, d={d}, h={h}, E={E}, k={k}, sparsity={sparsity}, blocking={blocking}, dtype={dtype}  *****"
-    )
-
-    torch.manual_seed(42)
-    # print(f"Running test with bs={bs}, d={d}, h={h}, E={E}, k={k}, sparsity={sparsity}, blocking={blocking}, dtype={dtype}")
-    logits = torch.randn(bs, E, dtype=dtype)
-    weights = torch.softmax(logits.float(), axis=-1).cuda().to(dtype)
-    X = torch.randn(bs, d, dtype=dtype, requires_grad=True).cuda()
-    W = torch.randn(d, h, dtype=dtype, requires_grad=True).cuda()
-    adaps = [
-        matrix_ops._dense_and_sparse(d, h, sparsity, blocking, dtype) for _ in range(E)
-    ]
-    adaps_sparse = [adap[1] for adap in adaps]
-    adaps_dense = [adap[0] for adap in adaps]
-    ada_data = torch.stack([adap.data for adap in adaps_sparse], dim=0)
-    row_idxs = torch.stack([adap.row_indices for adap in adaps_sparse], dim=0)
-    col_idxs_t = torch.stack([adap.column_indices_t for adap in adaps_sparse], dim=0)
-    offsets_t = torch.stack([adap.offsets_t for adap in adaps_sparse], dim=0)
-    block_offsets_t = torch.stack(
-        [adap.block_offsets_t for adap in adaps_sparse], dim=0
-    )
-
-    k_weights, expert_idxs = torch.topk(weights, k)
-
-    def call_with_baseact_and_idxs_computation(X, W, expert_idxs, function, **kwargs):
-        base_act = torch.matmul(X, W)
-        sorted_expert_idxs, sorted_scattered_idxs = ops.flatten_and_sort(expert_idxs)
-        padded_block_idxs, expert_offsets = ops.padded_block_indices(
-            sorted_expert_idxs, E
-        )
-        return function(
-            x=X,
-            base_act=base_act,
-            sorted_expert_idxs=sorted_expert_idxs,
-            sorted_scattered_idxs=sorted_scattered_idxs,
-            padded_block_idxs=padded_block_idxs,
-            **kwargs,
+if __name__ == "__main__":
+    for bs, d, h, E, k, sparsity, blocking, dtype in MOE_TESTCASES:
+        print("=====================================================================")
+        print(
+            f"*****   Running test with bs={bs}, d={d}, h={h}, E={E}, k={k}, sparsity={sparsity}, blocking={blocking}, dtype={dtype}  *****"
         )
 
-    # base_act = torch.matmul(X, W)
-    func = partial(
-        call_with_baseact_and_idxs_computation,
-        X=X,
-        W=W,
-        expert_idxs=expert_idxs,
-        function=ops.scattergather_adamerge,
-        k=k,
-        ada_weights=ada_data,
-        row_idxs=row_idxs,
-        col_idxs=col_idxs_t,
-        offsets=offsets_t,
-        block_offsets_t=block_offsets_t,
-        ada_block_size=blocking,
-        gates=k_weights,
-    )
-    benchmark_module("BS kernel not optimized", func)
-    # func_dummb = partial(dumb_forward, base_act=base_act, x=X, expert_p=k_weights, expert_idxs=expert_idxs, adaps=adaps_dense)
-    # benchmark_module("dummy forward", func_dummb)
+        torch.manual_seed(42)
+        # print(f"Running test with bs={bs}, d={d}, h={h}, E={E}, k={k}, sparsity={sparsity}, blocking={blocking}, dtype={dtype}")
+        logits = torch.randn(bs, E, dtype=dtype)
+        weights = torch.softmax(logits.float(), axis=-1).cuda().to(dtype)
+        X = torch.randn(bs, d, dtype=dtype, requires_grad=True).cuda()
+        W = torch.randn(d, h, dtype=dtype, requires_grad=True).cuda()
+        adaps = [
+            matrix_ops._dense_and_sparse(d, h, sparsity, blocking, dtype)
+            for _ in range(E)
+        ]
+        adaps_sparse = [adap[1] for adap in adaps]
+        adaps_dense = [adap[0] for adap in adaps]
+        ada_data = torch.stack([adap.data for adap in adaps_sparse], dim=0)
+        row_idxs = torch.stack([adap.row_indices for adap in adaps_sparse], dim=0)
+        col_idxs_t = torch.stack(
+            [adap.column_indices_t for adap in adaps_sparse], dim=0
+        )
+        offsets_t = torch.stack([adap.offsets_t for adap in adaps_sparse], dim=0)
+        block_offsets_t = torch.stack(
+            [adap.block_offsets_t for adap in adaps_sparse], dim=0
+        )
 
-    func_opt = partial(
-        call_with_baseact_and_idxs_computation,
-        X=X,
-        W=W,
-        expert_idxs=expert_idxs,
-        function=ops.scattergather_adamerge_opt,
-        k=k,
-        ada_weights=ada_data,
-        row_idxs=row_idxs,
-        col_idxs=col_idxs_t,
-        offsets=offsets_t,
-        block_offsets_t=block_offsets_t,
-        ada_block_size=blocking,
-        gates=k_weights,
-    )
-    benchmark_module("BS kernel optimized", func)
-    lora_rank = find_lora_hyperpaams(d, h, np.prod(ada_data.shape[1:]))
+        k_weights, expert_idxs = torch.topk(weights, k)
 
-    def lora_merge(lora_a, lora_b, x, W_base, W_merge):
-        # LoRA does not profit from lower top-k in this vanila form
-        # merge into 1 lora
-        A = torch.einsum("be,edr->bdr", (W_merge, lora_a))
-        B = torch.einsum("be,erd->brd", (W_merge, lora_b))
-        # lora forward
-        partial_out = torch.einsum("bd,bdr->br", (x, A))
-        adapter_out = torch.einsum("br,brd->bd", (partial_out, B))
-        dense_out = x @ W_base
-        return adapter_out + dense_out
+        def call_with_baseact_and_idxs_computation(
+            X, W, expert_idxs, function, **kwargs
+        ):
+            base_act = torch.matmul(X, W)
+            sorted_expert_idxs, sorted_scattered_idxs = ops.flatten_and_sort(
+                expert_idxs
+            )
+            padded_block_idxs, expert_offsets = ops.padded_block_indices(
+                sorted_expert_idxs, E
+            )
+            return function(
+                x=X,
+                base_act=base_act,
+                sorted_expert_idxs=sorted_expert_idxs,
+                sorted_scattered_idxs=sorted_scattered_idxs,
+                padded_block_idxs=padded_block_idxs,
+                **kwargs,
+            )
 
-    lora_a = torch.randn(E, d, lora_rank, dtype=dtype).cuda().contiguous()
-    lora_b = torch.randn(E, lora_rank, h, dtype=dtype).cuda().contiguous()
-    func_lora = partial(
-        lora_merge, lora_a=lora_a, lora_b=lora_b, x=X, W_base=W, W_merge=weights
-    )
-    benchmark_module("LoRA merge (our current vanila)", func_lora)
+        # base_act = torch.matmul(X, W)
+        func = partial(
+            call_with_baseact_and_idxs_computation,
+            X=X,
+            W=W,
+            expert_idxs=expert_idxs,
+            function=ops.scattergather_adamerge,
+            k=k,
+            ada_weights=ada_data,
+            row_idxs=row_idxs,
+            col_idxs=col_idxs_t,
+            offsets=offsets_t,
+            block_offsets_t=block_offsets_t,
+            ada_block_size=blocking,
+            gates=k_weights,
+        )
+        benchmark_module("BS kernel not optimized", func)
+        # func_dummb = partial(dumb_forward, base_act=base_act, x=X, expert_p=k_weights, expert_idxs=expert_idxs, adaps=adaps_dense)
+        # benchmark_module("dummy forward", func_dummb)
+
+        func_opt = partial(
+            call_with_baseact_and_idxs_computation,
+            X=X,
+            W=W,
+            expert_idxs=expert_idxs,
+            function=ops.scattergather_adamerge_opt,
+            k=k,
+            ada_weights=ada_data,
+            row_idxs=row_idxs,
+            col_idxs=col_idxs_t,
+            offsets=offsets_t,
+            block_offsets_t=block_offsets_t,
+            ada_block_size=blocking,
+            gates=k_weights,
+        )
+        benchmark_module("BS kernel optimized", func)
+        lora_rank = find_lora_hyperpaams(d, h, np.prod(ada_data.shape[1:]))
+
+        def lora_merge(lora_a, lora_b, x, W_base, W_merge):
+            # LoRA does not profit from lower top-k in this vanila form
+            # merge into 1 lora
+            A = torch.einsum("be,edr->bdr", (W_merge, lora_a))
+            B = torch.einsum("be,erd->brd", (W_merge, lora_b))
+            # lora forward
+            partial_out = torch.einsum("bd,bdr->br", (x, A))
+            adapter_out = torch.einsum("br,brd->bd", (partial_out, B))
+            dense_out = x @ W_base
+            return adapter_out + dense_out
+
+        lora_a = torch.randn(E, d, lora_rank, dtype=dtype).cuda().contiguous()
+        lora_b = torch.randn(E, lora_rank, h, dtype=dtype).cuda().contiguous()
+        func_lora = partial(
+            lora_merge, lora_a=lora_a, lora_b=lora_b, x=X, W_base=W, W_merge=weights
+        )
+        benchmark_module("LoRA merge (our current vanila)", func_lora)

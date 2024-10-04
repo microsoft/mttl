@@ -5,6 +5,7 @@ from stk.matrix import Matrix
 
 from mttl.models.modifiers.sparsity.sparse_utils import stk_matrix_utils as matrix_ops
 from mttl.models.modifiers.sparsity.spb_moe import ops
+from mttl.models.modifiers.sparsity.spb_moe.benchmark import dumb_forward
 
 blocksize = 16
 
@@ -14,21 +15,6 @@ SC_MOE_TEST = {
     (1024, 1024, 2048, 20, 2, 0.8, 16, torch.float32),
     (8, 128, 256, 10, 2, 0.8, 16, torch.float32),
 }
-
-
-def dumb_forward(base_act, x, expert_p, expert_idxs, adaps):
-    output = torch.stack(
-        [
-            sum(
-                base_act[i]
-                + (expert_p[i, j] * torch.matmul(x[i], (adaps[expert_idxs[i, j]])))
-                for j in range(expert_idxs.size(1))
-            )
-            for i in range(expert_idxs.size(0))
-        ],
-        dim=0,
-    )
-    return output
 
 
 @pytest.mark.skipif(

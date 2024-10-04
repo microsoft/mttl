@@ -14,7 +14,7 @@ from mttl.models.modifiers.sparsity.sparse_utils import stk_matrix_utils as matr
         (2, 8, 16, 0.5, 4),
     ],
 )
-def test_layout_creation(self, K, rows, cols, sparsity, blocking):
+def test_layout_creation(K, rows, cols, sparsity, blocking):
     adaps = [
         matrix_ops._dense_and_sparse(rows, cols, sparsity, blocking, torch.float16)
         for _ in range(K)
