@@ -9,9 +9,9 @@ from absl.testing import parameterized
 from pytorch_lightning import seed_everything
 from stk.matrix import Matrix
 
-from mttl.models.modifiers.spasity.sparse_utils import stk_matrix_utils as matrix_ops
-from mttl.models.modifiers.spasity.spb_moe import linear_ops
-from mttl.models.modifiers.spasity.spb_moe.bsr_adapter_moe_test import dumb_forward
+from mttl.models.modifiers.sparsity.sparse_utils import stk_matrix_utils as matrix_ops
+from mttl.models.modifiers.sparsity.spb_moe import ops
+from mttl.models.modifiers.sparsity.spb_moe.bsr_adapter_moe_test import dumb_forward
 
 
 def benchmark_module(name, function, runs=100):
@@ -111,10 +111,10 @@ for bs, d, h, E, k, sparsity, blocking, dtype in SC_MOE_TEST:
 
     def call_with_baseact_and_idxs_computation(X, W, expert_idxs, function, **kwargs):
         base_act = torch.matmul(X, W)
-        sorted_expert_idxs, sorted_scattered_idxs = linear_ops.flatten_and_sort(
+        sorted_expert_idxs, sorted_scattered_idxs = ops.flatten_and_sort(
             expert_idxs
         )
-        padded_block_idxs, expert_offsets = linear_ops.padded_block_indices(
+        padded_block_idxs, expert_offsets = ops.padded_block_indices(
             sorted_expert_idxs, E
         )
         return function(
@@ -132,7 +132,7 @@ for bs, d, h, E, k, sparsity, blocking, dtype in SC_MOE_TEST:
         X=X,
         W=W,
         expert_idxs=expert_idxs,
-        function=linear_ops.scattergather_adamerge,
+        function=ops.scattergather_adamerge,
         k=k,
         ada_weights=ada_data,
         row_idxs=row_idxs,
@@ -151,7 +151,7 @@ for bs, d, h, E, k, sparsity, blocking, dtype in SC_MOE_TEST:
         X=X,
         W=W,
         expert_idxs=expert_idxs,
-        function=linear_ops.scattergather_adamerge_opt,
+        function=ops.scattergather_adamerge_opt,
         k=k,
         ada_weights=ada_data,
         row_idxs=row_idxs,
@@ -180,4 +180,4 @@ for bs, d, h, E, k, sparsity, blocking, dtype in SC_MOE_TEST:
     func_lora = partial(
         lora_merge, lora_a=lora_a, lora_b=lora_b, x=X, W_base=W, W_merge=weights
     )
-    # benchmark_module("LoRA merge (our current vanila)", func_lora)
+    benchmark_module("LoRA merge (our current vanila)", func_lora)

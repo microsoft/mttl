@@ -1,7 +1,7 @@
 import torch
 from stk.matrix import Matrix
 
-from mttl.models.modifiers.spasity.spb_moe import functions
+from mttl.models.modifiers.sparsity.spb_moe import functions
 
 
 def sdd_adamerge(a, b, out_topo: Matrix, out_adaps: Matrix, layout):

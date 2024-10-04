@@ -10,8 +10,8 @@ from absl.testing import parameterized
 from pytorch_lightning import seed_everything
 from stk.matrix import Matrix
 
-from mttl.models.modifiers.spasity.sparse_utils import stk_matrix_utils as matrix_ops
-from mttl.models.modifiers.spasity.spb_moe import linear_ops
+from mttl.models.modifiers.sparsity.sparse_utils import stk_matrix_utils as matrix_ops
+from mttl.models.modifiers.sparsity.spb_moe import ops
 
 # os.environ["TRITON_INTERPRET"] = "1" #
 
@@ -75,10 +75,10 @@ class ScatteredMoETest(parameterized.TestCase):
         )
 
         k_weights, expert_idxs = torch.topk(weights, k)
-        sorted_expert_idxs, sorted_scattered_idxs = linear_ops.flatten_and_sort(
+        sorted_expert_idxs, sorted_scattered_idxs = ops.flatten_and_sort(
             expert_idxs
         )
-        padded_block_idxs, expert_offsets = linear_ops.padded_block_indices(
+        padded_block_idxs, expert_offsets = ops.padded_block_indices(
             sorted_expert_idxs, E
         )
 
@@ -100,7 +100,7 @@ class ScatteredMoETest(parameterized.TestCase):
         #     gates=k_weights,
         # )
 
-        out2 = linear_ops.scattergather_adamerge_opt(
+        out2 = ops.scattergather_adamerge_opt(
             x=X,
             base_act=base_act,
             k=k,

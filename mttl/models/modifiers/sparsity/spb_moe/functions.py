@@ -4,8 +4,8 @@ import torch
 from stk.backend.autocast import custom_bwd, custom_fwd
 from stk.matrix import Matrix
 
-import mttl.models.modifiers.spasity.spb_moe._triton_kernels as backend
-from mttl.models.modifiers.spasity.spb_moe.triton_kernels import (
+import mttl.models.modifiers.sparsity.spb_moe._triton_kernels as backend
+from mttl.models.modifiers.sparsity.spb_moe.triton_kernels import (
     scatter2scatter_sparse,
     scatter2scatter_sparse_optimized,
 )

@@ -19,18 +19,18 @@ from mttl.logging import logger
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.base import Modifier
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
-from mttl.models.modifiers.spasity.sparse_mask import (
+from mttl.models.modifiers.sparsity.sparse_mask import (
     MaskedLinear,
     ScatteredSparseLinearModule,
     SparseLinearModule,
     SparseMaskAdapter,
     SparseMaskConfig,
 )
-from mttl.models.modifiers.spasity.sparse_utils.utils import (
+from mttl.models.modifiers.sparsity.sparse_utils.utils import (
     padded_gather,
     padded_scatter,
 )
-from mttl.models.modifiers.spasity.spb_moe import _matrix_ops, linear_ops
+from mttl.models.modifiers.sparsity.spb_moe import _matrix_ops, ops
 from mttl.models.utils import model_loader_helper, transfer_batch_to_device
 
 device = "cuda"
@@ -184,7 +184,7 @@ out_blck_size = x.shape[1]
 x = x.reshape(-1, in_d).contiguous()
 out_topology = create_block_diagonal_matrix(out_blck_size, out_d, K)
 W_base = layer.weight.T.to(dtype=dtype)
-output = linear_ops.sdd_adamerge(x, W_base, out_topology, adaptersMatrix, layout)
+output = ops.sdd_adamerge(x, W_base, out_topology, adaptersMatrix, layout)
 print(output.shape)
 # create output topoly
 

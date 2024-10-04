@@ -6,7 +6,7 @@ import torch
 from absl.testing import parameterized
 from stk.matrix import Matrix
 
-from mttl.models.modifiers.spasity.sparse_utils import stk_matrix_utils as matrix_ops
+from mttl.models.modifiers.sparsity.sparse_utils import stk_matrix_utils as matrix_ops
 
 
 @parameterized.parameters((2, 8, 16, 0.5, 1), (2, 8, 16, 0.5, 4))
