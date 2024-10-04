@@ -38,6 +38,7 @@ class SparseMaskConfig(ModifierConfig):
     selection_algorithm: str = "rigl"
     reselection_rate_policy: str = "linear"
     mask_updater: str = None  # "snip"
+    init_to_zero: bool = True
 
 
 class SparseLinear(ABC):
@@ -134,8 +135,8 @@ class SparseWeights(nn.Module):
         self.register_buffer("col_idx", torch.zeros((nnz,), dtype=torch.int16))
 
         self.set_sparse_idxs(_sparse_csr_representation)
-
-        self.init_random()
+        if not config.init_to_zero:
+            self.init_random()
 
     def init_random(self):
         # init 1D tensor of values
