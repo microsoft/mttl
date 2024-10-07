@@ -26,3 +26,6 @@ azure-identity
 einops
 nltk
 # spops @ git+https://github.com/IST-DASLab/spops.git@main
+prettytable
+wandb
+tenacity

@@ -685,6 +685,29 @@ class IterativeDCDTrainer(DCDTrainer):
 
         if not os.path.exists(dataset_path):
             train_dataset = self.generate_epoch_data(self.train_dataset)
+
+            if self.mttl_args.accumulate_datasets:
+                from datasets import concatenate_datasets, load_from_disk
+
+                previous_datasets = []
+                for epoch in range(current_state_epoch):
+                    previous_dataset_path = (
+                        self.mttl_args.output_dir + f"/gen__epoch_{epoch}"
+                    )
+
+                    if os.path.exists(previous_dataset_path):
+                        previous_dataset = load_from_disk(previous_dataset_path)
+                        previous_datasets.append(previous_dataset["train"])
+
+                if previous_datasets:
+                    train_dataset = DatasetDict(
+                        {
+                            "train": concatenate_datasets(
+                                [train_dataset["train"]] + previous_datasets
+                            )
+                        }
+                    )
+
             train_dataset.save_to_disk(dataset_path)
 
         datamodule = self.create_datamodule_for_generated_data(dataset_path)
@@ -706,9 +729,13 @@ class IterativeDCDTrainer(DCDTrainer):
         if self.reference_model:
             self.reference_model.to("cpu")
 
-        # we need to save the model in the temp directory, this moves it to CPU so that VLLM
-        # doesn't complain, one alternative is to use 2 gpus, one for generation, one for training
-        self.model.merge_and_save_base_model(self.temp_directory, device="cpu")
+        if self.mttl_args.generate_with_latest_km:
+            # we need to save the model in the temp directory, this moves it to CPU so that VLLM
+            # doesn't complain, one alternative is to use 2 gpus, one for generation, one for training
+            self.model.merge_and_save_base_model(self.temp_directory, device="cpu")
+        else:
+            # just save the base model in the temp directory
+            self.model.model.save_pretrained(self.temp_directory)
 
         # Generate a set of prompts
         augmenter = DatasetAugmenter(
@@ -744,7 +771,10 @@ class IterKMArguments(ExpertConfig):
     dataset_type: str = "text_dataset"
     dataset: str = "sordonia/narrativeqa"
     nqa_dataset: str = "sordonia/narrativeqa"
+    # Generate new data every n epochs
     generate_every_n_epoch: int = 5
+    # If set to True, the model will generate new data using the latest KM model
+    generate_with_latest_km: bool = True
     accumulate_datasets: bool = False
 
 
