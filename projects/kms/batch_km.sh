@@ -39,6 +39,12 @@ ls -l $PWD/../../
 
 IFS=$'\n'
 for DOC_ID in $DOCUMENT_IDS; do
+    # check if the directory $AMLT_OUTPUT_DIR/$DOC_ID/gen__epoch_45 exists
+    if [ -d "$AMLT_OUTPUT_DIR/$DOC_ID/gen__epoch_45" ]; then
+        echo "Directory $AMLT_OUTPUT_DIR/$DOC_ID/gen__epoch_45 exists. Skipping training."
+        continue
+    fi
+
     CUDA_VISIBLE_DEVICES=0 python train_km_iter.py \
         -c "$CONFIG_FILE" \
         -k finetune_task_name="$DOC_ID" \
