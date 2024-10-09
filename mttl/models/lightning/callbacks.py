@@ -7,7 +7,6 @@ from abc import ABC, abstractmethod
 import pytorch_lightning as pl
 import torch
 import tqdm
-import wandb
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning import callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
@@ -15,14 +14,38 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch.optim import Optimizer
 from transformers.utils import ModelOutput
 
+import wandb
 from mttl.datamodule.base import DataModule
 from mttl.evaluators import MMLUEvaluator
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.evaluators import Evaluator
 from mttl.logging import logger
+from mttl.models.modifiers.base import ModifierConfig
+from mttl.models.modifiers.sparse_mask import SparseMaskAdapter
 from mttl.models.utils import transfer_batch_to_device
 
 DEBUG = False
+
+
+class ModelModifierCallback(pl.Callback):
+    """
+    Just a general callback. It can be used for whatever we need to.
+    Currently, it only removes the mask updater after a certain epoch if modifier is sparse mask adapter.
+    """
+
+    def __init__(self, args: "ExpertConfig"):
+        self.args = args
+
+    def on_train_epoch_start(self, trainer, pl_module):
+        if self.args.model_modifier == "sparse_mask_adapter":
+            if (
+                trainer.current_epoch
+                == self.args.modifier_config.remove_mask_updater_epoch
+            ):
+                for m_name, module in dict(pl_module.named_modules()).items():
+                    if isinstance(module, SparseMaskAdapter):
+                        module.remove_mask_updater()
+        return super().on_train_epoch_start(trainer, pl_module)
 
 
 class LiveCheckpointCallback(pl.Callback):

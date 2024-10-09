@@ -38,6 +38,7 @@ class SparseMaskConfig(ModifierConfig):
     selection_algorithm: str = "rigl"
     reselection_rate_policy: str = "linear"
     mask_updater: str = None  # "snip"
+    remove_mask_updater_epoch: int = None
 
 
 class SparseLinear(ABC):
@@ -320,6 +321,14 @@ class MaskedLinear(SparseLinear, nn.Module):
             mask.data, dtype=self.base_weight.dtype, device=self.base_weight.device
         )
 
+    @property
+    def scipy_representation(self):
+        non_zero_indices = torch.nonzero(self.binary_mask, as_tuple=True)
+        row_idx = non_zero_indices[0].numpy()
+        col_idx = non_zero_indices[1].numpy()
+        data = self.sparse_weights.data[row_idx, col_idx].cpu().float().numpy()
+        return csr_matrix((data, (row_idx, col_idx)), shape=self.base_weight.shape)
+
 
 class SparseLinearModule(SparseWeights, SparseLinear):
     """
@@ -510,7 +519,6 @@ class ScatteredSparseLinearModule(SparseWeights, SparseLinear):
         config: SparseMaskConfig,
         parent_name=None,
         use_sparse_bias=False,
-        mask: torch.Tensor = None,
     ):
 
         SparseWeights.__init__(self, config, weight.shape, weight.dtype, weight.device)
@@ -874,3 +882,19 @@ class SparseMaskAdapter(Modifier, ModifyMixin):
 
     def forward(self, input):
         return self.sparse_layer(input)
+
+    def remove_mask_updater(self):
+        """
+        Remove mask update and use current mask for the rest of training
+        This also switches to scattered implementation.
+        """
+        if isinstance(self.sparse_layer, MaskUpdatWrapper):
+            new_sparse_layer = ScatteredSparseLinearModule(
+                self.dense_layer_weight, self.dense_layer_bias, self.config
+            )
+            new_sparse_layer.reset_sparse_weights(
+                self.sparse_layer.sparse_layer.scipy_representation
+            )
+            self.sparse_layer = new_sparse_layer.to(
+                self.sparse_layer.sparse_layer.device
+            )
