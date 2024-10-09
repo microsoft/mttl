@@ -733,13 +733,13 @@ class IterativeDCDTrainer(DCDTrainer):
             # we need to save the model in the temp directory, this moves it to CPU so that VLLM
             # doesn't complain, one alternative is to use 2 gpus, one for generation, one for training
             self.model.merge_and_save_base_model(self.temp_directory, device="cpu")
+            model_name_or_path = self.temp_directory
         else:
-            # just save the base model in the temp directory
-            self.model.model.save_pretrained(self.temp_directory)
+            model_name_or_path = self.model.config.base_model
 
         # Generate a set of prompts
         augmenter = DatasetAugmenter(
-            self.temp_directory,
+            model_name_or_path,
             block_size=2048,
             max_continuation_length=768,
             num_generations=16,
