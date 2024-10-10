@@ -1,15 +1,15 @@
 import argparse
 import os
 
-import torch 
+import torch
 import tqdm
-from datasets import Dataset, load_dataset
-
 from dataset_augmenter import chunk_text
-from transformers import AutoTokenizer
+from datasets import Dataset, load_dataset
 from sentence_transformers import SentenceTransformer
+from transformers import AutoTokenizer
 
 from mttl.utils import remote_login
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -27,7 +27,7 @@ def main():
 
     args = parser.parse_args()
 
-    remote_login(os.environ['HF_TOKEN'])
+    remote_login(os.environ["HF_TOKEN"])
     dataset = load_dataset(args.dataset)
 
     tokenizer = AutoTokenizer.from_pretrained(args.model)
@@ -35,11 +35,11 @@ def main():
     final_dataset = []
 
     for split in ["train", "validation", "test"]:
-    
+
         if len(dataset) == 3:
             dataset_split = dataset[split]
         else:
-            dataset_split = dataset['train'].filter(lambda x : x['split'] == split)
+            dataset_split = dataset["train"].filter(lambda x: x["split"] == split)
 
         for ex_id, example in enumerate(tqdm.tqdm(dataset_split)):
 
@@ -59,16 +59,21 @@ def main():
             def get_detailed_query(q):
                 return f"Instruct: Given a question about a work of literature, retrieve relevant passages that answer the question.\nQuery: {q}"
 
-            questions = [get_detailed_query(q) for q in example["questions"]] 
+            questions = [get_detailed_query(q) for q in example["questions"]]
 
             # finally, we compute the similarity scores
             # let's get the embeddings for the questions and the chunks
             embeds = []
             for seqs in [questions, chunked_dataset]:
                 embeds += [
-                    model.encode(seqs, batch_size=args.batch_size, show_progress_bar=True, convert_to_tensor=True)
+                    model.encode(
+                        seqs,
+                        batch_size=args.batch_size,
+                        show_progress_bar=True,
+                        convert_to_tensor=True,
+                    )
                 ]
-            
+
             q_embeds, chunk_embeds = embeds
             scores = model.similarity(q_embeds, chunk_embeds)
             k = min(args.top_k, chunk_embeds.size(0))
@@ -78,15 +83,14 @@ def main():
             # list of excerpts for each question (so a list of lists)
             excerpts = []
             for q_id, (q, topk) in enumerate(zip(questions, topk_chunks)):
-                excerpts += [
-                    [chunked_dataset[i] for i in topk]
-                ]
+                excerpts += [[chunked_dataset[i] for i in topk]]
 
             example[args.document_field] = excerpts
             final_dataset += [example]
 
     final_dataset = Dataset.from_list(final_dataset)
     final_dataset.push_to_hub(f"{args.hf_id}_{args.worker_id}_{args.num_workers}")
+
 
 if __name__ == "__main__":
     main()
