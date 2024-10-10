@@ -1,14 +1,15 @@
 import argparse
 import os
-from collections import defaultdict
 
 import torch 
 import tqdm
 from datasets import Dataset, load_dataset
 
 from dataset_augmenter import chunk_text
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoTokenizer
 from sentence_transformers import SentenceTransformer
+
+from mttl.utils import remote_login
 
 def main():
     parser = argparse.ArgumentParser()
@@ -19,15 +20,19 @@ def main():
     parser.add_argument("--document_id_field", type=str, default="document_id")
     parser.add_argument("--document_field", type=str, default="text")
     parser.add_argument("--block_size", type=int, default=64)
-    parser.add_argument("--batch_size", type=int, default=4)
+    parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--top_k", type=int, default=20)
+    parser.add_argument("--num_workers", type=int, default=1)
+    parser.add_argument("--worker_id", type=int, default=0)
 
     args = parser.parse_args()
 
+    remote_login(os.environ['HF_TOKEN'])
     dataset = load_dataset(args.dataset)
 
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     model = SentenceTransformer(args.model, device="cuda")
+    final_dataset = []
 
     for split in ["train", "validation", "test"]:
     
@@ -36,8 +41,10 @@ def main():
         else:
             dataset_split = dataset['train'].filter(lambda x : x['split'] == split)
 
-        i = 0
-        for example in tqdm.tqdm(dataset_split):
+        for ex_id, example in enumerate(tqdm.tqdm(dataset_split)):
+
+            if ex_id % args.num_workers != args.worker_id:
+                continue
 
             chunked_dataset = []
             document = example[args.document_field]
@@ -67,12 +74,19 @@ def main():
             k = min(args.top_k, chunk_embeds.size(0))
             topk_scores, topk_chunks = torch.topk(scores, k, dim=1)
 
-            breakpoint()
-            xx = 1
+            # finally, we store the most similar chunks in `document_field_name`, as a
+            # list of excerpts for each question (so a list of lists)
+            excerpts = []
+            for q_id, (q, topk) in enumerate(zip(questions, topk_chunks)):
+                excerpts += [
+                    [chunked_dataset[i] for i in topk]
+                ]
 
-            
+            example[args.document_field] = excerpts
+            final_dataset += [example]
 
-
+    final_dataset = Dataset.from_list(final_dataset)
+    final_dataset.push_to_hub(f"{args.hf_id}_{args.worker_id}_{args.num_workers}")
 
 if __name__ == "__main__":
     main()
