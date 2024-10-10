@@ -102,6 +102,10 @@ def train_ke(training_args):
         logger.warning("Overwriting `router_granularity` to 'coarsegrained'")
         training_args.router_granularity = "coarsegrained"
 
+    if training_args.router_selector != "ke_selector":
+        logger.warning("Overwriting `router_selector` to 'ke_selector'")
+        training_args.router_selector = "ke_selector"
+
     # expert_library = create_library(training_args)
     model_config = KMMoEModelConfig(
         base_model=training_args.model,
