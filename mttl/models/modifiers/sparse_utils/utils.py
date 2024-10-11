@@ -29,6 +29,47 @@ except ImportError:
 from torch.autograd import Function
 
 
+def create_csr_tensor(row_indices, col_indices, values, num_rows, num_cols):
+    """
+    Constructs a PyTorch CSR tensor from given row indices, column indices, and values.
+
+    Parameters:
+    - row_indices (torch.Tensor): Tensor of row indices of non-zero values (dtype=torch.int64).
+    - col_indices (torch.Tensor): Tensor of column indices of non-zero values (dtype=torch.int64).
+    - values (torch.Tensor): Tensor of non-zero values.
+    - num_rows (int): Number of rows in the resulting matrix.
+    - num_cols (int): Number of columns in the resulting matrix.
+
+    Returns:
+    - csr_tensor (torch.Tensor): PyTorch CSR sparse tensor.
+    """
+    # Ensure the indices are of type torch.int64
+    row_indices = row_indices.to(torch.int64)
+    col_indices = col_indices.to(torch.int64)
+
+    # Step 1: Sort the indices lexicographically by (row_indices, col_indices)
+    # Stack row_indices and col_indices to form pairs
+    indices = torch.stack((row_indices, col_indices), dim=1)
+    # Sort indices lexicographically
+    sorted_indices, sort_order = torch.sort(indices, dim=0)
+    # Use the sort order to sort the values
+    sorted_row_indices = row_indices[sort_order[:, 0]]
+    sorted_col_indices = col_indices[sort_order[:, 1]]
+    sorted_values = values[sort_order[:, 0]]
+
+    # Step 2: Compute crow_indices
+    # Count the number of non-zero entries per row
+    counts = torch.bincount(sorted_row_indices, minlength=num_rows)
+    # Compute the cumulative sum to get crow_indices
+    crow_indices = torch.zeros(num_rows + 1, dtype=torch.int64)
+    crow_indices[1:] = torch.cumsum(counts, dim=0)
+
+    # Step 3: Create the CSR tensor
+    csr_tensor = torch.sparse_csr_tensor(crow_indices, sorted_col_indices, sorted_values, size=(num_rows, num_cols))
+
+    return csr_tensor
+
+
 def _scatter_add_flattened(weights, weights_sparse, idxs):
     """
     Adds sparse weights to the passed weights.
