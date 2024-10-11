@@ -138,8 +138,12 @@ class SparseWeights(nn.Module):
         """
         Set the sparse weights to the weights of the passed csr_matrix.
         """
-        data = sparse_tensor.data if isinstance(sparse_tensor, csr_matrix) else sparse_tensor
-        
+        data = (
+            sparse_tensor.data
+            if isinstance(sparse_tensor, csr_matrix)
+            else sparse_tensor
+        )
+
         assert (
             data.shape == self.sparse_weights.data.shape
         ), "Shape mismatch when resetting sparse weights"
@@ -157,8 +161,11 @@ class SparseWeights(nn.Module):
         if isinstance(sparse_tensor, csr_matrix):
             col_idxs, row_offs = sparse_tensor.indices, sparse_tensor.indptr
         else:
-            col_idxs, row_offs = sparse_tensor.col_indices(), sparse_tensor.crow_indices()
-        
+            col_idxs, row_offs = (
+                sparse_tensor.col_indices(),
+                sparse_tensor.crow_indices(),
+            )
+
         self.row_offs = torch.tensor(
             row_offs,
             dtype=torch.int32,
@@ -261,7 +268,7 @@ class BlockSparseWeights(SparseWeights):
 
 class MaskedLinear(SparseLinear, nn.Module):
     """
-    A dummy method to learn the sparse weights as it operates only with dense matricies. 
+    A dummy method to learn the sparse weights as it operates only with dense matricies.
     It will keep sparse weights as dense matrix (size of the original weights) and calculate grads w.r.t. the sparse weights.
 
     Importantly: this accumulates sparse weights! So every time the mask is reset, it may select weights that have been adapter in the past and will not be zero.
@@ -275,16 +282,25 @@ class MaskedLinear(SparseLinear, nn.Module):
         config: SparseLinearConfig,
         parent_name=None,
         use_sparse_bias=False,
+        init_all_ones=False,
         mask: torch.Tensor = None,
     ):
         super().__init__(base_weight, base_bias, config, parent_name, use_sparse_bias)
 
         self.block_size = config.block_size
         self.keep_ratio = config.keep_ratio
-
-        self.binary_mask = torch.ones_like(
-            self.base_weight, dtype=self.base_weight.dtype
-        )
+        if init_all_ones:
+            self.binary_mask = torch.ones_like(
+                self.base_weight, dtype=self.base_weight.dtype
+            )
+        else:
+            binary_mask = init_sparse_weights(
+                self.config.sps_type,
+                self.keep_ratio,
+                self.base_weight.shape,
+                self.block_size,
+            )
+            self.binary_mask = binary_mask.to(self.device)
         self.sparse_weights = nn.Parameter(
             torch.zeros_like(
                 self.base_weight, dtype=self.base_weight.dtype, device=self.device
@@ -312,12 +328,14 @@ class MaskedLinear(SparseLinear, nn.Module):
         )
 
     def reset_sparse_weights(self, mask: torch.Tensor):
-        '''
+        """
         Only resets the binary mask, weights for this adapter are never reset.
-        '''
-        mask.values().copy_(torch.ones_like(mask.values())) # ake sure its binary
+        """
+        mask.values().copy_(torch.ones_like(mask.values()))  # ake sure its binary
         self.binary_mask = torch.tensor(
-            mask.to_dense(), device=self.base_weight.device, dtype=self.base_weight.dtype
+            mask.to_dense(),
+            device=self.base_weight.device,
+            dtype=self.base_weight.dtype,
         )
 
     @property

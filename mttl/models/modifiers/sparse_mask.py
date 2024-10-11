@@ -290,7 +290,7 @@ class ScatteredSparseAdapter(SparseMaskAdapter):
 
     def __init__(
         self,
-        config: SparseMaskConfig,
+        config: ScatteredConfig,
         layer: nn.Module,
         **kwargs,
     ):
@@ -304,7 +304,7 @@ class ScatteredSparseAdapter(SparseMaskAdapter):
 
 
 class MLSConfig(SparseMaskConfig):
-    pass
+    init_all_ones: bool = False
 
 
 @Modifier.register("mls_sparse_adapter", config_cls=MLSConfig)
@@ -315,7 +315,7 @@ class MaskedLinearSparseAdapter(SparseMaskAdapter):
 
     def __init__(
         self,
-        config: SparseMaskConfig,
+        config: MLSConfig,
         layer: nn.Module,
         **kwargs,
     ):
@@ -325,4 +325,5 @@ class MaskedLinearSparseAdapter(SparseMaskAdapter):
             self.dense_layer_bias,
             self.config,
             parent_name=self.name,
+            init_all_ones=config.init_all_ones
         )

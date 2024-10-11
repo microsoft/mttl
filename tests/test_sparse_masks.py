@@ -9,23 +9,29 @@ from pytorch_lightning import seed_everything
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.sparse_mask import (
     MaskedLinear,
+    MaskedLinearSparseAdapter,
+    MLSConfig,
+    ScatteredConfig,
+    ScatteredSparseAdapter,
     ScatteredSparseLinearModule,
-    SNIPMaskUpdateWrapper,
-    SparseLinearModule,
+    SNIPMaskUpdater,
     SparseMaskAdapter,
     SparseMaskConfig,
 )
+from mttl.models.modifiers.sparse_utils.sparse_linear import (
+    ScatteredSparseLinearModule,
+    SparseLinearModule,
+)
 
 
-def test_sm_adapter_spops():
+def test_sm_adapter():
     os.environ["CONFIG_PATH"] = "./"
 
     seed_everything(0)
     from transformers.models.llama.configuration_llama import LlamaConfig
 
-    adapter_config = SparseMaskConfig(
+    adapter_config = ScatteredConfig(
         modify_layers="gate_proj|down_proj|up_proj",
-        sps_impl="sp_add+sp_mm",
         sps_type="regular_sparse",
         keep_ratio=0.05,
         mask_updater=None,
@@ -50,7 +56,6 @@ def test_sm_adapter_spops():
             assert n.endswith(".sparse_weights")
             parent_name = ".".join(n.split(".")[:-1])
             parent_module = modules[parent_name]
-            assert isinstance(parent_module, SparseLinearModule)
             assert p.numel() == int(0.05 * parent_module.base_weight.numel())
 
     # not test for forward as it requires GPU.
@@ -62,9 +67,8 @@ def test_block_sparse():
     seed_everything(0)
     from transformers.models.llama.configuration_llama import LlamaConfig
 
-    adapter_config = SparseMaskConfig(
+    adapter_config = ScatteredConfig(
         modify_layers="gate_proj|down_proj|up_proj",
-        sps_impl="sp_add+sp_mm",
         sps_type="block_sparse",
         keep_ratio=0.05,
         mask_updater=None,
@@ -90,7 +94,6 @@ def test_block_sparse():
             assert n.endswith(".sparse_weights")
             parent_name = ".".join(n.split(".")[:-1])
             parent_module = modules[parent_name]
-            assert isinstance(parent_module, SparseLinearModule)
             assert (
                 p.numel()
                 == math.ceil(int(0.05 * parent_module.base_weight.numel()) / 16**2)
@@ -104,9 +107,8 @@ def test_sm_adapter_scattered(dummy_batch):
     seed_everything(0)
     from transformers.models.llama.configuration_llama import LlamaConfig
 
-    adapter_config = SparseMaskConfig(
+    adapter_config = ScatteredConfig(
         modify_layers="gate_proj|down_proj|up_proj",
-        sps_impl="scattered",
         sps_type="regular_sparse",
         keep_ratio=0.05,
         mask_updater=None,
@@ -144,9 +146,8 @@ def test_sm_adapter_masked_linear(dummy_batch):
     seed_everything(0)
     from transformers.models.llama.configuration_llama import LlamaConfig
 
-    adapter_config = SparseMaskConfig(
+    adapter_config = MLSConfig(
         modify_layers="gate_proj|down_proj|up_proj",
-        sps_impl="masked_linear",
         sps_type="regular_sparse",
         keep_ratio=0.05,
         mask_updater=None,
@@ -189,9 +190,8 @@ def test_snip_updater(dummy_batch):
     seed_everything(0)
     from transformers.models.llama.configuration_llama import LlamaConfig
 
-    adapter_config = SparseMaskConfig(
+    adapter_config = ScatteredConfig(
         modify_layers="gate_proj|down_proj|up_proj",
-        sps_impl="scattered",
         sps_type="regular_sparse",
         keep_ratio=0.05,
         mask_updater="snip",
@@ -219,30 +219,32 @@ def test_snip_updater(dummy_batch):
             assert n.endswith(".sparse_weights")
             parent_name = ".".join(n.split(".")[:-2])
             parent_module = modules[parent_name]
-            assert isinstance(parent_module, SNIPMaskUpdateWrapper)
-            assert parent_module._mask_update_steps == 1
+            assert parent_module.mask_updater._mask_update_steps == 1
 
 
 @pytest.mark.parametrize(
-    "sps_type", ["sp_add+sp_mm", "scattered", "masked_linear", "triton_block_sparse"]
+    "sps_config_cls", [MLSConfig, ScatteredConfig]
 )
-def test_snip_weight_accumulation(sps_type):
+def test_snip_weight_accumulation(sps_config_cls):
     os.environ["CONFIG_PATH"] = "./"
 
     seed_everything(0)
     from transformers.models.llama.configuration_llama import LlamaConfig
 
-    adapter_config = SparseMaskConfig(
-        sps_impl=sps_type,
+    adapter_config = sps_config_cls(
         sps_type="block_sparse",
         keep_ratio=0.02,
         block_size=10,
         mask_updater="snip",
     )
-    snip_module = SparseMaskAdapter(adapter_config, nn.Linear(100, 100)).sparse_layer
+    
+    adapter = ScatteredSparseAdapter(adapter_config, nn.Linear(100, 100))
+    snip_module = adapter.mask_updater
+    sparse_layer = adapter.sparse_layer
+    
 
     assert snip_module.accumulated_sparse_weights.sum() == 0.0
-    sparse_weights = snip_module.sparse_layer.sparse_weights
+    sparse_weights = sparse_layer.sparse_weights
     sparse_weights.requires_grad = False
     idxs_perm = torch.randperm(sparse_weights.flatten().shape[0])
     idxs1 = idxs_perm[:100]
@@ -250,13 +252,13 @@ def test_snip_weight_accumulation(sps_type):
     assert sparse_weights.sum() == 100.0
 
     assert snip_module.accumulated_sparse_weights.sum() == 0.0
-    snip_module.switch_to_mask_update_modus()
+    snip_module.switch_to_mask_update_modus(sparse_layer)
     assert snip_module.accumulated_sparse_weights.sum() == 100.0
 
     idxs2 = idxs_perm[100:200]
     sparse_weights.flatten()[idxs2] += 1.0
     assert sparse_weights.sum() == 200.0
-    snip_module.switch_to_mask_update_modus()
+    snip_module.switch_to_mask_update_modus(sparse_layer)
     assert snip_module.accumulated_sparse_weights.sum() == 200.0
 
     selected_indices = torch.zeros_like(snip_module.accumulated_sparse_weights)
@@ -267,9 +269,9 @@ def test_snip_weight_accumulation(sps_type):
     selected_indices.flatten()[idxs[100:]] = 1.0
     assert selected_indices.sum() == 200.0
     snip_module._selected_indices = selected_indices.float().to_sparse_coo()
-    snip_module.sparse_layer.sparse_weights *= 0.0
-    snip_module.switch_to_weights_update_modus()
-    assert snip_module.sparse_layer.sparse_weights.sum() == 100.0
+    sparse_layer.sparse_weights *= 0.0
+    snip_module.switch_to_weights_update_modus(sparse_layer)
+    assert sparse_layer.sparse_weights.sum() == 100.0
 
 
 if __name__ == "__main__":
