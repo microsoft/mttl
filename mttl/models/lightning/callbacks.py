@@ -27,27 +27,6 @@ from mttl.models.utils import transfer_batch_to_device
 DEBUG = False
 
 
-class ModelModifierCallback(pl.Callback):
-    """
-    Just a general callback. It can be used for whatever we need to.
-    Currently, it only removes the mask updater after a certain epoch if modifier is sparse mask adapter.
-    """
-
-    def __init__(self, args: "ExpertConfig"):
-        self.args = args
-
-    def on_train_epoch_start(self, trainer, pl_module):
-        if self.args.model_modifier == "sparse_mask_adapter":
-            if (
-                trainer.current_epoch
-                == self.args.modifier_config.remove_mask_updater_epoch
-            ):
-                for m_name, module in dict(pl_module.named_modules()).items():
-                    if isinstance(module, SparseMaskAdapter):
-                        module.remove_mask_updater()
-        return super().on_train_epoch_start(trainer, pl_module)
-
-
 class LiveCheckpointCallback(pl.Callback):
     """A better model checkpoint callback, that works in synchrony with LiveLogMixin."""
 

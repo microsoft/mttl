@@ -11,7 +11,6 @@ from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.lightning.callbacks import (
     DownstreamEvalCallback,
     LiveCheckpointCallback,
-    ModelModifierCallback,
     NanoMMLUCallback,
     RougeCallback,
 )
@@ -94,7 +93,6 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
     )
 
     callbacks.append(checkpoint_callback)
-    callbacks.append(ModelModifierCallback(args))
 
     if args.eval_rouge_flag:
         rouge = RougeCallback(
