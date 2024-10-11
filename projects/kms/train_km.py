@@ -9,6 +9,7 @@ import torch.nn.functional as F
 # register this datamodule!
 from km_datamodule import KMDatasetModule
 from lightning_fabric import seed_everything
+from nqa_datamodule import NQADatamodule  # noqa: F401
 
 from mttl.arguments import ExpertConfig
 from mttl.logging import setup_logging
