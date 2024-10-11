@@ -15,6 +15,7 @@ from tqdm.asyncio import tqdm as tqdm_async
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from vllm import LLM, SamplingParams
 
+from mttl.logging import logger
 from mttl.registrable import Registrable
 
 global client
@@ -172,7 +173,11 @@ class DatasetAugmenter:
                 trust_remote_code=True,
                 gpu_memory_utilization=0.9,
                 tensor_parallel_size=torch.cuda.device_count(),
+                enforce_eager=True,
+                max_num_seqs=64,
+                max_model_len=4096,
             )
+            logger.warning("VLLM: Setting max_model_len to 4096!!!")
         else:
             from openai import AsyncAzureOpenAI
 
