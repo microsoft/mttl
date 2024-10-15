@@ -8,6 +8,7 @@ from transformers.trainer import TRAINING_ARGS_NAME, TrainingArguments
 from mttl.arguments import ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import logger
+from mttl.models.expert_context import InfoContainer
 from mttl.models.get_optimizer import get_optimizer_and_scheduler
 
 MTTL_ARGS_NAME = "mttl_args.bin"
@@ -34,6 +35,16 @@ class ExpertModelTrainer(Trainer):
             kwargs["eval_dataset"] = self.dm.dev_dataset
             kwargs["data_collator"] = self.dm.collate_fn
             kwargs["tokenizer"] = self.dm.tokenizer
+
+            if len(kwargs["train_dataset"]) == 0:
+                raise ValueError(
+                    "Training Dataset is empty. Please check the datamodule."
+                )
+
+            if len(kwargs["eval_dataset"]) == 0:
+                raise ValueError(
+                    "Evaluation Dataset is empty. Please check the datamodule."
+                )
         else:
             self.dm = None
 
@@ -138,15 +149,27 @@ class ExpertModelTrainer(Trainer):
 class LMTrainer(ExpertModelTrainer):
     """Standard next-token prediction objective"""
 
-    def compute_loss(self, model, inputs, return_outputs=False):
-        input_ids = inputs["input_ids"]
-        labels = inputs["labels"]
-        attention_mask = inputs["attention_mask"]
+    # @InfoContainer.wrap_with_context(idx=1)
+    def compute_loss(self, model, batch, return_outputs=False):
+
+        input_ids = batch.pop("input_ids")
+        labels = batch.pop("labels")
+
+        assert input_ids.size() == labels.size()
+        # assert that labels is either -100 or the same as input_ids
+        assert torch.all((labels == -100) | (labels == input_ids))
+
+        # Now, we shift by one
+        labels = labels[:, 1:]
+        input_ids = input_ids[:, :-1]
+
+        attention_mask = batch.pop("attention_mask")[:, :-1]
 
         outputs = model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            labels=labels,
+            input_ids=input_ids, attention_mask=attention_mask, labels=labels, **batch
         )
 
         return (outputs.loss, outputs.logits) if return_outputs else outputs.loss
+
+    # def prediction_step(self, model, batch, *args, **kwargs):
+    #     return self.compute_loss(model, batch)
