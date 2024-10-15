@@ -539,7 +539,7 @@ class TaskNameSelector(Selector):
 @dataclass
 class KnowledgeExtractorSelectorConfig(SelectorConfig):
     field_name: str = "task_names"
-    ke_experts_prefix: str = "KE"
+    ke_expert_name: str = None
 
 
 @Selector.register("ke_selector", KnowledgeExtractorSelectorConfig)
@@ -553,7 +553,7 @@ class KnowledgeExtractorSelector(Selector):
         )
         task_names = getattr(self.routing_infos, self.config.field_name)
         ke_expert_name = [
-            task for task in self.expert_names if self.config.ke_experts_prefix in task
+            task for task in self.expert_names if self.config.ke_expert_name == task
         ]
         assert len(ke_expert_name) == 1
 
