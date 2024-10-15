@@ -170,6 +170,8 @@ def train_km(training_args):
     if best_model_path:
         logger.info("Best model checkpoint: %s", best_model_path)
 
+    trainer.save_model(args.output_dir + "/best_model")
+
     # Maybe save to Expert Library
     if args.library_id:
         expert_library = create_library(args)
