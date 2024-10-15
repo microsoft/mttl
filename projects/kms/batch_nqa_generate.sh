@@ -1,16 +1,8 @@
 #!/bin/bash
 
-# Check if the correct number of arguments is provided
-if [ $# -lt 4 ]; then
-    echo "Usage: $0 <worker_id> <num_workers> <input_file> <dataset_dir>"
-    exit 1
-fi
-
 # Assign command-line arguments to variables
 WORKER_ID=$1
 NUM_WORKERS=$2
-INPUT_FILE=$3
-DATASET_DIR=$4
 
 # Validate that WORKER_ID and NUM_WORKERS are integers
 if ! [[ $WORKER_ID =~ ^[0-9]+$ ]] ; then
@@ -32,11 +24,8 @@ fi
 # Extract IDs assigned to this worker
 DOCUMENT_IDS=$(awk -v wid=$WORKER_ID -v nworkers=$NUM_WORKERS '{
     if ((NR - 1) % nworkers == wid) print $0
-}' "$INPUT_FILE" | paste -sd, -)
+}' "nqa_ids.txt" | paste -sd, -)
 
-CUDA_VISIBLE_DEVICES=0 python generate_for_dataset.py \
-    --dataset $DATASET_DIR \
-    --dataset_type narrativeqa \
-    --dataset_task $DOCUMENT_IDS \
-    --use_prompts summary,qa \
-    --output_path $AMLT_OUTPUT_DIR
+
+echo $DOCUMENT_IDS
+CUDA_VISIBLE_DEVICES=0 python generate_for_dataset.py --dataset sordonia/narrativeqa_sanitized --model microsoft/Phi-3-mini-4k-instruct --dataset_type narrativeqa --dataset_task $DOCUMENT_IDS --use_prompts summary,qa --output_path $AMLT_OUTPUT_DIR

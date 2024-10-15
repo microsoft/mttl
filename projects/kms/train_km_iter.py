@@ -825,6 +825,8 @@ def train_km(training_args):
     if best_model_path:
         logger.info("Best model checkpoint: %s", best_model_path)
 
+    trainer.save_model(args.output_dir + "/best_model")
+
 
 if __name__ == "__main__":
     args = IterKMArguments.parse()

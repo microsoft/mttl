@@ -173,11 +173,12 @@ class DatasetAugmenter:
                 trust_remote_code=True,
                 gpu_memory_utilization=0.9,
                 tensor_parallel_size=torch.cuda.device_count(),
-                enforce_eager=True,
                 max_num_seqs=64,
-                max_model_len=4096,
+                max_model_len=self.tokenizer.model_max_length,
             )
-            logger.warning("VLLM: Setting max_model_len to 4096!!!")
+            logger.warning(
+                f"DatasetAugmenter: Setting max_model_len to {self.tokenizer.model_max_length}."
+            )
         else:
             from openai import AsyncAzureOpenAI
 
@@ -202,6 +203,7 @@ class DatasetAugmenter:
     def augment(
         self,
         dataset: Dataset,
+        carry_columns: str = "all",
     ) -> Dataset:
 
         prompts, chunks, types, output_dataset, rests = [], [], [], [], []
@@ -218,10 +220,13 @@ class DatasetAugmenter:
                         task.create_task(chunk, add_chat_template=not self.oai)
                     )
                     # append the rest of the columns
-                    rests.append({})
+                    rest = {}
                     for column in dataset.column_names:
-                        if column != "text":
-                            rests[-1][column] = dataset[doc_idx][column]
+                        if column != "text" and (
+                            carry_columns == "all" or column in carry_columns
+                        ):
+                            rest[column] = dataset[doc_idx][column]
+                    rests.append(rest)
 
         if not self.oai:
             outputs = self.llm.generate(prompts, self.sampling_params)

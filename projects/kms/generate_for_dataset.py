@@ -115,9 +115,7 @@ def main(
 
         # disable caching
         disable_caching()
-
-        # flattened nqa dataset
-        dataset = load_dataset(dataset, split="train")
+        dataset = load_dataset("sordonia/narrativeqa_sanitized", split="train")
 
         if "split" not in dataset.column_names:
             raise ValueError(
@@ -126,22 +124,12 @@ def main(
 
         if dataset_task is not None:
             document_ids = dataset_task.split(",")
-        else:
-            # infer docids from txt files in the dataset dir, but strip the extension
-            document_ids = dataset.unique("document_id")
 
-        texts = []
-        for document_id in tqdm.tqdm(
-            list(document_ids), desc=f"Generating data for documents"
-        ):
-            text = dataset.filter(
-                lambda x: x["document_id"] == document_id,
-                num_proc=16,
-            )[0]["text"]
-            texts.append({"text": text, "document_id": document_id})
+            dataset = dataset.filter(
+                lambda x: x["document_id"] in set(document_ids), num_proc=16
+            )
 
-        # do augmentation
-        concat_dataset = augmenter.augment(Dataset.from_list(texts))
+        concat_dataset = augmenter.augment(dataset, carry_columns="document_id")
         os.makedirs(output_path, exist_ok=True)
 
         d = DatasetDict(

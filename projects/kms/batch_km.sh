@@ -39,14 +39,9 @@ ls -l $PWD/../../
 
 IFS=$'\n'
 for DOC_ID in $DOCUMENT_IDS; do
-    # check if the directory $AMLT_OUTPUT_DIR/$DOC_ID/gen__epoch_45 exists
-    if [ -d "$AMLT_OUTPUT_DIR/$DOC_ID/gen__epoch_45" ]; then
-        echo "Directory $AMLT_OUTPUT_DIR/$DOC_ID/gen__epoch_45 exists. Skipping training."
-        continue
-    fi
-
-    if [ -d "$AMLT_OUTPUT_DIR/$DOC_ID/done.txt" ]; then
-        echo "Directory $AMLT_OUTPUT_DIR/$DOC_ID/done.txt exists. Skipping training."
+    # check if the directory $AMLT_OUTPUT_DIR/$DOC_ID/gen__epoch_4 exists
+    if [ -d "$AMLT_OUTPUT_DIR/$DOC_ID/best_model" ]; then
+        echo "Skipping training."
         continue
     fi
 
@@ -57,5 +52,4 @@ for DOC_ID in $DOCUMENT_IDS; do
         -k output_dir="$AMLT_OUTPUT_DIR/$DOC_ID"
 
     mkdir -p "$AMLT_OUTPUT_DIR/$DOC_ID"
-    touch "$AMLT_OUTPUT_DIR/$DOC_ID/done.txt"
 done
