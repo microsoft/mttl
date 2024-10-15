@@ -616,7 +616,7 @@ class MoEModelConfig(BaseExpertModelConfig):
     # if library_id is not None, then we load experts from the library
     library_id: str = None
     # how many experts to add if not in library
-    moe_num_experts: int = 1
+    moe_num_experts: int = 0
     # if selector_config is not None, then we use it to select experts
     selector_config: AutoSelectorConfig = None
     # if modifier_config is not None, then we create moe_num_experts with this modifier
