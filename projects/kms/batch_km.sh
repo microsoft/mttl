@@ -45,9 +45,17 @@ for DOC_ID in $DOCUMENT_IDS; do
         continue
     fi
 
+    if [ -d "$AMLT_OUTPUT_DIR/$DOC_ID/done.txt" ]; then
+        echo "Directory $AMLT_OUTPUT_DIR/$DOC_ID/done.txt exists. Skipping training."
+        continue
+    fi
+
     CUDA_VISIBLE_DEVICES=0 python train_km_iter.py \
         -c "$CONFIG_FILE" \
         -k finetune_task_name="$DOC_ID" \
         -k wandb_run_name="$AMLT_EXPERIMENT_NAME-$DOC_ID" \
         -k output_dir="$AMLT_OUTPUT_DIR/$DOC_ID"
+
+    mkdir -p "$AMLT_OUTPUT_DIR/$DOC_ID"
+    touch "$AMLT_OUTPUT_DIR/$DOC_ID/done.txt"
 done

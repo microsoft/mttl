@@ -136,14 +136,8 @@ def main(
         ):
             text = dataset.filter(
                 lambda x: x["document_id"] == document_id,
-                num_proc=0,
+                num_proc=16,
             )[0]["text"]
-
-            # narrativeqa related text normalization
-            text = text.split("*** END OF THIS PROJECT")[0]
-            text = text.split("<pre>")[-1]
-            text = text.split("</pre>")[0]
-            text = text.replace("<b>", "").replace("</b>", "")
             texts.append({"text": text, "document_id": document_id})
 
         # do augmentation
