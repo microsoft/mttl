@@ -14,16 +14,19 @@ class NQAZeroShotEvaluator(RougeEvaluator):
                 model_family=dataset_args.model_family,
                 predict_batch_size=dataset_args.predict_batch_size,
                 finetune_task_name=dataset_args.finetune_task_name,
-                include_context=False,
+                include_context=dataset_args.include_context,
+                subsample_train=dataset_args.subsample_train,
+                subsample_dev=dataset_args.subsample_dev,
+                subsample_test=dataset_args.subsample_test,
             ),
             for_generation=True,
         )
         super().__init__(datamodule, generation_kwargs=generation_kwargs)
 
     def evaluate(self, model, split="test", **kwargs):
-        if self.datamodule.train_dataset:
+        if self.datamodule.test_dataset and len(self.datamodule.test_dataset):
             split_ = "train"
-        elif self.datamodule.dev_dataset:
+        elif self.datamodule.dev_dataset and len(self.datatamodule.dev_dataset):
             split_ = "dev"
         else:
             split_ = "test"
