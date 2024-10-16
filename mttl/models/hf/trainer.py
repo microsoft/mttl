@@ -159,11 +159,7 @@ class LMTrainer(ExpertModelTrainer):
         # assert that labels is either -100 or the same as input_ids
         assert torch.all((labels == -100) | (labels == input_ids))
 
-        # Now, we shift by one
-        labels = labels[:, 1:]
-        input_ids = input_ids[:, :-1]
-
-        attention_mask = batch.pop("attention_mask")[:, :-1]
+        attention_mask = batch.pop("attention_mask")
 
         outputs = model(
             input_ids=input_ids, attention_mask=attention_mask, labels=labels, **batch
