@@ -10,6 +10,7 @@ class NQADatasetConfig(DatasetConfig):
     task_source_field: str = "document_id"
     prompt: str = "Answer the following question: "
     include_context: bool = False
+    topk_context: int = 10
 
 
 @DataModule.register("narrativeqa", config_cls=NQADatasetConfig)
@@ -44,12 +45,34 @@ class NQADatamodule(DataModule):
                     answer = examples["answers"][i][j][0]
 
                     if self.config.include_context:
-                        source = [
-                            {
-                                "role": "user",
-                                "content": f"Consider the following paragraph:\n{examples['text'][i]}\n{self.config.prompt}{question}",
-                            }
-                        ]
+                        context = examples["text"][i]
+                        if isinstance(context, list):
+                            # If the context is a list of strings per question, we get the question-specific context
+                            context = context[j]
+
+                        if isinstance(context, list):
+                            # following Alan's approach
+                            context = " ".join(
+                                [
+                                    f"Passage {k+1}: {context[k]}\n\n"
+                                    for k in range(
+                                        min(self.config.topk_context, len(context))
+                                    )
+                                ]
+                            )
+                            source = [
+                                {
+                                    "role": "user",
+                                    "content": f"Consider the following passages:\n{context}\n{self.config.prompt}{question}",
+                                }
+                            ]
+                        else:
+                            source = [
+                                {
+                                    "role": "user",
+                                    "content": f"Consider the following paragraph:\n{context}\n{self.config.prompt}{question}",
+                                }
+                            ]
                     else:
                         source = [
                             {
