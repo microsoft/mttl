@@ -78,6 +78,7 @@ class LoRA(Modifier, MergeableModifierMixin, ModifyMixin):
         """Merge this adapter with the layer!"""
         if isinstance(self.layer, nn.Linear):
             self.merged_with_layer = True
+
             # for back-compatibility, try the two sides:
             if self.lora_a.data.shape[0] == self.layer.weight.shape[0]:
                 to_merge = self.lora_a.data @ self.lora_b.data
