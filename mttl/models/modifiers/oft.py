@@ -106,12 +106,12 @@ class OFTLayer(Modifier, ModifyMixin):
         base_layer: the pretrained model layer
         """
         super().__init__()
-        
+
         self.base_layer = layer
         # OFT info
         self.config = config
-        self.oft_r = nn.Parameter() #nn.ParameterDict({})
-        self.oft_s =  nn.Parameter() # nn.ParameterDict({})
+        self.oft_r = nn.Parameter()  # nn.ParameterDict({})
+        self.oft_s = nn.Parameter()  # nn.ParameterDict({})
         self.r = {}
         self.oft_block_size = {}
         self.oft_dropout = None
@@ -123,18 +123,22 @@ class OFTLayer(Modifier, ModifyMixin):
         self.merged_adapters = []
         self.kwargs = kwargs
 
-
-
         if isinstance(self.base_layer, nn.Linear):
-            in_features, out_features = self.base_layer.in_features, self.base_layer.out_features
+            in_features, out_features = (
+                self.base_layer.in_features,
+                self.base_layer.out_features,
+            )
         elif isinstance(self.base_layer, nn.Conv2d):
-            in_features, out_features = self.base_layer.in_channels, self.base_layer.out_channels
+            in_features, out_features = (
+                self.base_layer.in_channels,
+                self.base_layer.out_channels,
+            )
         else:
             raise ValueError(f"Unsupported layer type {type(self.base_layer)}")
 
         self.in_features = in_features
         self.out_features = out_features
-        
+
         self.update_layer(
             r=config.r,
             oft_block_size=config.oft_block_size,
@@ -211,7 +215,7 @@ class OFTLayer(Modifier, ModifyMixin):
             oft_dropout_layer = MultiplicativeDropoutLayer(p=module_dropout)
         else:
             oft_dropout_layer = nn.Identity()
-        self.oft_dropout= oft_dropout_layer #update(nn.ModuleDict({adapter_name: oft_dropout_layer}))
+        self.oft_dropout = oft_dropout_layer  # update(nn.ModuleDict({adapter_name: oft_dropout_layer}))
 
         if r == 0 and oft_block_size != 0:
             if (
@@ -354,7 +358,7 @@ class OFTLayer(Modifier, ModifyMixin):
             return lower_params
         else:
             return higher_params
-    
+
     def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
         previous_dtype = x.dtype
         oft_rotation = torch.eye(
@@ -363,7 +367,7 @@ class OFTLayer(Modifier, ModifyMixin):
         oft_scale = torch.ones(
             (int(self.out_features), 1), device=x.device, dtype=previous_dtype
         )
-        
+
         oft_r = self.oft_r
         oft_s = self.oft_s
         dropout = self.oft_dropout
@@ -404,202 +408,199 @@ class OFTLayer(Modifier, ModifyMixin):
 
         result = result.to(previous_dtype)
         return result
-        
 
 
 # class Linear(nn.Module, OFTLayer):
-    # """OFT implemented in Linear layer"""
+# """OFT implemented in Linear layer"""
 
-    # def __init__(
-    #     self,
-    #     base_layer,
-    #     adapter_name: str,
-    #     r: int = 8,
-    #     oft_block_size: int = 0,
-    #     module_dropout: float = 0.0,
-    #     coft: bool = False,
-    #     eps: float = 6e-5,
-    #     block_share: bool = False,
-    #     fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
-    #     init_weights: Union[bool, str] = True,
-    #     is_target_conv_1d_layer: bool = False,
-    #     **kwargs,
-    # ) -> None:
-    #     super().__init__()
-    #     OFTLayer.__init__(self, base_layer, **kwargs)
-    #     self.fan_in_fan_out = fan_in_fan_out
+# def __init__(
+#     self,
+#     base_layer,
+#     adapter_name: str,
+#     r: int = 8,
+#     oft_block_size: int = 0,
+#     module_dropout: float = 0.0,
+#     coft: bool = False,
+#     eps: float = 6e-5,
+#     block_share: bool = False,
+#     fan_in_fan_out: bool = False,  # Set this to True if the layer to replace stores weight like (fan_in, fan_out)
+#     init_weights: Union[bool, str] = True,
+#     is_target_conv_1d_layer: bool = False,
+#     **kwargs,
+# ) -> None:
+#     super().__init__()
+#     OFTLayer.__init__(self, base_layer, **kwargs)
+#     self.fan_in_fan_out = fan_in_fan_out
 
-    #     self._active_adapter = adapter_name
+#     self._active_adapter = adapter_name
 
-    #     self.update_layer(
-    #         adapter_name,
-    #         r,
-    #         oft_block_size,
-    #         module_dropout,
-    #         coft,
-    #         eps,
-    #         block_share,
-    #         init_weights,
-    #     )
-    #     self.is_target_conv_1d_layer = is_target_conv_1d_layer
+#     self.update_layer(
+#         adapter_name,
+#         r,
+#         oft_block_size,
+#         module_dropout,
+#         coft,
+#         eps,
+#         block_share,
+#         init_weights,
+#     )
+#     self.is_target_conv_1d_layer = is_target_conv_1d_layer
 
-    # def merge(
-    #     self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
-    # ) -> None:
-    #     """
-    #     Merge the active adapter weights into the base weights
+# def merge(
+#     self, safe_merge: bool = False, adapter_names: Optional[list[str]] = None
+# ) -> None:
+#     """
+#     Merge the active adapter weights into the base weights
 
-    #     Args:
-    #         safe_merge (`bool`, *optional*):
-    #             If `True`, the merge operation will be performed in a copy of the original weights and check for NaNs
-    #             before merging the weights. This is useful if you want to check if the merge operation will produce
-    #             NaNs. Defaults to `False`.
-    #         adapter_names (`List[str]`, *optional*):
-    #             The list of adapter names that should be merged. If `None`, all active adapters will be merged.
-    #             Defaults to `None`.
-    #     """
-    #     adapter_names = check_adapters_to_merge(self, adapter_names)
-    #     if not adapter_names:
-    #         # no adapter to merge
-    #         return
+#     Args:
+#         safe_merge (`bool`, *optional*):
+#             If `True`, the merge operation will be performed in a copy of the original weights and check for NaNs
+#             before merging the weights. This is useful if you want to check if the merge operation will produce
+#             NaNs. Defaults to `False`.
+#         adapter_names (`List[str]`, *optional*):
+#             The list of adapter names that should be merged. If `None`, all active adapters will be merged.
+#             Defaults to `None`.
+#     """
+#     adapter_names = check_adapters_to_merge(self, adapter_names)
+#     if not adapter_names:
+#         # no adapter to merge
+#         return
 
-    #     for active_adapter in adapter_names:
-    #         if active_adapter in self._available_adapters:
-    #             base_layer = self.get_base_layer()
-    #             if safe_merge:
-    #                 # Note that safe_merge will be slower than the normal merge
-    #                 # because of the copy operation.
-    #                 orig_weights = base_layer.weight.data
-    #                 oft_mat, oft_s = self.get_delta_weight(active_adapter)
-    #                 orig_weights = torch.transpose(orig_weights, 0, 1)
-    #                 orig_weights = torch.mm(oft_mat, orig_weights)
-    #                 orig_weights = torch.transpose(orig_weights, 0, 1)
-    #                 orig_weights = orig_weights * oft_s
+#     for active_adapter in adapter_names:
+#         if active_adapter in self._available_adapters:
+#             base_layer = self.get_base_layer()
+#             if safe_merge:
+#                 # Note that safe_merge will be slower than the normal merge
+#                 # because of the copy operation.
+#                 orig_weights = base_layer.weight.data
+#                 oft_mat, oft_s = self.get_delta_weight(active_adapter)
+#                 orig_weights = torch.transpose(orig_weights, 0, 1)
+#                 orig_weights = torch.mm(oft_mat, orig_weights)
+#                 orig_weights = torch.transpose(orig_weights, 0, 1)
+#                 orig_weights = orig_weights * oft_s
 
-    #                 if not torch.isfinite(orig_weights).all():
-    #                     raise ValueError(
-    #                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
-    #                     )
+#                 if not torch.isfinite(orig_weights).all():
+#                     raise ValueError(
+#                         f"NaNs detected in the merged weights. The adapter {active_adapter} seems to be broken"
+#                     )
 
-    #                 base_layer.weight.data = orig_weights.contiguous()
-    #             else:
-    #                 oft_mat, oft_s = self.get_delta_weight(active_adapter)
-    #                 orig_weights = base_layer.weight.data
-    #                 orig_weights = torch.transpose(orig_weights, 0, 1)
-    #                 orig_weights = torch.mm(oft_mat, orig_weights)
-    #                 orig_weights = torch.transpose(orig_weights, 0, 1)
-    #                 orig_weights = orig_weights * oft_s
+#                 base_layer.weight.data = orig_weights.contiguous()
+#             else:
+#                 oft_mat, oft_s = self.get_delta_weight(active_adapter)
+#                 orig_weights = base_layer.weight.data
+#                 orig_weights = torch.transpose(orig_weights, 0, 1)
+#                 orig_weights = torch.mm(oft_mat, orig_weights)
+#                 orig_weights = torch.transpose(orig_weights, 0, 1)
+#                 orig_weights = orig_weights * oft_s
 
-    #                 base_layer.weight.data = orig_weights.contiguous()
+#                 base_layer.weight.data = orig_weights.contiguous()
 
-    #             self.merged_adapters.append(active_adapter)
+#             self.merged_adapters.append(active_adapter)
 
-    # def unmerge(self) -> None:
-    #     """
-    #     This method unmerges all merged adapter layers from the base weights.
-    #     """
-    #     if not self.merged:
-    #         warnings.warn("Already unmerged. Nothing to do.")
-    #         return
-    #     while len(self.merged_adapters) > 0:
-    #         active_adapter = self.merged_adapters.pop()
-    #         if active_adapter in self.oft_r.keys():
-    #             oft_mat, oft_s = self.get_delta_weight(active_adapter)
+# def unmerge(self) -> None:
+#     """
+#     This method unmerges all merged adapter layers from the base weights.
+#     """
+#     if not self.merged:
+#         warnings.warn("Already unmerged. Nothing to do.")
+#         return
+#     while len(self.merged_adapters) > 0:
+#         active_adapter = self.merged_adapters.pop()
+#         if active_adapter in self.oft_r.keys():
+#             oft_mat, oft_s = self.get_delta_weight(active_adapter)
 
-    #             orig_weights = self.get_base_layer().weight.data
-    #             orig_weights = torch.transpose(orig_weights, 0, 1)
-    #             orig_weights = torch.mm(oft_mat.t(), orig_weights)
-    #             orig_weights = torch.transpose(orig_weights, 0, 1)
+#             orig_weights = self.get_base_layer().weight.data
+#             orig_weights = torch.transpose(orig_weights, 0, 1)
+#             orig_weights = torch.mm(oft_mat.t(), orig_weights)
+#             orig_weights = torch.transpose(orig_weights, 0, 1)
 
-    #             self.get_base_layer().weight.data = orig_weights * (1 / oft_s)
+#             self.get_base_layer().weight.data = orig_weights * (1 / oft_s)
 
-    # def get_delta_weight(self, adapter_name) -> tuple[torch.Tensor, torch.Tensor]:
-    #     """
-    #     Compute the delta weight for the given adapter.
+# def get_delta_weight(self, adapter_name) -> tuple[torch.Tensor, torch.Tensor]:
+#     """
+#     Compute the delta weight for the given adapter.
 
-    #     Args:
-    #         adapter (str):
-    #             The name of the adapter for which the delta weight should be computed.
-    #     """
-    #     oft_r = self.oft_r[adapter_name]
-    #     oft_s = self.oft_s[adapter_name]
+#     Args:
+#         adapter (str):
+#             The name of the adapter for which the delta weight should be computed.
+#     """
+#     oft_r = self.oft_r[adapter_name]
+#     oft_s = self.oft_s[adapter_name]
 
-    #     rank = self.r[adapter_name]
-    #     coft = self.coft[adapter_name]
-    #     eps = self.eps[adapter_name]
+#     rank = self.r[adapter_name]
+#     coft = self.coft[adapter_name]
+#     eps = self.eps[adapter_name]
 
-    #     if coft:
-    #         with torch.no_grad():
-    #             oft_r.copy_(self._project_batch(oft_r, eps=eps))
+#     if coft:
+#         with torch.no_grad():
+#             oft_r.copy_(self._project_batch(oft_r, eps=eps))
 
-    #     orth_rotate = self._cayley_batch(oft_r)
-    #     weight = self._block_diagonal(orth_rotate, rank)
+#     orth_rotate = self._cayley_batch(oft_r)
+#     weight = self._block_diagonal(orth_rotate, rank)
 
-    #     return weight, oft_s
+#     return weight, oft_s
 
-    # def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
-    #     previous_dtype = x.dtype
+# def forward(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+#     previous_dtype = x.dtype
 
-    #     if self.disable_adapters:
-    #         if self.merged:
-    #             self.unmerge()
-    #         result = self.base_layer(x, *args, **kwargs)
-    #     elif self.merged:
-    #         result = self.base_layer(x, *args, **kwargs)
-    #     else:
-    #         oft_rotation = torch.eye(
-    #             self.in_features, device=x.device, dtype=previous_dtype
-    #         )
-    #         oft_scale = torch.ones(
-    #             (int(self.out_features), 1), device=x.device, dtype=previous_dtype
-    #         )
+#     if self.disable_adapters:
+#         if self.merged:
+#             self.unmerge()
+#         result = self.base_layer(x, *args, **kwargs)
+#     elif self.merged:
+#         result = self.base_layer(x, *args, **kwargs)
+#     else:
+#         oft_rotation = torch.eye(
+#             self.in_features, device=x.device, dtype=previous_dtype
+#         )
+#         oft_scale = torch.ones(
+#             (int(self.out_features), 1), device=x.device, dtype=previous_dtype
+#         )
 
-    #         for active_adapter in self.active_adapters:
-    #             if active_adapter not in self.oft_r.keys():
-    #                 continue
-    #             oft_r = self.oft_r[active_adapter]
-    #             oft_s = self.oft_s[active_adapter]
-    #             dropout = self.oft_dropout[active_adapter]
+#         for active_adapter in self.active_adapters:
+#             if active_adapter not in self.oft_r.keys():
+#                 continue
+#             oft_r = self.oft_r[active_adapter]
+#             oft_s = self.oft_s[active_adapter]
+#             dropout = self.oft_dropout[active_adapter]
 
-    #             rank = self.r[active_adapter]
-    #             coft = self.coft[active_adapter]
-    #             eps = self.eps[active_adapter]
+#             rank = self.r[active_adapter]
+#             coft = self.coft[active_adapter]
+#             eps = self.eps[active_adapter]
 
-    #             if coft:
-    #                 with torch.no_grad():
-    #                     oft_r.copy_(self._project_batch(oft_r, eps=eps))
+#             if coft:
+#                 with torch.no_grad():
+#                     oft_r.copy_(self._project_batch(oft_r, eps=eps))
 
-    #             orth_rotate = self._cayley_batch(oft_r)
-    #             orth_rotate = dropout(orth_rotate)
-    #             oft_mat = self._block_diagonal(orth_rotate, rank)
+#             orth_rotate = self._cayley_batch(oft_r)
+#             orth_rotate = dropout(orth_rotate)
+#             oft_mat = self._block_diagonal(orth_rotate, rank)
 
-    #             oft_rotation = oft_mat @ oft_rotation
-    #             oft_scale = oft_s * oft_scale
+#             oft_rotation = oft_mat @ oft_rotation
+#             oft_scale = oft_s * oft_scale
 
-    #         x = x.to(self.get_base_layer().weight.data.dtype)
+#         x = x.to(self.get_base_layer().weight.data.dtype)
 
-    #         orig_weight = self.get_base_layer().weight.data
-    #         orig_weight = torch.transpose(orig_weight, 0, 1)
-    #         oft_rotation = oft_rotation.to(previous_dtype)
-    #         orig_weight = orig_weight.to(previous_dtype)
-    #         rotated_weight = torch.mm(oft_rotation, orig_weight)
-    #         rotated_weight = torch.transpose(rotated_weight, 0, 1)
+#         orig_weight = self.get_base_layer().weight.data
+#         orig_weight = torch.transpose(orig_weight, 0, 1)
+#         oft_rotation = oft_rotation.to(previous_dtype)
+#         orig_weight = orig_weight.to(previous_dtype)
+#         rotated_weight = torch.mm(oft_rotation, orig_weight)
+#         rotated_weight = torch.transpose(rotated_weight, 0, 1)
 
-    #         scaled_rotated_weight = rotated_weight * oft_scale
+#         scaled_rotated_weight = rotated_weight * oft_scale
 
-    #         scaled_rotated_weight = scaled_rotated_weight.to(previous_dtype)
-    #         bias = (
-    #             self.get_base_layer().bias.to(previous_dtype)
-    #             if self.get_base_layer().bias is not None
-    #             else None
-    #         )
-    #         result = F.linear(input=x, weight=scaled_rotated_weight, bias=bias)
+#         scaled_rotated_weight = scaled_rotated_weight.to(previous_dtype)
+#         bias = (
+#             self.get_base_layer().bias.to(previous_dtype)
+#             if self.get_base_layer().bias is not None
+#             else None
+#         )
+#         result = F.linear(input=x, weight=scaled_rotated_weight, bias=bias)
 
-    #     result = result.to(previous_dtype)
-    #     return result
+#     result = result.to(previous_dtype)
+#     return result
 
-    # def __repr__(self) -> str:
-    #     rep = super().__repr__()
-    #     return "oft." + rep
-    
-    
+# def __repr__(self) -> str:
+#     rep = super().__repr__()
+#     return "oft." + rep

@@ -65,7 +65,9 @@ def create_csr_tensor(row_indices, col_indices, values, num_rows, num_cols):
     crow_indices[1:] = torch.cumsum(counts, dim=0)
 
     # Step 3: Create the CSR tensor
-    csr_tensor = torch.sparse_csr_tensor(crow_indices, sorted_col_indices, sorted_values, size=(num_rows, num_cols))
+    csr_tensor = torch.sparse_csr_tensor(
+        crow_indices, sorted_col_indices, sorted_values, size=(num_rows, num_cols)
+    )
 
     return csr_tensor
 

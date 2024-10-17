@@ -325,5 +325,5 @@ class MaskedLinearSparseAdapter(SparseMaskAdapter):
             self.dense_layer_bias,
             self.config,
             parent_name=self.name,
-            init_all_ones=config.init_all_ones
+            init_all_ones=config.init_all_ones,
         )

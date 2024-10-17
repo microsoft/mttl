@@ -222,9 +222,7 @@ def test_snip_updater(dummy_batch):
             assert parent_module.mask_updater._mask_update_steps == 1
 
 
-@pytest.mark.parametrize(
-    "sps_config_cls", [MLSConfig, ScatteredConfig]
-)
+@pytest.mark.parametrize("sps_config_cls", [MLSConfig, ScatteredConfig])
 def test_snip_weight_accumulation(sps_config_cls):
     os.environ["CONFIG_PATH"] = "./"
 
@@ -237,11 +235,10 @@ def test_snip_weight_accumulation(sps_config_cls):
         block_size=10,
         mask_updater="snip",
     )
-    
+
     adapter = ScatteredSparseAdapter(adapter_config, nn.Linear(100, 100))
     snip_module = adapter.mask_updater
     sparse_layer = adapter.sparse_layer
-    
 
     assert snip_module.accumulated_sparse_weights.sum() == 0.0
     sparse_weights = sparse_layer.sparse_weights
