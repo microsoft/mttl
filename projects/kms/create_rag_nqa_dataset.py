@@ -24,6 +24,12 @@ def main():
     parser.add_argument("--top_k", type=int, default=20)
     parser.add_argument("--num_workers", type=int, default=1)
     parser.add_argument("--worker_id", type=int, default=0)
+    parser.add_argument(
+        "--token_overlap",
+        type=int,
+        default=0,
+        help="chunk (text segment between two `\n`) overlap between RAG passages",
+    )
 
     args = parser.parse_args()
 
@@ -51,8 +57,10 @@ def main():
             doc_id = example[args.document_id_field]
 
             # first, we chunk the text into blocks
-            for chunk in chunk_text(document, tokenizer, args.block_size):
-                chunk_id, text = chunk
+            for chunk_idx, chunk in enumerate(
+                chunk_text(document, tokenizer, args.block_size, args.token_overlap)
+            ):
+                _, text = chunk
                 chunked_dataset += [text]
 
             # second, we preprocess the questions
