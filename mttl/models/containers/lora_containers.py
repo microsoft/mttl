@@ -96,7 +96,7 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
 
     def merge_with_layer(self):
         """Merge all experts with the layer."""
-        if not len(self.experts):
+        if not len(self):
             return
 
         for expert_name in list(self.expert_infos.keys()):
@@ -206,7 +206,7 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
                 )
             else:
                 # we have no indices, so we assume that we have weights for all the experts
-                assert selection.weights.shape[-1] == len(self.experts)
+                assert selection.weights.shape[-1] == len(self)
 
                 warn_once(
                     "Creating skilled loras for all experts, you might want to use CoalescedLoRAContainer instead, set USE_COALESCED_LORA=True in your environment variables."
@@ -233,7 +233,7 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
             return module_output.view(input.shape[0], input.shape[1], -1)
 
     def forward(self, input, **kwargs):
-        if len(self.experts) > 0 and self._enabled:
+        if len(self) > 0 and self._enabled:
             selection = self.selector(input, container=self, **kwargs)
             return self.route(input, selection, **kwargs)
         return self.layer(input)
@@ -401,7 +401,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             raise ValueError("Unknown selection type.")
 
     def forward(self, input, **kwargs):
-        if len(self.experts) > 0 and self._enabled:
+        if len(self) > 0 and self._enabled:
             selection = self.selector(input, container=self, **kwargs)
             return self.route(input, selection, **kwargs)
         return self.layer(input)
