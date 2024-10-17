@@ -273,11 +273,12 @@ class SparseMaskAdapter(Modifier, ModifyMixin):
             )
 
     def forward(self, input):
-        if self.mask_updater is not None:
+        if self.mask_updater is not None and self.training:
             return self.mask_updater(self.sparse_layer, input)
         return self.sparse_layer(input)
 
 
+@dataclass
 class ScatteredConfig(SparseMaskConfig):
     pass
 
@@ -302,7 +303,7 @@ class ScatteredSparseAdapter(SparseMaskAdapter):
             parent_name=self.name,
         )
 
-
+@dataclass
 class MLSConfig(SparseMaskConfig):
     init_all_ones: bool = False
 

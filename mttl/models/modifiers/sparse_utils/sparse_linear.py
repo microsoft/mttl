@@ -290,7 +290,7 @@ class MaskedLinear(SparseLinear, nn.Module):
         self.block_size = config.block_size
         self.keep_ratio = config.keep_ratio
         if init_all_ones:
-            self.binary_mask = torch.ones_like(
+            binary_mask = torch.ones_like(
                 self.base_weight, dtype=self.base_weight.dtype
             )
         else:
@@ -300,17 +300,18 @@ class MaskedLinear(SparseLinear, nn.Module):
                 self.base_weight.shape,
                 self.block_size,
             )
-            self.binary_mask = binary_mask.to(self.device)
+            binary_mask = binary_mask.to(self.device)
         self.sparse_weights = nn.Parameter(
             torch.zeros_like(
                 self.base_weight, dtype=self.base_weight.dtype, device=self.device
             ),
             requires_grad=True,
         )
+        self.register_buffer("binary_mask", binary_mask)
 
     def forward(self, x):
         base_out = torch.nn.functional.linear(x, self.base_weight, self.base_bias)
-        self.binary_mask = self.binary_mask.to(self.device).to(self.base_weight.dtype)
+        # self.binary_mask = self.binary_mask.to(self.device).to(self.base_weight.dtype)
         sparse_out = torch.nn.functional.linear(
             x, self.sparse_weights * self.binary_mask, self.sparse_bias
         )
