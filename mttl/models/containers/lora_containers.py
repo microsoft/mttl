@@ -12,7 +12,13 @@ from mttl.models.containers.selectors.selector_output import (
     SelectorOutput,
 )
 from mttl.models.library.expert import Expert
-from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
+from mttl.models.modifiers.lora import (
+    LoRA,
+    LoRAConfig,
+    LoRAView,
+    SkilledLoRA,
+    SkilledLoRAConfig,
+)
 from mttl.models.modifiers.modify_model import get_modifier_name
 
 
@@ -38,7 +44,9 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
             )
 
         self.merged_expert_names = []
-        self.experts = nn.ModuleDict({})
+        self.config = config
+        self.lora_a = nn.ParameterDict({})
+        self.lora_b = nn.ParameterDict({})
 
     def merge_expert(self, expert_name):
         if expert_name not in self.expert_infos:
@@ -46,9 +54,10 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
                 "Expert {} not found in the list of experts".format(expert_name)
             )
 
-        self.experts[expert_name].merge_with_layer()
+        self.get(expert_name).merge_with_layer()
         self.expert_infos.pop(expert_name)
-        self.experts.pop(expert_name)
+        self.lora_a.pop(expert_name)
+        self.lora_b.pop(expert_name)
         self.merged_expert_names.append(expert_name)
 
     def on_add_expert(
@@ -67,24 +76,26 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
             get_modifier_name(expert.expert_config)
         ]
 
-        modifier_module = LoRA_cls(
-            expert.expert_config, self.layer, layer_name=self.__layer_name__
-        )
-
         if expert.expert_weights:
             expert_weights = filter_expert_weights(
                 self.__layer_name__, expert.expert_weights
             )
-            modifier_module.load_lora_weights(expert_weights)
+        else:
+            # create a new modifier module to initialize the weights
+            modifier = LoRA_cls(
+                expert.expert_config, self.layer, layer_name=self.__layer_name__
+            )
+            expert_weights = modifier.state_dict()
+
+        self.lora_a[expert.name] = expert_weights["lora_a"]
+        self.lora_b[expert.name] = expert_weights["lora_b"]
 
         if action == "merge":
             # weight is merged with layer so we can discard it now
-            modifier_module.merge_with_layer()
-            self.merged_expert_names.append(expert.name)
-        else:
-            self.experts[expert.name] = modifier_module
+            self.merge_with_layer(expert.name)
 
     def merge_with_layer(self):
+        """Merge all experts with the layer."""
         if not len(self.experts):
             return
 
@@ -228,7 +239,7 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
         return self.layer(input)
 
     def __getitem__(self, name):
-        return self.experts[name]
+        return LoRAView(self.config, self.layer, self.lora_a[name], self.lora_b[name])
 
 
 class CoalescedLoRAExpertContainer(LoRAExpertContainer):
