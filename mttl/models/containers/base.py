@@ -90,15 +90,13 @@ class ExpertContainer(nn.Module, Container):
                 "Cannot set is_default if this expert is merged, change to 'route'."
             )
 
-        update = action != "merge"
-        if update:
-            self.expert_infos[expert.name] = expert_info
-            self.default_expert_name: str | None = (
-                expert.name if is_default else self.default_expert_name
-            )
+        self.expert_infos[expert.name] = expert_info
+        self.default_expert_name: str | None = (
+            expert.name if is_default else self.default_expert_name
+        )
 
         self.on_add_expert(expert, action=action, is_default=is_default)
-        if update:
+        if action != "merge":
             # if a new expert was added, we update the selector and information meta-data
             self.selector.add_expert(
                 expert.name, expert_info=expert_info, is_default=is_default
@@ -126,7 +124,8 @@ class ExpertContainer(nn.Module, Container):
 
     def export_experts(self) -> List[Expert]:
         experts = []
-        for name, expert_module in self.experts.items():
+        for name in self.expert_names:
+            expert_module = self.get(name)
             expert = Expert(
                 expert_info=self.expert_infos[name],
                 expert_weights={
@@ -160,7 +159,7 @@ class ExpertContainer(nn.Module, Container):
         if type(key) == int:
             key = self.expert_names[key]
 
-        if key not in self.experts:
+        if key not in self.expert_infos:
             if self.default_expert_name is None:
                 raise ValueError(
                     "Expert with name {} does not exist and no default expert is set.".format(
