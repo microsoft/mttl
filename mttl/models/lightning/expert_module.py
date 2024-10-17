@@ -135,6 +135,10 @@ class ExpertModule(LightningTrainingMixin, LightningEfficientCheckpoint):
             load_in_4bit=getattr(self.hparams, "load_in_4bit", False),
             load_in_8bit=getattr(self.hparams, "load_in_8bit", False),
         )
+    
+    @property
+    def generation_config(self):
+        return self.model.generation_config
 
     def on_save_checkpoint(self, ckpt):
         super().on_save_checkpoint(ckpt)
