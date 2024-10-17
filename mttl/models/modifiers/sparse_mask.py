@@ -62,7 +62,7 @@ class SNIPMaskUpdater(MaskUpdater):
     It is used to periodically re-calculate the sparse mask indices a la SNIP (https://arxiv.org/pdf/1810.02340).
     To recalculate the mask, it uses a couple of incoming mini-batches to estimate the importance of each parameter.
 
-    It accumulates learned weights in a dense CPU matrix. 
+    It accumulates learned weights in a dense CPU matrix.
     This is useful e.g. to make sure that the weights that have been learned in the past and are selected again are not reinitialized to 0.
     """
 
