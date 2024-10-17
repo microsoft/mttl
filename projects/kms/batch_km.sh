@@ -34,6 +34,12 @@ DOCUMENT_IDS=$(awk -v wid=$WORKER_ID -v nworkers=$NUM_WORKERS '{
     if ((NR - 1) % nworkers == wid) print $0
 }' "$INPUT_FILE")
 
+# Check if DOCUMENT_IDS is empty
+if [ -z "$DOCUMENT_IDS" ]; then
+    echo "No documents assigned to worker $WORKER_ID. Exiting."
+    exit 0
+fi
+
 export PYTHONPATH=$PWD/../../
 ls -l $PWD/../../
 
