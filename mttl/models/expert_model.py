@@ -230,7 +230,7 @@ class MultiExpertMixin:
         containers = []
         for _, module in self.model.named_modules():
             for _, child in dict(module.named_children()).items():
-                if isinstance(child, ExpertContainer) and len(child.experts) > 0:
+                if isinstance(child, ExpertContainer):
                     containers.append(child)
         return containers
 
@@ -247,7 +247,7 @@ class MultiExpertMixin:
         """
         for _, module in self.model.named_modules():
             for c_name, child in dict(module.named_children()).items():
-                if isinstance(child, ExpertContainer) and len(child.experts) > 0:
+                if isinstance(child, ExpertContainer):
                     setattr(module, c_name, child.layer)
 
         self.selector_cache.clear()
