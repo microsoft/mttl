@@ -87,12 +87,12 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
             )
             expert_weights = modifier.state_dict()
 
-        self.lora_a[expert.name] = expert_weights["lora_a"]
-        self.lora_b[expert.name] = expert_weights["lora_b"]
+        self.lora_a[expert.name] = expert_weights["lora_a"].to(self.layer.weight.device)
+        self.lora_b[expert.name] = expert_weights["lora_b"].to(self.layer.weight.device)
 
         if action == "merge":
             # weight is merged with layer so we can discard it now
-            self.merge_with_layer(expert.name)
+            self.merge_expert(expert.name)
 
     def merge_with_layer(self):
         """Merge all experts with the layer."""
