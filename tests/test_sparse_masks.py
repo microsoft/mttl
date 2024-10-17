@@ -267,7 +267,7 @@ def test_snip_weight_accumulation(sps_config_cls):
     assert selected_indices.sum() == 200.0
     snip_module._selected_indices = selected_indices.float().to_sparse_coo()
     sparse_layer.sparse_weights *= 0.0
-    snip_module.switch_to_weights_update_modus(sparse_layer)
+    snip_module.switch_to_weights_update_mode(sparse_layer)
     assert sparse_layer.sparse_weights.sum() == 100.0
 
 

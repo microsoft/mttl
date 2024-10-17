@@ -37,7 +37,7 @@ class SparseMaskConfig(SparseLinearConfig):
     mask_reselection_interval: int = (
         100  # every how many steps to switch to mask update regime
     )
-    n_max_mask_reseleciton: int = (
+    n_max_mask_reselection: int = (
         -1
     )  # how many mask updates to do. If > 0, the mask updater will be removed after this many updates
     mask_updater: str = None  # "snip"
@@ -62,8 +62,8 @@ class SNIPMaskUpdater(MaskUpdater):
     It is used to periodically re-calculate the sparse mask indices a la SNIP (https://arxiv.org/pdf/1810.02340).
     To recalculate the mask, it uses a couple of incoming mini-batches to estimate the importance of each parameter.
 
-    If accumulates learned weights in a dense CPU matrix. This is useful e.g. to make sure that the weights that have been learned in the past and are selected again are not reinitialized to 0.
-
+    It accumulates learned weights in a dense CPU matrix. 
+    This is useful e.g. to make sure that the weights that have been learned in the past and are selected again are not reinitialized to 0.
     """
 
     def __init__(
@@ -143,7 +143,7 @@ class SNIPMaskUpdater(MaskUpdater):
         )
         self._backward_hooks.append(hook_handle)
 
-    def switch_to_weights_update_modus(self, sparse_layer: SparseLinear):
+    def switch_to_weights_update_mode(self, sparse_layer: SparseLinear):
         self.unregister_hooks()
         self.updating_the_mask = False
         self.sparse_layer_weights, self.sparse_layer_biases = None, None
@@ -191,7 +191,7 @@ class SNIPMaskUpdater(MaskUpdater):
             self._steps_since_last_mask_update % self.config.mask_reselection_interval
             == 0
             and sparse_layer.training
-            and self.config.n_max_mask_reseleciton <= self._n_mask_updates
+            and self.config.n_max_mask_reselection <= self._n_mask_updates
         )
 
     def _time_to_update_sparse_weights(self, sparse_layer: SparseLinear):
@@ -200,7 +200,7 @@ class SNIPMaskUpdater(MaskUpdater):
             and sparse_layer.training
         )
 
-    def prepate_mask_or_weights_learning(self, sparse_layer: SparseLinear):
+    def prepare_mask_or_weights_learning(self, sparse_layer: SparseLinear):
         """
         Currently we have two regimes that we alternate:
         - mask learning: update the non-zero indices
@@ -220,7 +220,7 @@ class SNIPMaskUpdater(MaskUpdater):
         elif self.updating_the_mask and self._time_to_update_sparse_weights(
             sparse_layer
         ):
-            self.switch_to_weights_update_modus(sparse_layer)
+            self.switch_to_weights_update_mode(sparse_layer)
             self._mask_update_steps = 0
             self._steps_since_last_mask_update = 0
 
@@ -228,7 +228,7 @@ class SNIPMaskUpdater(MaskUpdater):
             self._steps_since_last_mask_update += 1
 
     def forward(self, sparse_layer: SparseLinear, x: torch.Tensor):
-        self.prepate_mask_or_weights_learning(sparse_layer)
+        self.prepare_mask_or_weights_learning(sparse_layer)
         bias = (
             self.sparse_layer_biases.detach()
             if self.sparse_layer_biases is not None
