@@ -377,6 +377,7 @@ def add_expert_to_transformer(
             action=action,
             is_default=is_default,
         )
+
     ### PARAM TYING ###
     # Note: because experts are added into expert containers
     # instead of parameter names being e.g. model.layers.4.self_attn.q_proj.lora_a,
@@ -384,12 +385,16 @@ def add_expert_to_transformer(
 
     # For this reason tying with q_proj\\.lora_a|k_proj\\.lora_a|v_proj\\.lora_a will not work,
     # and it has to be q_proj.*\\.lora_a|k_proj.*\\.lora_a|v_proj.*\\.lora_a
-    from mttl.models.modifiers.base import get_target_2_source_param_mapping, tie_params
+    if expert_config.tie_params:
+        from mttl.models.modifiers.base import (
+            get_target_2_source_param_mapping,
+            tie_params,
+        )
 
-    target_2_source_param = get_target_2_source_param_mapping(
-        transformer.named_parameters(), expert_config.tie_params
-    )
-    tie_params(transformer, expert_config, target_2_source_param)
+        target_2_source_param = get_target_2_source_param_mapping(
+            transformer.named_parameters(), expert_config.tie_params
+        )
+        tie_params(transformer, expert_config, target_2_source_param)
 
     if not added_layers:
         raise ValueError(
