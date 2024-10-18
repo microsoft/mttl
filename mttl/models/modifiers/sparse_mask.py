@@ -303,6 +303,7 @@ class ScatteredSparseAdapter(SparseMaskAdapter):
             parent_name=self.name,
         )
 
+
 @dataclass
 class MLSConfig(SparseMaskConfig):
     init_all_ones: bool = False
