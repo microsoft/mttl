@@ -1,4 +1,9 @@
-from nqa_datamodule import NQADatamodule, NQADatasetConfig
+from nqa_datamodule import (
+    MiniNQADatamodule,
+    MiniNQADatasetConfig,
+    NQADatamodule,
+    NQADatasetConfig,
+)
 
 from mttl.datamodule.base import DataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
@@ -7,8 +12,13 @@ from mttl.evaluators.rouge_evaluator import RougeEvaluator
 
 class NQAZeroShotEvaluator(RougeEvaluator):
     def __init__(self, dataset_args, generation_kwargs):
-        datamodule = NQADatamodule(
-            NQADatasetConfig(
+        if dataset_args.dataset_type == "mini_nqa":
+            dm_cls, dm_cfg_cls = MiniNQADatamodule, MiniNQADatasetConfig
+        else:
+            dm_cls, dm_cfg_cls = NQADatamodule, NQADatasetConfig
+
+        datamodule = dm_cls(
+            dm_cfg_cls(
                 dataset=dataset_args.dataset,
                 model=dataset_args.model,
                 model_family=dataset_args.model_family,
