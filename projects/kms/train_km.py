@@ -88,6 +88,10 @@ class DCDTrainer(ExpertModelTrainer):
 
             # Calculate mean magnitude of target states
             mean = torch.sum(torch.abs(target_states)) / (actual_states.size(-1))
+            if actual_states.size(0) != target_states.size(0):
+                # this shouldn't happen, but sometimes it does probably due to weird tokenization issues
+                logger.warning("Skipping batch due to mismatch in shape")
+                continue
 
             losses.append(
                 # Loss is the mean abs difference between target and predicted states,
@@ -95,6 +99,11 @@ class DCDTrainer(ExpertModelTrainer):
                 torch.sum(torch.abs(actual_states - target_states))
                 / (mean * np.prod(target_states.shape))
             )
+
+        if len(losses) == 0:
+            # this happens when shape mismatch due to tokenization issues, should happen rarely
+            fake_loss = actual_states.sum() * 0.0
+            return (fake_loss, outputs.logits) if return_outputs else fake_loss
 
         loss = torch.mean(torch.stack(losses))
 
@@ -171,6 +180,7 @@ def train_km(training_args):
         logger.info("Best model checkpoint: %s", best_model_path)
 
     trainer.save_model(args.output_dir + "/best_model")
+    trainer.save_state(args.output_dir + "/best_model")
 
     # Maybe save to Expert Library
     if args.library_id:

@@ -70,7 +70,7 @@ from mttl.datamodule.base import DataModule, DatasetConfig, get_datamodule
 from mttl.logging import logger, setup_logging
 from mttl.models.expert_model import ExpertModel, ExpertModelConfig
 from mttl.models.get_optimizer import get_optimizer_and_scheduler
-from mttl.utils import remote_login
+from mttl.utils import create_library, remote_login, upload_library
 
 
 @dataclass
@@ -826,6 +826,16 @@ def train_km(training_args):
         logger.info("Best model checkpoint: %s", best_model_path)
 
     trainer.save_model(args.output_dir + "/best_model")
+    trainer.save_state(args.output_dir + "/best_model")
+
+    # Maybe save to Expert Library
+    if args.library_id:
+        expert_library = create_library(args)
+        upload_library(
+            expert_library,
+            best_model_path or model,
+            expert_name=args.finetune_task_name,
+        )
 
 
 if __name__ == "__main__":
