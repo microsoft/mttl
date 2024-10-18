@@ -111,7 +111,7 @@ def train_ke(training_args):
             # Let's provide a fix that works for the current setup
             if training_args.trainable_param_names == ".*lora_[ab].*":
                 logger.warning("Overwriting `trainable_param_names` to include the KE")
-                training_args.trainable_param_names = f".*.{ke_name}.lora_[ab].*"
+                training_args.trainable_param_names = f".*lora_[ab].{ke_name}.*"
             else:
                 raise ValueError(
                     "Please ensure that the Knowledge Extractor will be trained"
