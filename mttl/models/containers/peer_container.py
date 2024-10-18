@@ -115,15 +115,13 @@ class PEERMLPContainer(ExpertContainer, Modifier):
 
     def on_add_expert(self, expert: Expert, **kwargs) -> None:
         """
-        'initialize_experts' is called from here instead of __init__ to allow for laoding expert weights from expert object that is passed here
+        'initialize_experts' is called from here
         """
         expert_config: PEERConfig = expert.expert_config
         if self._num_experts == expert_config.moe__num_experts:
             raise ContainerFullException()
         self.initialize_experts(expert_config)
         self.expert_infos[expert.name] = expert.expert_info
-        if expert.expert_weights:
-            self.load_state_dict(expert.expert_weights)
         self.expert_name = expert.name
 
     def __getitem__(self, name):
