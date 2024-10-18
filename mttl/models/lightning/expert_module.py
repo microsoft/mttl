@@ -24,6 +24,14 @@ torch.set_float32_matmul_precision("high")
 
 
 class LightningTrainingMixin:
+    
+    @property
+    def experts_names(self):
+        return self.model.experts_names
+    
+    def get_expert_instance(self, name):
+        return self.model.get_expert_instance(name)
+    
     @property
     def _log_pref(self):
         return getattr(self.hparams, "logging_prefix", "")
@@ -215,7 +223,7 @@ class MultiExpertModule(LightningTrainingMixin, LightningEfficientCheckpoint):
         return model
 
 
-class MoEModule(LightningEfficientCheckpoint, LightningTrainingMixin):
+class MoEModule(LightningTrainingMixin, LightningEfficientCheckpoint):
     def __init__(
         self,
         model_object: PreTrainedModel = None,
@@ -269,7 +277,7 @@ class MoEModule(LightningEfficientCheckpoint, LightningTrainingMixin):
         )
         model.load_state_dict(ckpt["state_dict"], strict=False)
         return model
-
+    
     def training_step(self, batch, _):
         output, context = self.forward(**batch, return_context=True)
         loss = output.loss
