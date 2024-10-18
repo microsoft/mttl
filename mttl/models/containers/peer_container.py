@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import torch
 from torch import nn
 
@@ -7,14 +9,26 @@ from mttl.models.containers.selectors.selector_output import (
     MultiheadBatchSequenceExpertsAndWeightsSelectorOutput,
 )
 from mttl.models.library.expert import Expert
-from mttl.models.modifiers.mlp import PEERConfig, PEERModifier
+from mttl.models.modifiers.base import Modifier, ModifierConfig
+
+# from mttl.models.modifiers.mlp import PEERConfig, PEERModifier
 
 # diff architectures name those layers differently
 DOWN_NAMES = ["fc1", "c_fc"]
 UP_NAMES = ["fc2", "c_proj"]
 
 
-class PEERMLPContainer(ExpertContainer):
+@dataclass
+class PEERConfig(ModifierConfig):
+    n_heads: int = 8
+    moe__num_experts: int = 100
+    emb_dim: int = 128
+    down_proj_layer: str = "fc1"
+    up_proj_layer: str = "fc2"
+
+
+@Modifier.register("peer", config_cls=PEERConfig)
+class PEERMLPContainer(ExpertContainer, Modifier):
     """
     PEER layer from Mixture of A Million Experts (https://arxiv.org/pdf/2407.04153)
 
@@ -33,7 +47,7 @@ class PEERMLPContainer(ExpertContainer):
         **kwargs,
     ):
         super().__init__(config, module)
-        self.num_experts = 0
+        self._num_experts = 0
         down_names = DOWN_NAMES + [
             config.down_proj_layer
         ]  # names of the up and down projection layers in the MLP block
@@ -55,21 +69,25 @@ class PEERMLPContainer(ExpertContainer):
         self.dtype = next(self.layer.parameters()).dtype
 
         self.layer = nn.Identity()
+        self.expert_name = None
         self.layer.in_features = self.input_dim
-        self.experts = PEERModifier(config)
+
+    @property
+    def num_experts(self):
+        return self._num_experts
 
     def initialize_experts(self, expert_config: PEERConfig) -> None:
-        self.num_experts = expert_config.moe_num_experts
+        self._num_experts = expert_config.moe__num_experts
         assert (
-            self.num_experts**0.5
+            self._num_experts**0.5
         ).is_integer(), "Number of experts must be a square number"
         self.peer_weight_down_embed = nn.Embedding(
-            num_embeddings=self.num_experts,
+            num_embeddings=self._num_experts,
             embedding_dim=self.input_dim,
             dtype=self.dtype,
         )
         self.peer_weight_up_embed = nn.Embedding(
-            num_embeddings=self.num_experts,
+            num_embeddings=self._num_experts,
             embedding_dim=self.output_dim,
             dtype=self.dtype,
         )
@@ -96,10 +114,22 @@ class PEERMLPContainer(ExpertContainer):
         return self.on_add_expert(expert, **kwargs)
 
     def on_add_expert(self, expert: Expert, **kwargs) -> None:
+        """
+        'initialize_experts' is called from here in order not to break logic in expert model
+        """
         expert_config: PEERConfig = expert.expert_config
-        if self.num_experts == expert_config.moe_num_experts:
+        if self._num_experts == expert_config.moe__num_experts:
             raise ContainerFullException()
         self.initialize_experts(expert_config)
+        self.expert_infos[expert.name] = expert.expert_info
+        self.expert_name = expert.name
 
-    def __getitem__(self, key):
-        pass
+    def __getitem__(self, name):
+        if name != self.expert_name:
+            raise ValueError(
+                f"Expert with name {name} does not exist in this container."
+            )
+        return self
+
+    def __len__(self):
+        return self._num_experts

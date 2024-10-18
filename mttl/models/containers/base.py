@@ -35,6 +35,11 @@ class ExpertContainer(nn.Module, Container):
         self.selector = selector or TaskNameSelector()
         self._default_expert_name = None
         self.expert_infos = {}
+        self.experts = nn.ModuleDict({})
+
+    @property
+    def num_experts(self):
+        return len(self.experts)
 
     @property
     def default_expert_name(self):

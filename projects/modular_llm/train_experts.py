@@ -7,6 +7,7 @@ from pytorch_lightning import Trainer, seed_everything
 from mttl.arguments import Args, ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import logger, setup_logging
+from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.lightning.callbacks import (
     DownstreamEvalCallback,
@@ -200,7 +201,8 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
                 if isinstance(module, MoEModule):
                     with expert_library.batched_commit():
                         for expert_name in module.experts_names:
-                            expert = module.get_expert_instance(expert_name)
+                            expert: Expert = module.get_expert_instance(expert_name)
+                            expert.expert_info.training_config = args
                             expert_library.add_expert(expert, expert_name)
                 elif isinstance(module, ExpertModule):
                     expert = module.as_expert()

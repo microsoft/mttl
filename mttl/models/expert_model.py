@@ -163,7 +163,7 @@ class MultiExpertMixin:
         containers = []
         for _, module in self.model.named_modules():
             for _, child in dict(module.named_children()).items():
-                if isinstance(child, ExpertContainer) and len(child.experts) > 0:
+                if isinstance(child, ExpertContainer) and child.num_experts > 0:
                     containers.append(child)
         return containers
 
