@@ -7,7 +7,6 @@ from abc import ABC, abstractmethod
 import pytorch_lightning as pl
 import torch
 import tqdm
-import wandb
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning import callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
@@ -15,11 +14,14 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch.optim import Optimizer
 from transformers.utils import ModelOutput
 
+import wandb
 from mttl.datamodule.base import DataModule
 from mttl.evaluators import MMLUEvaluator
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.evaluators import Evaluator
 from mttl.logging import logger
+from mttl.models.modifiers.base import ModifierConfig
+from mttl.models.modifiers.sparse_mask import SparseMaskAdapter
 from mttl.models.utils import transfer_batch_to_device
 
 DEBUG = False
