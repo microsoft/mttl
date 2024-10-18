@@ -88,7 +88,6 @@ def main():
         print(f"Length of concatenated dataset: {len(concatenated_splits[split])}")
 
     # Save concatenated dataset
-    breakpoint()
     concatenated_dataset.push_to_hub(args.hf_id)
     print(f"Pushing concatenated dataset to {args.hf_id}")
 
