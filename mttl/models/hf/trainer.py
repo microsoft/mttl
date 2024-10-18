@@ -149,7 +149,6 @@ class ExpertModelTrainer(Trainer):
 class LMTrainer(ExpertModelTrainer):
     """Standard next-token prediction objective"""
 
-    # @InfoContainer.wrap_with_context(idx=1)
     def compute_loss(self, model, batch, return_outputs=False):
 
         input_ids = batch.pop("input_ids")
