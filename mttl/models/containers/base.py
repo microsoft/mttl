@@ -40,7 +40,7 @@ class ExpertContainer(nn.Module, Container):
     @property
     def num_experts(self):
         return len(self.experts)
-    
+
     @property
     def default_expert_name(self):
         return self._default_expert_name
