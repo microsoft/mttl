@@ -35,7 +35,7 @@ pip install -e ".[flash-attn]"
 First of all, download and prepare [FLANv2](https://github.com/google-research/FLAN/tree/main/flan/v2) dataset. We limit each task to having 10000 examples for computational reasons. We provide a simple script to do all the preprocessing as below:
 
 ```bash
-python create_flan.py flan --dataset_library_id=local://modular_artifacts/flan-flat
+python create_flan.py --dataset_library_id=local://modular_artifacts/flan-flat
 ```
 
 
