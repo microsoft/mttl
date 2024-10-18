@@ -49,25 +49,31 @@ class PEERMLPContainer(ExpertContainer):
         self.activation = module.act
         self.input_dim = getattr(module, down_names[n_idx]).in_features
         self.output_dim = getattr(module, up_names[n_idx]).out_features
+
         if selector_config:
             self.selector = PKSSelector(selector_config, in_d=self.input_dim)
+
         # to enable selector instantiation without having to cary the original module's weights
         self.dtype = next(self.layer.parameters()).dtype
 
         self.layer = nn.Identity()
         self.layer.in_features = self.input_dim
+
         self.experts = PEERModifier(config)
 
     def initialize_experts(self, expert_config: PEERConfig) -> None:
         self.num_experts = expert_config.moe_num_experts
+
         assert (
             self.num_experts**0.5
         ).is_integer(), "Number of experts must be a square number"
+
         self.peer_weight_down_embed = nn.Embedding(
             num_embeddings=self.num_experts,
             embedding_dim=self.input_dim,
             dtype=self.dtype,
         )
+
         self.peer_weight_up_embed = nn.Embedding(
             num_embeddings=self.num_experts,
             embedding_dim=self.output_dim,
@@ -97,8 +103,10 @@ class PEERMLPContainer(ExpertContainer):
 
     def on_add_expert(self, expert: Expert, **kwargs) -> None:
         expert_config: PEERConfig = expert.expert_config
+
         if self.num_experts == expert_config.moe_num_experts:
             raise ContainerFullException()
+
         self.initialize_experts(expert_config)
 
     def __getitem__(self, key):

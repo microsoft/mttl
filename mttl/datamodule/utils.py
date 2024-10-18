@@ -106,7 +106,7 @@ def get_tokenizer(config, for_generation=False):
 
 def get_tokenizer_with_args(
     model_name,
-    model_family,
+    model_family="gpt",
     padding_side="right",
     truncation_side="right",
     for_generation=False,

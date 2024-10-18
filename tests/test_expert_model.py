@@ -3,7 +3,6 @@ import pytest
 from pytorch_lightning import seed_everything
 from transformers import AutoModelForCausalLM
 
-from mttl.models.containers import get_modifiable_modules
 from mttl.models.containers.selectors.arrow_selector import (
     ArrowSelector,
     ArrowSelectorConfig,
@@ -17,6 +16,7 @@ from mttl.models.containers.selectors.poly_selector import (
     PolySelector,
     PolySelectorConfig,
 )
+from mttl.models.containers.utils import get_modifiable_modules
 from mttl.models.expert_model import (
     ExpertModel,
     ExpertModelConfig,
@@ -165,6 +165,7 @@ def test_get_modifiable_modules(monkeypatch):
     multi_expert_model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
     one_expert_modules = dict(get_modifiable_modules(multi_expert_model.model))
     one_expert_all_modules = dict(multi_expert_model.model.named_modules())
+    one_expert_all_params = dict(multi_expert_model.model.named_parameters())
     assert len(one_expert_all_modules.keys()) == 248
     assert one_expert_modules.keys() == transformer_modules.keys()
     assert len(one_expert_all_modules) > len(transformer_modules)
@@ -173,8 +174,10 @@ def test_get_modifiable_modules(monkeypatch):
     multi_expert_model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"))
     two_expert_modules = dict(get_modifiable_modules(multi_expert_model.model))
     two_expert_all_modules = dict(multi_expert_model.model.named_modules())
+    two_expert_all_params = dict(multi_expert_model.model.named_parameters())
     assert two_expert_modules.keys() == transformer_modules.keys()
-    assert len(two_expert_all_modules) > len(one_expert_all_modules)
+    assert len(two_expert_all_modules) == len(one_expert_all_modules)
+    assert len(two_expert_all_params) > len(one_expert_all_params)
 
 
 def test_get_modifiable_modules_coalesced(monkeypatch):
@@ -191,7 +194,8 @@ def test_get_modifiable_modules_coalesced(monkeypatch):
     multi_expert_model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
     one_expert_modules = dict(get_modifiable_modules(multi_expert_model.model))
     one_expert_all_modules = dict(multi_expert_model.model.named_modules())
-    assert len(one_expert_all_modules.keys()) == 236
+
+    assert len(one_expert_all_modules.keys()) == 260
     assert one_expert_modules.keys() == transformer_modules.keys()
     assert len(one_expert_all_modules) > len(transformer_modules)
 

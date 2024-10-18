@@ -534,3 +534,30 @@ class TaskNameSelector(Selector):
         raise NotImplementedError(
             "Not required for TaskNameSelector as it performs hard selection. Use 'get_expert_instance' instead."
         )
+
+
+@dataclass
+class KnowledgeExtractorSelectorConfig(SelectorConfig):
+    field_name: str = "task_names"
+    ke_experts_prefix: str = "KE"
+
+
+@Selector.register("ke_selector", KnowledgeExtractorSelectorConfig)
+class KnowledgeExtractorSelector(Selector):
+
+    @forward_with_cache
+    def forward(self, input, **kwargs) -> BatchExpertsSelectorOutput:
+
+        assert self.routing_infos and hasattr(
+            self.routing_infos, self.config.field_name
+        )
+        task_names = getattr(self.routing_infos, self.config.field_name)
+        ke_expert_name = [
+            task for task in self.expert_names if self.config.ke_experts_prefix in task
+        ]
+        assert len(ke_expert_name) == 1
+
+        expert_names = [[ke_expert_name[0], task_name] for task_name in task_names]
+        weights = input.new(size=(len(expert_names), 2)).fill_(0.5)
+
+        return BatchExpertsAndWeightsSelectorOutput(expert_names, weights)

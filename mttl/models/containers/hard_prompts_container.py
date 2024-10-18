@@ -65,31 +65,6 @@ class HardPromptDecoderWrapper:
         return self.transformer.generate(*args, **kwargs)
 
 
-def add_hard_prompt_to_transformer(
-    transformer,
-    expert: Expert,
-    action="route",
-    is_default=False,
-):
-    expert_config = expert.expert_config
-
-    # create a shared prompt container holding the experts
-    if not isinstance(transformer, HardPromptDecoderWrapper):
-        expert_container = HardPromptExpertContainer(
-            expert_config,
-            selector=None,
-        )
-        # patch the decoder
-        transformer = HardPromptDecoderWrapper(transformer, expert_container)
-
-    transformer.add_expert(
-        expert,
-        action=action,
-        is_default=is_default,
-    )
-    return transformer
-
-
 class HardPromptExpertContainer(ExpertContainer):
     def __init__(self, config, selector=None):
         super().__init__(config, layer=None)
@@ -101,16 +76,39 @@ class HardPromptExpertContainer(ExpertContainer):
         self.merged_expert_names = []
         self.experts = nn.ModuleDict({})
 
-    def on_add_expert(
-        self,
+    @classmethod
+    def modify_transformer(
+        cls,
+        transformer,
         expert: Expert,
         action="route",
         is_default=False,
+        **kwargs,
+    ):
+        expert_config = expert.expert_config
+
+        # create a shared prompt container holding the experts
+        if not isinstance(transformer, HardPromptDecoderWrapper):
+            expert_container = cls(
+                expert_config,
+                selector=None,
+            )
+            # patch the decoder
+            transformer = HardPromptDecoderWrapper(transformer, expert_container)
+
+        transformer.add_expert(
+            expert,
+            action=action,
+            is_default=is_default,
+        )
+        return transformer
+
+    def on_add_expert(
+        self,
+        expert: Expert,
+        is_default=False,
     ) -> None:
         from mttl.models.modifiers.modify_model import get_modifier_name
-
-        if action == "merge":
-            raise ValueError("Merging is not supported for hard prompts.")
 
         if get_modifier_name(expert.expert_config) == "hard_prompt":
             expert_module = HardPrompt(
