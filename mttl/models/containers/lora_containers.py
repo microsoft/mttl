@@ -65,7 +65,6 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
     def on_add_expert(
         self,
         expert: Expert,
-        action="route",
         is_default=False,
     ) -> None:
         from mttl.models.containers import filter_expert_weights
@@ -91,10 +90,6 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
 
         self.lora_a[expert.name] = expert_weights["lora_a"].to(self.layer.weight.device)
         self.lora_b[expert.name] = expert_weights["lora_b"].to(self.layer.weight.device)
-
-        if action == "merge":
-            # weight is merged with layer so we can discard it now
-            self.merge_expert(expert.name)
 
     def merge_with_layer(self):
         """Merge all experts with the layer."""
@@ -310,13 +305,8 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         else:
             raise ValueError("Unknown modifier type, expected LoRA or SkilledLoRA.")
 
-    def on_add_expert(self, expert: Expert, action="route", is_default=False) -> None:
+    def on_add_expert(self, expert: Expert, is_default=False) -> None:
         from mttl.models.containers import filter_expert_weights
-
-        if action == "merge":
-            raise ValueError(
-                "Merging is not supported for `CoalescedLoRAExpertContainer`."
-            )
 
         # back-compatibility, in previous versions, the expert config was a training config
         self._check_config(expert.expert_config)

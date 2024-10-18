@@ -50,6 +50,12 @@ class ExpertContainer(nn.Module, Container):
     def enable(self):
         self._enabled = True
 
+    def merge_with_layer(self):
+        raise NotImplementedError("This container does not support merging.")
+
+    def merge_expert(self, expert_name: str):
+        raise NotImplementedError("This container does not support merging.")
+
     @property
     def default_expert_name(self):
         return self._default_expert_name
@@ -96,11 +102,14 @@ class ExpertContainer(nn.Module, Container):
         )
 
         self.on_add_expert(expert, action=action, is_default=is_default)
+
         if action != "merge":
             # if a new expert was added, we update the selector and information meta-data
             self.selector.add_expert(
                 expert.name, expert_info=expert_info, is_default=is_default
             )
+        else:
+            self.merge_expert(expert.name)
 
     @property
     def expert_names(self) -> list:
