@@ -8,12 +8,7 @@ import torch
 from torch import nn
 
 from mttl.logging import warn_once
-from mttl.models.modifiers.base import (
-    MergeableModifierMixin,
-    Modifier,
-    ModifierConfig,
-    ModifyMixin,
-)
+from mttl.models.modifiers.base import MergeableModifierMixin, Modifier, ModifierConfig
 
 
 @dataclass
@@ -25,7 +20,7 @@ class LoRAConfig(ModifierConfig):
 
 
 @Modifier.register("lora", config_cls=LoRAConfig)
-class LoRA(Modifier, MergeableModifierMixin, ModifyMixin):
+class LoRA(Modifier, MergeableModifierMixin):
     def __init__(
         self,
         config: LoRAConfig,
@@ -78,6 +73,7 @@ class LoRA(Modifier, MergeableModifierMixin, ModifyMixin):
         """Merge this adapter with the layer!"""
         if isinstance(self.layer, nn.Linear):
             self.merged_with_layer = True
+
             # for back-compatibility, try the two sides:
             if self.lora_a.data.shape[0] == self.layer.weight.shape[0]:
                 to_merge = self.lora_a.data @ self.lora_b.data

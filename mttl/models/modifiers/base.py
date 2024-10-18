@@ -35,6 +35,10 @@ class Modifier(nn.Module, Registrable):
 
         return self.__layer_name__
 
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        return modify_with_adapter(transformer, config, cls)
+
 
 class MergeableModifierMixin(ABC):
     @abstractmethod
@@ -101,12 +105,6 @@ class AutoModifierConfig(AutoSerializable):
             return AutoSerializable.fromdict(data)
         except ValueError:
             return cls.fromdict_legacy(data)
-
-
-class ModifyMixin:
-    @classmethod
-    def modify_transformer(cls, transformer, config):
-        return modify_with_adapter(transformer, config, cls)
 
 
 def get_target_2_source_param_mapping(
