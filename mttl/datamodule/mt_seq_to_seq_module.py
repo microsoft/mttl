@@ -182,7 +182,6 @@ class FlatMultiTaskModule(DataModule):
                 tokenizer=self.tokenizer,
                 max_input_length=self.config.max_input_length,
             )
-            dev_dataset_aug = dev_dataset_aug.shuffle()
             dev_dataset = dev_dataset_aug.select(range(len(dev_dataset)))
 
             test_dataset_aug = augment_few_shot(
@@ -191,7 +190,6 @@ class FlatMultiTaskModule(DataModule):
                 tokenizer=self.tokenizer,
                 max_input_length=self.config.max_input_length,
             )
-            test_dataset_aug = test_dataset_aug.shuffle()
             test_dataset = test_dataset_aug.select(range(len(test_dataset)))
 
         self.train_dataset = train_dataset
