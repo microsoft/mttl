@@ -23,18 +23,21 @@ class NQAZeroShotEvaluator(RougeEvaluator):
         )
         super().__init__(datamodule, generation_kwargs=generation_kwargs)
 
-    def evaluate(self, model, split="test", **kwargs):
-        if self.datamodule.test_dataset and len(self.datamodule.test_dataset):
-            split_ = "train"
-        elif self.datamodule.dev_dataset and len(self.datatamodule.dev_dataset):
-            split_ = "dev"
-        else:
-            split_ = "test"
+    def evaluate(self, model, split=None, **kwargs):
 
-        # when selecting on document ids, some dataset will be empty,
-        # to make the evaluators not complain, we just set the dataset to the first one that is not empty
-        dataset_ = getattr(self.datamodule, f"{split}_dataset")
-        if not dataset_:
-            split = split_
+        # splits in order of preference
+        splits = ["test", "dev", "train"]
+
+        if split is not None:
+            assert split in splits, f"Split {split} not found in {splits}"
+            dataset = getattr(self.datamodule, f"{split}_dataset")
+            assert dataset and len(
+                dataset
+            ), f"invalid dataset for split {split}, \n{dataset}"
+        else:
+            for split in splits:
+                dataset = getattr(self.datamodule, f"{split}_dataset")
+                if dataset and len(dataset):
+                    break
 
         return super().evaluate(model, split=split, **kwargs)
