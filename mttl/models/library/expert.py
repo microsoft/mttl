@@ -149,6 +149,17 @@ def load_expert(
     from mttl.models.base_model import WEIGHTS_NAME
     from mttl.models.lightning.base_module import CHECKPOINT_PATH_IN_HUB
 
+    # enable ability to load expert from library by doing
+    # expert_path = <hf_id>/<lib_name>/<exp_name>
+    if isinstance(expert_path, str) and "://" in expert_path:
+        from mttl.models.library.expert_library import ExpertLibrary
+
+        assert expert_name is None
+        expert_library, expert_name = expert_path.rsplit("/", 1)
+        return ExpertLibrary.get_expert_library(
+            expert_library, create=False, selection=expert_name
+        )[expert_name]
+
     if expert_library is not None and expert_path in expert_library:
         return expert_library[expert_path]
 
