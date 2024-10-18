@@ -57,9 +57,7 @@ class SparseLinear(ABC):
         self.sparse_bias = None
         if config.use_sparse_bias:
             self.sparse_bias = nn.Parameter(
-                torch.zeros(
-                    self.base_weight.shape[0], dtype=self.base_weight.dtype
-                ),
+                torch.zeros(self.base_weight.shape[0], dtype=self.base_weight.dtype),
                 requires_grad=True,
             )
 
@@ -483,9 +481,7 @@ class BlockSparseLinearModuleScatter(BlockSparseLinearModule):
         parent_name=None,
         sparse_func=None,
     ):
-        super().__init__(
-            weight, bias, config, parent_name, sparse_func
-        )
+        super().__init__(weight, bias, config, parent_name, sparse_func)
         self.sparse_func = BlcokSparseLinearFunction_SP_SCATTER
 
         idxs = torch.tensor(
