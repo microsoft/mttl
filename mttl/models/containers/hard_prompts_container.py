@@ -65,31 +65,6 @@ class HardPromptDecoderWrapper:
         return self.transformer.generate(*args, **kwargs)
 
 
-def add_hard_prompt_to_transformer(
-    transformer,
-    expert: Expert,
-    action="route",
-    is_default=False,
-):
-    expert_config = expert.expert_config
-
-    # create a shared prompt container holding the experts
-    if not isinstance(transformer, HardPromptDecoderWrapper):
-        expert_container = HardPromptExpertContainer(
-            expert_config,
-            selector=None,
-        )
-        # patch the decoder
-        transformer = HardPromptDecoderWrapper(transformer, expert_container)
-
-    transformer.add_expert(
-        expert,
-        action=action,
-        is_default=is_default,
-    )
-    return transformer
-
-
 class HardPromptExpertContainer(ExpertContainer):
     def __init__(self, config, selector=None):
         super().__init__(config, layer=None)
@@ -100,6 +75,33 @@ class HardPromptExpertContainer(ExpertContainer):
         self.default_expert_name = None
         self.merged_expert_names = []
         self.experts = nn.ModuleDict({})
+
+    @classmethod
+    def modify_transformer(
+        cls,
+        transformer,
+        expert: Expert,
+        action="route",
+        is_default=False,
+        **kwargs,
+    ):
+        expert_config = expert.expert_config
+
+        # create a shared prompt container holding the experts
+        if not isinstance(transformer, HardPromptDecoderWrapper):
+            expert_container = cls(
+                expert_config,
+                selector=None,
+            )
+            # patch the decoder
+            transformer = HardPromptDecoderWrapper(transformer, expert_container)
+
+        transformer.add_expert(
+            expert,
+            action=action,
+            is_default=is_default,
+        )
+        return transformer
 
     def on_add_expert(
         self,

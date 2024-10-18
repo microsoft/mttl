@@ -8,12 +8,7 @@ import torch
 from torch import nn
 
 from mttl.logging import warn_once
-from mttl.models.modifiers.base import (
-    MergeableModifierMixin,
-    Modifier,
-    ModifierConfig,
-    ModifyMixin,
-)
+from mttl.models.modifiers.base import MergeableModifierMixin, Modifier, ModifierConfig
 
 
 @dataclass
@@ -25,7 +20,7 @@ class LoRAConfig(ModifierConfig):
 
 
 @Modifier.register("lora", config_cls=LoRAConfig)
-class LoRA(Modifier, MergeableModifierMixin, ModifyMixin):
+class LoRA(Modifier, MergeableModifierMixin):
     def __init__(
         self,
         config: LoRAConfig,

@@ -8,7 +8,6 @@ import torch
 
 from mttl.logging import logger
 from mttl.models.base_model import BaseExpertModel
-from mttl.models.containers import add_expert_to_transformer
 from mttl.models.containers.base import (
     ContainerFullException,
     ExpertContainer,
@@ -353,6 +352,8 @@ class MultiExpertMixin:
         """
         If action is merge, then the expert is merged with the existing model, and we return None.
         """
+        from mttl.models.containers import get_default_container_class
+
         if expert_name is not None:
             # we want to load expert instance with a given name (might be different from the one in the expert instance)
             # we dont want to change expert instance though!
@@ -364,7 +365,7 @@ class MultiExpertMixin:
             modifier_name = expert_instance.expert_config.modifier_name
             selector_config = self._get_selector_config(modifier_name)
 
-            add_expert_to_transformer(
+            get_default_container_class(modifier_name).modify_transformer(
                 self.model,
                 expert_instance,
                 action=action,
@@ -377,7 +378,7 @@ class MultiExpertMixin:
                 self.experts_infos[expert_instance.name] = expert_instance.expert_info
                 # reload the expert instance to fill the weights properly if this was an empty expert
                 expert_instance = self.get_expert_instance(expert_instance.name)
-            return expert_instance
+                return expert_instance
 
     def disable_adapters(self):
         for name, module in self.model.named_modules():

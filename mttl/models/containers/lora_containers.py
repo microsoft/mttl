@@ -67,7 +67,7 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
         expert: Expert,
         is_default=False,
     ) -> None:
-        from mttl.models.containers import filter_expert_weights
+        from mttl.models.containers.utils import filter_expert_weights
 
         # back-compatibility, in previous versions, the expert config was a training config
         self._check_config(expert.expert_config)
@@ -306,7 +306,7 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
             raise ValueError("Unknown modifier type, expected LoRA or SkilledLoRA.")
 
     def on_add_expert(self, expert: Expert, is_default=False) -> None:
-        from mttl.models.containers import filter_expert_weights
+        from mttl.models.containers.utils import filter_expert_weights
 
         # back-compatibility, in previous versions, the expert config was a training config
         self._check_config(expert.expert_config)
