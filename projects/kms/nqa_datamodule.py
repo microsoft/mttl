@@ -41,8 +41,12 @@ class NQADatamodule(DataModule):
                 for j in range(len(examples["questions"][i])):
                     document_id = examples["document_id"][i]
                     question = examples["questions"][i][j]
-                    # take the first answer as the target
-                    answer = examples["answers"][i][j][0]
+
+                    if self.for_generation:
+                        answer = examples["answers"][i][j]
+                    else:
+                        # take the first answer as the target
+                        answer = examples["answers"][i][j][0]
 
                     if self.config.include_context:
                         context = examples["text"][i]
