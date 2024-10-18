@@ -115,7 +115,7 @@ class PEERMLPContainer(ExpertContainer, Modifier):
 
     def on_add_expert(self, expert: Expert, **kwargs) -> None:
         """
-        'initialize_experts' is called from here
+        'initialize_experts' is called from here in order not to break logic in expert model
         """
         expert_config: PEERConfig = expert.expert_config
         if self._num_experts == expert_config.moe__num_experts:
