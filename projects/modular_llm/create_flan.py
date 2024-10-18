@@ -5,7 +5,6 @@ from mttl.models.library.dataset_library import DatasetLibrary
 
 
 @click.command()
-@click.argument("task")
 @click.option(
     "--split",
     type=str,
@@ -38,16 +37,13 @@ from mttl.models.library.dataset_library import DatasetLibrary
     default=True,
     help="Print splits information for each task.",
 )
-def main(task, split, download_size, cutoff, dataset_library_id, verbose):
-    if task == "flan":
-        concatenated_datasets = download_flan(
-            split=split,
-            download_size=download_size,
-            cutoff=cutoff,
-            verbose=verbose,
-        )
-    else:
-        raise ValueError("Unknown task")
+def main(split, download_size, cutoff, dataset_library_id, verbose):
+    concatenated_datasets = download_flan(
+        split=split,
+        download_size=download_size,
+        cutoff=cutoff,
+        verbose=verbose,
+    )
 
     if dataset_library_id is not None:
         print("Pushing dataset to ", dataset_library_id)
