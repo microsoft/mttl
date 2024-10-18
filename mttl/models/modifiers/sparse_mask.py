@@ -90,7 +90,7 @@ class SNIPMaskUpdater(MaskUpdater):
             base_weights_shape, device="cpu", dtype=base_weights_shape_dtype
         )
 
-    def switch_to_mask_update_modus(self, sparse_layer):
+    def switch_to_mask_update_mode(self, sparse_layer):
         self.updating_the_mask = True
         self._selected_indices = None
         base_weights, base_biases, sparse_weights, sparse_biases = (
@@ -117,7 +117,10 @@ class SNIPMaskUpdater(MaskUpdater):
 
         self.sparse_layer_biases = base_biases
         if sparse_biases is not None:
-            self.sparse_layer_biases += sparse_biases
+            if self.sparse_layer_biases is None:
+                self.sparse_layer_biases = sparse_biases.detach()
+            else:
+                self.sparse_layer_biases += sparse_biases.detach()
 
         self.binary_mask = torch.ones_like(
             self.sparse_layer_weights, device=self.sparse_layer_weights.device
@@ -209,7 +212,7 @@ class SNIPMaskUpdater(MaskUpdater):
         Here we figure out what regume we are in.
         """
         if self._time_to_update_mask(sparse_layer) and not self.updating_the_mask:
-            self.switch_to_mask_update_modus(sparse_layer)
+            self.switch_to_mask_update_mode(sparse_layer)
             self._mask_update_steps += 1
 
         elif self.updating_the_mask and not self._time_to_update_sparse_weights(
