@@ -38,6 +38,7 @@ class NQADatamodule(DataModule):
 
             def update_split(item):
                 item["split"] = doc_to_split[item["document_id"]]
+                return item
 
             # Update the Split column
             dataset = dataset.map(update_split)
