@@ -239,5 +239,48 @@ def rank_zero_only_and_wait(before=True, after=True):
     return decorator
 
 
+@rank_zero_only_and_wait(before=False, after=True)
+def create_library(args):
+    from mttl.models.library.expert_library import ExpertLibrary
+
+    expert_library = ExpertLibrary.get_expert_library(
+        repo_id=args.library_id,
+        create=True,
+        destination_id=args.destination_library_id,
+    )
+    return expert_library
+
+
 def generate_random_string(str_len=10):
     return "".join(random.choices(string.ascii_uppercase, k=str_len))
+
+
+@rank_zero_only_and_wait(before=False, after=True)
+def upload_library(expert_library, module_or_path, expert_name=None):
+    from mttl.models.expert_model import ExpertModel, MultiExpertMixin
+    from mttl.models.library.expert import Expert
+    from mttl.models.lightning.base_module import LightningEfficientCheckpoint
+
+    if expert_library is not None:
+        # refresh expert library: so we dont overwrite the readme if the remote has changed.
+        expert_library.refresh_from_remote()
+
+        if isinstance(module_or_path, LightningEfficientCheckpoint):
+            module = module.model
+
+        if isinstance(module_or_path, MultiExpertMixin):
+            with expert_library.batched_commit():
+                for expert_name in module_or_path.experts_names:
+                    expert = module_or_path.get_expert_instance(expert_name)
+                    expert_library.add_expert(expert, expert_name)
+        elif isinstance(module_or_path, ExpertModel):
+            expert = module_or_path.as_expert()
+            expert_name = expert_name or generate_random_string()
+            expert_library.add_expert(expert, expert_name)
+        elif isinstance(module_or_path, Expert):
+            expert_name = expert_name or generate_random_string()
+            expert_library.add_expert(module_or_path, expert_name)
+        elif isinstance(module_or_path, str):
+            expert_library.add_expert_from_ckpt(module_or_path, expert_name)
+        else:
+            raise ValueError("Model class not recognized")
