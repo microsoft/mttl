@@ -13,6 +13,10 @@ from mttl.models.containers.selectors.base import (
     TaskNameSelector,
     TaskNameSelectorConfig,
 )
+from mttl.models.containers.selectors.km_selector import (
+    KnowledgeExtractorSelector,
+    KnowledgeExtractorSelectorConfig,
+)
 from mttl.models.containers.selectors.moe_selector import (
     MOERKHSSelector,
     MOERKHSSelectorConfig,
