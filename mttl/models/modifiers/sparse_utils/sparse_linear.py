@@ -31,6 +31,7 @@ class SparseLinearConfig(ModifierConfig):
     keep_ratio: float = 1.0
     block_size: int = 16  # e.g. 16x16\]
     sps_type: str = "block_sparse"  # ['block_sparse','regular_sparse','row_sparse']
+    use_sparse_bias: bool = True
 
 
 class SparseLinear(ABC):
@@ -40,7 +41,6 @@ class SparseLinear(ABC):
         base_bias,
         config: SparseLinearConfig,
         parent_name=None,
-        use_sparse_bias=False,
         **kwargs,
     ):
         super().__init__()
@@ -55,10 +55,10 @@ class SparseLinear(ABC):
         self.base_weight.requires_grad = False
 
         self.sparse_bias = None
-        if use_sparse_bias:
+        if config.use_sparse_bias:
             self.sparse_bias = nn.Parameter(
-                torch.zeros_like(
-                    self.base_bias, dtype=self.base_bias.dtype, device=self.device
+                torch.zeros(
+                    self.base_weight.shape[0], dtype=self.base_weight.dtype
                 ),
                 requires_grad=True,
             )
@@ -281,11 +281,10 @@ class MaskedLinear(SparseLinear, nn.Module):
         base_bias,
         config: SparseLinearConfig,
         parent_name=None,
-        use_sparse_bias=False,
         init_all_ones=False,
         mask: torch.Tensor = None,
     ):
-        super().__init__(base_weight, base_bias, config, parent_name, use_sparse_bias)
+        super().__init__(base_weight, base_bias, config, parent_name)
 
         self.block_size = config.block_size
         self.keep_ratio = config.keep_ratio
@@ -359,11 +358,10 @@ class SparseLinearModule(SparseWeights, SparseLinear):
         bias,
         config: SparseLinearConfig,
         parent_name=None,
-        use_sparse_bias=False,
         sparse_func=None,
     ):
         SparseWeights.__init__(self, config, weight.shape, weight.dtype, weight.device)
-        SparseLinear.__init__(self, weight, bias, config, parent_name, use_sparse_bias)
+        SparseLinear.__init__(self, weight, bias, config, parent_name)
         self.sparse_func = sparse_func
         if self.sparse_func is None:
             if self.config.sps_type in ["regular_sparse", "row_sparse"]:
@@ -410,7 +408,6 @@ class BlockSparseLinearModule(BlockSparseWeights, SparseLinear):
         bias,
         config: SparseLinearConfig,
         parent_name=None,
-        use_sparse_bias=False,
         sparse_func=None,
     ):
         assert (
@@ -419,7 +416,7 @@ class BlockSparseLinearModule(BlockSparseWeights, SparseLinear):
         BlockSparseWeights.__init__(
             self, config, weight.shape, weight.dtype, weight.device
         )
-        SparseLinear.__init__(self, weight, bias, config, parent_name, use_sparse_bias)
+        SparseLinear.__init__(self, weight, bias, config, parent_name)
         self.sparse_func = sparse_func
         self.sparse_func = BlcokSparseLinearFunction_SP_ADD
         if self.sps_type != "block_sparse":
@@ -484,11 +481,10 @@ class BlockSparseLinearModuleScatter(BlockSparseLinearModule):
         bias,
         config: SparseLinearConfig,
         parent_name=None,
-        use_sparse_bias=False,
         sparse_func=None,
     ):
         super().__init__(
-            weight, bias, config, parent_name, use_sparse_bias, sparse_func
+            weight, bias, config, parent_name, sparse_func
         )
         self.sparse_func = BlcokSparseLinearFunction_SP_SCATTER
 
@@ -536,11 +532,10 @@ class ScatteredSparseLinearModule(SparseWeights, SparseLinear):
         bias,
         config: SparseLinearConfig,
         parent_name=None,
-        use_sparse_bias=False,
     ):
 
         SparseWeights.__init__(self, config, weight.shape, weight.dtype, weight.device)
-        SparseLinear.__init__(self, weight, bias, config, parent_name, use_sparse_bias)
+        SparseLinear.__init__(self, weight, bias, config, parent_name)
 
         idxs = torch.tensor(
             np.array(self.twoD_indices),
@@ -588,7 +583,6 @@ class SpieLSparseLinearModule(SparseLinearModule):
         bias,
         config: SparseLinearConfig,
         parent_name=None,
-        use_sparse_bias=False,
         mask: torch.Tensor = None,
     ):
         super().__init__(
@@ -596,7 +590,6 @@ class SpieLSparseLinearModule(SparseLinearModule):
             bias,
             config,
             parent_name,
-            use_sparse_bias,
             sparse_func=LinearWithSparseDelta,
         )
         indices = torch.tensor(
