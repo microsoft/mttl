@@ -20,6 +20,9 @@ def get_scheduler(optimizer, config):
     elif scheduler_name == "exponential_decay":
         return torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=config.gamma)
     elif scheduler_name == "linear_decay_with_warmup":
+        if config.warmup_steps <= 0:
+            raise ValueError("warmup steps must be > 0")
+
         return get_linear_schedule_with_warmup(
             optimizer, config.warmup_steps, config.total_steps
         )

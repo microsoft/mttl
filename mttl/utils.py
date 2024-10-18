@@ -261,7 +261,6 @@ def upload_library(expert_library, module_or_path, expert_name=None):
     from mttl.models.library.expert import Expert
     from mttl.models.lightning.base_module import LightningEfficientCheckpoint
 
-    breakpoint()
     if expert_library is not None:
         # refresh expert library: so we dont overwrite the readme if the remote has changed.
         expert_library.refresh_from_remote()

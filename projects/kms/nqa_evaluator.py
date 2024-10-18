@@ -14,24 +14,30 @@ class NQAZeroShotEvaluator(RougeEvaluator):
                 model_family=dataset_args.model_family,
                 predict_batch_size=dataset_args.predict_batch_size,
                 finetune_task_name=dataset_args.finetune_task_name,
-                include_context=False,
+                include_context=dataset_args.include_context,
+                subsample_train=dataset_args.subsample_train,
+                subsample_dev=dataset_args.subsample_dev,
+                subsample_test=dataset_args.subsample_test,
             ),
             for_generation=True,
         )
         super().__init__(datamodule, generation_kwargs=generation_kwargs)
 
-    def evaluate(self, model, split="test", **kwargs):
-        if self.datamodule.train_dataset:
-            split_ = "train"
-        elif self.datamodule.dev_dataset:
-            split_ = "dev"
-        else:
-            split_ = "test"
+    def evaluate(self, model, split=None, **kwargs):
 
-        # when selecting on document ids, some dataset will be empty,
-        # to make the evaluators not complain, we just set the dataset to the first one that is not empty
-        dataset_ = getattr(self.datamodule, f"{split}_dataset")
-        if not dataset_:
-            split = split_
+        # splits in order of preference
+        splits = ["test", "dev", "train"]
+
+        if split is not None:
+            assert split in splits, f"Split {split} not found in {splits}"
+            dataset = getattr(self.datamodule, f"{split}_dataset")
+            assert dataset and len(
+                dataset
+            ), f"invalid dataset for split {split}, \n{dataset}"
+        else:
+            for split in splits:
+                dataset = getattr(self.datamodule, f"{split}_dataset")
+                if dataset and len(dataset):
+                    break
 
         return super().evaluate(model, split=split, **kwargs)

@@ -17,7 +17,7 @@ from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
 
 from mttl.datamodule.utils import get_tokenizer
-from mttl.logging import logger
+from mttl.logging import logger, warn_once
 from mttl.registrable import Registrable
 
 
@@ -100,6 +100,7 @@ class DatasetConfig:
     task_id_field: str = "task_id"
     task_name_field: str = "task_name"
     task_source_field: str = "task_source"
+    dataloader_num_workers: int = 8
 
 
 class PackedMixin:
@@ -423,10 +424,17 @@ class DefaultCollator(PackedMixin):
 
         # Otherwise process as expected
         sources = [b["source"] for b in batch]
-        labels = [b["target"] for b in batch]
+        og_labels = [b["target"] for b in batch]
         task_ids = [b.get(self.task_id_field, None) for b in batch]
         task_names = [b.get(self.task_name_field, None) for b in batch]
         task_sources = [b.get(self.task_source_field, None) for b in batch]
+
+        # Only tokenize a single label. Keep all other on
+        if isinstance(og_labels[0], list):
+            warn_once("Multiple labels found per example. Using the first one.")
+            labels = [l[0] for l in og_labels]
+        else:
+            labels = og_labels
 
         output_batch = (
             self.prepare_inputs_for_gpt_family(sources, labels)
@@ -450,7 +458,7 @@ class DefaultCollator(PackedMixin):
 
         output_batch["task_names"] = task_names
         output_batch["sources_texts"] = sources
-        output_batch["labels_texts"] = labels
+        output_batch["labels_texts"] = og_labels
         output_batch["task_sources"] = task_sources
 
         # integrate extra fields in the batch if required
@@ -553,7 +561,7 @@ class DataModule(LightningDataModule, Registrable):
             train_dataset,
             batch_size=self.config.train_batch_size,
             shuffle=True,
-            num_workers=0,
+            num_workers=self.config.dataloader_num_workers,
             pin_memory=True,
             persistent_workers=False,
             collate_fn=self.collate_fn,
@@ -568,7 +576,7 @@ class DataModule(LightningDataModule, Registrable):
             dev_dataset,
             batch_size=self.config.predict_batch_size,
             shuffle=shuffle,
-            num_workers=0,
+            num_workers=self.config.dataloader_num_workers,
             pin_memory=False,
             persistent_workers=False,
             collate_fn=self.collate_fn,
@@ -584,7 +592,7 @@ class DataModule(LightningDataModule, Registrable):
             test_dataset,
             batch_size=self.config.predict_batch_size,
             shuffle=shuffle,
-            num_workers=8,
+            num_workers=self.config.dataloader_num_workers,
             pin_memory=False,
             persistent_workers=False,
             collate_fn=self.collate_fn,

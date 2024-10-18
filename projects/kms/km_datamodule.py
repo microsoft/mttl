@@ -175,8 +175,12 @@ class DocumentDataset(torch.utils.data.Dataset):
 
     def build_labels(self, datapoint):
         all_tokens = datapoint["input_ids"]
-        label_ids = all_tokens[1:]
-        input_ids = all_tokens[:-1]
+
+        # Keeping in line with the Pytorch Lightning implementation,
+        # Let's do the offset on the trainer side
+        label_ids = all_tokens  # [1:]
+        input_ids = all_tokens  # [:-1]
+
         datapoint["attention_mask"] = datapoint["attention_mask"][:-1]
 
         # input ids will be split into
@@ -264,6 +268,7 @@ class LMDataModule(DataModule):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
 
         assert "train" in dataset
+        assert len(dataset) == 1, "all dataset should be in `train`"
 
         # Let's first filter out unused tasks
         (
