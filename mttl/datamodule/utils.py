@@ -41,7 +41,7 @@ def maybe_filter_hf_dataset_by_task(
             desc="Creating train set",
         )["train"]
         dev_dataset = dataset.filter(
-            lambda x: x["split"] == "validation",
+            lambda x: x["split"] in ["validation", "valid", "dev"],
             num_proc=n_proc,
             desc="Creating valid set",
         )["train"]
