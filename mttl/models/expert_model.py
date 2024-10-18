@@ -282,6 +282,8 @@ class MultiExpertMixin:
                         raise result.exception()
                     progress_bar.update(1)
 
+        # TODO: should we sort experts by name ?
+
     def add_experts_from_dict(self, experts_dict, action="route"):
         for expert_name, expert_dump in experts_dict.items():
             self.add_expert_instance(expert_dump, expert_name, action=action)
@@ -636,8 +638,7 @@ class MoEModel(BaseExpertModel, MultiExpertMixin):
         elif self.config.library_id:
             expert_library = ExpertLibrary.get_expert_library(self.config.library_id)
             assert len(expert_library) > 0, "No experts found in the library."
-            for i, expert in enumerate(sorted(list(expert_library.keys()))):
-                self.add_expert_instance(expert_library[expert], expert_name=expert)
+            self.add_experts_from_library(expert_library)
 
     def add_empty_experts(self):
         for i in range(self.config.moe_num_experts):
