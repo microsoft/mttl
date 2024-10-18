@@ -45,6 +45,8 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
 
         self.merged_expert_names = []
         self.config = config
+
+        # store lora A, B as name->tensor dictionaries
         self.lora_a = nn.ParameterDict({})
         self.lora_b = nn.ParameterDict({})
 
@@ -238,13 +240,18 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
             return self.route(input, selection, **kwargs)
         return self.layer(input)
 
-    def __getitem__(self, name):
+    def __getitem__(self, name) -> LoRA:
+        """Returns a LoRA module."""
         return LoRAView(self.config, self.layer, self.lora_a[name], self.lora_b[name])
 
 
 class CoalescedLoRAExpertContainer(LoRAExpertContainer):
     """A coalesced version of the LoRA expert container, where the experts are kept
     in memory in a single parameter.
+
+    Adding experts is slow for this container, given that at each time we are concatenating
+    the expert weights to the existing expert weights. This is not a problem for a small number
+    of experts, but it can be slow for a large number of experts.
     """
 
     __supports_configs__ = [LoRAConfig, SkilledLoRAConfig]
