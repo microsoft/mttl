@@ -101,7 +101,7 @@ class ExpertContainer(nn.Module, Container):
             expert.name if is_default else self.default_expert_name
         )
 
-        self.on_add_expert(expert, action=action, is_default=is_default)
+        self.on_add_expert(expert, is_default=is_default)
 
         if action != "merge":
             # if a new expert was added, we update the selector and information meta-data
