@@ -205,10 +205,6 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
                 # we have no indices, so we assume that we have weights for all the experts
                 assert selection.weights.shape[-1] == len(self)
 
-                warn_once(
-                    "Creating skilled loras for all experts, you might want to use CoalescedLoRAContainer instead, set USE_COALESCED_LORA=True in your environment variables."
-                )
-
                 # store skilled lora view for reuse locally
                 skilled_loras = [
                     SkilledLoRAView.from_loras(
@@ -240,16 +236,15 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
         return LoRAView(self.config, self.layer, self.lora_a[name], self.lora_b[name])
 
 
-class CoalescedLoRAExpertContainer(LoRAExpertContainer):
-    """A coalesced version of the LoRA expert container, where the experts are kept
-    in memory in a single parameter.
+class SkilledLoRAExpertContainer(LoRAExpertContainer):
+    """Skilled LoRA container. In this case, we are not using a LoRA module, but a SkilledLoRA module.
 
     Adding experts is slow for this container, given that at each time we are concatenating
     the expert weights to the existing expert weights. This is not a problem for a small number
     of experts, but it can be slow for a large number of experts.
     """
 
-    __supports_configs__ = [LoRAConfig, SkilledLoRAConfig]
+    __supports_configs__ = [SkilledLoRAConfig]
 
     def __init__(
         self,

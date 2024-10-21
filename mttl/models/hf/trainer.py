@@ -165,6 +165,3 @@ class LMTrainer(ExpertModelTrainer):
         )
 
         return (outputs.loss, outputs.logits) if return_outputs else outputs.loss
-
-    # def prediction_step(self, model, batch, *args, **kwargs):
-    #     return self.compute_loss(model, batch)
