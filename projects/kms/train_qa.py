@@ -6,70 +6,22 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 import torch.nn.functional as F
+from huggingface_hub import HfApi, upload_file
+from lightning_fabric import seed_everything
 
 # register this datamodule!
-from km_datamodule import KMDatasetModule
-from lightning_fabric import seed_everything
 from nqa_datamodule import NQADatamodule
-from train_km import get_original_model
 
 from mttl.arguments import MultiExpertConfig
 from mttl.logging import setup_logging
-from mttl.models.base_model import BaseExpertModel
-from mttl.models.expert_model import (
-    BaseExpertModel,
-    ExpertModel,
-    ExpertModelConfig,
-    MoEModelConfig,
-    MultiExpertMixin,
-)
+from mttl.models.expert_model import ExpertModel, ExpertModelConfig, MoEModelConfig
 from mttl.models.hf.trainer import LMTrainer
+from mttl.models.km_model import KMMoEModel, KMMoEModelConfig
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.utils import create_library, remote_login, upload_library
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
-
-
-@dataclass
-class KMMoEModelConfig(MoEModelConfig):
-    ke_expert_name: str = None
-    ke_experts_prefix: str = "KE"
-
-
-@BaseExpertModel.register("moe_km", config_cls=MoEModelConfig)
-class KMMoEModel(BaseExpertModel, MultiExpertMixin):
-    """MoeModel that can accomodate a Knowledge Extractor"""
-
-    def __init__(self, config, **kwargs):
-        super().__init__(config, **kwargs)
-
-        self.modifier_config = config.modifier_config
-        expert_library = ExpertLibrary.get_expert_library(self.config.library_id)
-
-        # Now, we may want to try and test multiple knowledge extractors on the same library.
-        # To do so, we need to be able to not load previously trained ones
-        expert_names = expert_library.keys()
-        ke_experts = list(
-            filter(lambda x: x.startswith(self.config.ke_experts_prefix), expert_names)
-        )
-        for expert in sorted(list(expert_library.keys())):
-            if expert not in ke_experts:
-                self.add_expert_instance(expert_library[expert], expert_name=expert)
-
-        assert len(self.experts_names) > 0, "No experts found in the library."
-
-        # also need to add an additional expert for the KE
-        # we will use the `ExpertConfig` of the first expert
-        an_expert = self.get_expert_instance(self.experts_names[0])
-        self.ke_expert_name = (
-            self.config.ke_expert_name
-            or f"{self.config.ke_experts_prefix}_{len(ke_experts)}"
-        )
-        self.add_empty_expert(
-            self.ke_expert_name, expert_config=an_expert.expert_config
-        )
-        logger.info("Added KE expert: %s", self.ke_expert_name)
 
 
 @dataclass
@@ -105,13 +57,13 @@ def train_ke(training_args):
             selector_config=training_args.selector_config,
         )
         model = KMMoEModel(model_config)
-
-        ke_name = model.ke_expert_name
-        if ke_name not in training_args.trainable_param_names:
+        if model.ke_expert_name not in training_args.trainable_param_names:
             # Let's provide a fix that works for the current setup
             if training_args.trainable_param_names == ".*lora_[ab].*":
                 logger.warning("Overwriting `trainable_param_names` to include the KE")
-                training_args.trainable_param_names = f".*lora_[ab].{ke_name}.*"
+                training_args.trainable_param_names = (
+                    f".*lora_[ab].{model.ke_expert_name}.*"
+                )
             else:
                 raise ValueError(
                     "Please ensure that the Knowledge Extractor will be trained"
@@ -123,7 +75,7 @@ def train_ke(training_args):
             logger.warning("Overwriting `finetune_task_name` to match the KM experts")
 
         training_args.finetune_task_name = list(
-            filter(lambda x: x != ke_name, model.experts_names)
+            filter(lambda x: x != model.ke_expert_name, model.experts_names)
         )
     else:
         logger.info("Loading model without expert library")
@@ -163,14 +115,19 @@ def train_ke(training_args):
     # Maybe save to Expert Library
     if args.ke_hf_path:
         # TODO: make sure that pushing expert in MoE works
-        model.push_to_hub(args.ke_hf_path)
-    elif args.library_id:
-        expert_library = ExpertLibrary.get_expert_library(args.library_id)
-        ke_expert = model.get_expert_instance(ke_name)
-        expert_library.add_expert(ke_expert, ke_name)
+        if isinstance(model, KMMoEModel):
+            ke_expert = model.get_expert_instance(model.ke_expert_name)
+            # creat a library and upload that expert
+            lib_path, exp_name = args.ke_hf_path.rsplit("/", 1)
+            expert_library = ExpertLibrary.get_expert_library(lib_path, create=True)
+            expert_library.add_expert(ke_expert, exp_name)
+        else:
+            model.push_to_hub(args.ke_hf_path)
 
 
 if __name__ == "__main__":
     args = KEArguments.parse()
     assert args.dataset_config
+    import json
+
     train_ke(args)
