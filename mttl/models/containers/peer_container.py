@@ -52,6 +52,7 @@ class PEERMLPContainer(ExpertContainer):
 
         if selector_config:
             self.selector = PKSSelector(selector_config, in_d=self.input_dim)
+
         # to enable selector instantiation without having to cary the original module's weights
         self.dtype = next(self.layer.parameters()).dtype
 

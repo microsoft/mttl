@@ -4,8 +4,8 @@ from typing import Tuple, Type
 from mttl.logging import logger, warn_once
 from mttl.models.containers.base import ExpertContainer
 from mttl.models.containers.lora_containers import (
-    CoalescedLoRAExpertContainer,
     LoRAExpertContainer,
+    SkilledLoRAExpertContainer,
 )
 from mttl.models.containers.peer_container import PEERMLPContainer
 from mttl.models.containers.selectors.base import (
@@ -42,10 +42,9 @@ def _extract_identifier(string, match_on="finegrained"):
 def get_default_container_class(modifier_name: str) -> Type["ExpertContainer"]:
     import os
 
-    use_coalesced = os.environ.get("COALESCED_LORA_CONTAINER", "False") == "1"
     defaults = {
-        "lora": CoalescedLoRAExpertContainer if use_coalesced else LoRAExpertContainer,
-        "skilled_lora": CoalescedLoRAExpertContainer,
+        "lora": LoRAExpertContainer,
+        "skilled_lora": SkilledLoRAExpertContainer,
         "peer": PEERMLPContainer,
     }
     if modifier_name not in defaults:

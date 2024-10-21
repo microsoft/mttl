@@ -638,7 +638,11 @@ class MoEModel(BaseExpertModel, MultiExpertMixin):
         elif self.config.library_id:
             expert_library = ExpertLibrary.get_expert_library(self.config.library_id)
             assert len(expert_library) > 0, "No experts found in the library."
-            self.add_experts_from_library(expert_library)
+
+            for i, expert in enumerate(sorted(list(expert_library.keys()))):
+                self.add_expert_instance(expert_library[expert], expert_name=expert)
+
+            self.moe_num_experts = i + 1
 
     def add_empty_experts(self):
         for i in range(self.config.moe_num_experts):
