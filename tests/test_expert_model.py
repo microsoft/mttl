@@ -72,21 +72,23 @@ def test_expert_model_skilled(monkeypatch):
     assert model.experts_containers[0].default_expert_name == "b"
 
     # plug a poly selector
-    model.set_selector("lora", PolySelectorConfig(task_names=["t1", "t2", "t3"]))
-    # model.set_selector("skilled_lora", PolySelectorConfig(task_names=["t1", "t2", "t3"]))
-    assert len(model.selectors["lora"]) == 12
-    selector = model.selectors["lora"][0]
+    model.set_selector(
+        "skilled_lora", PolySelectorConfig(task_names=["t1", "t2", "t3"])
+    )
+
+    assert len(model.selectors["skilled_lora"]) == 12
+    selector = model.selectors["skilled_lora"][0]
     assert isinstance(selector, PolySelector)
 
     expert_a: Expert = model.get_expert_instance("a")
     assert len(expert_a.expert_weights) == 24
     assert expert_a.expert_config.modify_layers == ".*out_proj.*"
 
-    # switch selector for lora to task name
-    model.set_selector("lora", TaskNameSelectorConfig())
+    # switch selector for skilled lora to task name
+    model.set_selector("skilled_lora", TaskNameSelectorConfig())
 
-    assert len(model.selectors["lora"]) == 12
-    assert isinstance(model.selectors["lora"][0], TaskNameSelector)
+    assert len(model.selectors["skilled_lora"]) == 12
+    assert isinstance(model.selectors["skilled_lora"][0], TaskNameSelector)
 
 
 def test_from_pretrained(tmp_path):
