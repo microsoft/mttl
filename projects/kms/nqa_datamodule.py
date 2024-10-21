@@ -1,3 +1,4 @@
+import json
 from dataclasses import dataclass
 
 from mttl.datamodule.base import DataModule, DatasetConfig
@@ -10,6 +11,8 @@ class NQADatasetConfig(DatasetConfig):
     task_source_field: str = "document_id"
     prompt: str = "Answer the following question: "
     include_context: bool = False
+    topk_context: int = 10
+    subsample_file: str = None
 
 
 @DataModule.register("narrativeqa", config_cls=NQADatasetConfig)
@@ -18,6 +21,27 @@ class NQADatamodule(DataModule):
         from mttl.models.library.dataset_library import DatasetLibrary
 
         dataset = DatasetLibrary.pull_dataset(self.config.dataset)
+
+        # Instead of always working with the large NQA dataset, we can subsample it
+        # This allows us to reuse our previous datasets, while ensure a consistent train / dev / test split
+        if self.config.subsample_file:
+            subsample_file = json.load(open(self.config.subsample_file, "r"))
+            doc_to_split = {
+                doc: split
+                for split in ["train", "dev", "test"]
+                for doc in subsample_file[split]
+            }
+            all_docs = set(
+                subsample_file["train"] + subsample_file["dev"] + subsample_file["test"]
+            )
+            dataset = dataset.filter(lambda x: x["document_id"] in all_docs)
+
+            def update_split(item):
+                item["split"] = doc_to_split[item["document_id"]]
+                return item
+
+            # Update the Split column
+            dataset = dataset.map(update_split)
 
         (
             self._task_names,
@@ -40,16 +64,42 @@ class NQADatamodule(DataModule):
                 for j in range(len(examples["questions"][i])):
                     document_id = examples["document_id"][i]
                     question = examples["questions"][i][j]
-                    # take the first answer as the target
-                    answer = examples["answers"][i][j][0]
+
+                    if self.for_generation:
+                        answer = examples["answers"][i][j]
+                    else:
+                        # take the first answer as the target
+                        answer = examples["answers"][i][j][0]
 
                     if self.config.include_context:
-                        source = [
-                            {
-                                "role": "user",
-                                "content": f"Consider the following paragraph:\n{examples['text'][i]}\n{self.config.prompt}{question}",
-                            }
-                        ]
+                        context = examples["text"][i]
+                        if isinstance(context, list):
+                            # If the context is a list of strings per question, we get the question-specific context
+                            context = context[j]
+
+                        if isinstance(context, list):
+                            # following Alan's approach
+                            context = " ".join(
+                                [
+                                    f"Passage {k+1}: {context[k]}\n\n"
+                                    for k in range(
+                                        min(self.config.topk_context, len(context))
+                                    )
+                                ]
+                            )
+                            source = [
+                                {
+                                    "role": "user",
+                                    "content": f"Consider the following passages:\n{context}\n{self.config.prompt}{question}",
+                                }
+                            ]
+                        else:
+                            source = [
+                                {
+                                    "role": "user",
+                                    "content": f"Consider the following paragraph:\n{context}\n{self.config.prompt}{question}",
+                                }
+                            ]
                     else:
                         source = [
                             {
@@ -93,3 +143,13 @@ class NQADatamodule(DataModule):
                 num_proc=16,
                 remove_columns=self.test_dataset.column_names,
             )
+
+
+@dataclass
+class MiniNQADatasetConfig(NQADatasetConfig):
+    subsample_file: str = "nqa_mini_split.json"
+
+
+@DataModule.register("mini_nqa", config_cls=MiniNQADatasetConfig)
+class MiniNQADatamodule(NQADatamodule):
+    pass

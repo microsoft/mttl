@@ -282,6 +282,8 @@ class MultiExpertMixin:
                         raise result.exception()
                     progress_bar.update(1)
 
+        # TODO: should we sort experts by name ?
+
     def add_experts_from_dict(self, experts_dict, action="route"):
         for expert_name, expert_dump in experts_dict.items():
             self.add_expert_instance(expert_dump, expert_name, action=action)
@@ -617,7 +619,7 @@ class MoEModelConfig(BaseExpertModelConfig):
     # if library_id is not None, then we load experts from the library
     library_id: str = None
     # how many experts to add if not in library
-    moe_num_experts: int = 1
+    moe_num_experts: int = 0
     # if selector_config is not None, then we use it to select experts
     selector_config: AutoSelectorConfig = None
     # if modifier_config is not None, then we create moe_num_experts with this modifier
@@ -633,14 +635,10 @@ class MoEModel(BaseExpertModel, MultiExpertMixin):
 
         if not self.config.library_id and self.config.moe_num_experts >= 1:
             self.add_empty_experts()
-            self.moe_num_experts = self.config.moe_num_experts
-        else:
+        elif self.config.library_id:
             expert_library = ExpertLibrary.get_expert_library(self.config.library_id)
             assert len(expert_library) > 0, "No experts found in the library."
-            for i, expert in enumerate(sorted(list(expert_library.keys()))):
-                self.add_expert_instance(expert_library[expert], expert_name=expert)
-
-            self.moe_num_experts = i + 1
+            self.add_experts_from_library(expert_library)
 
     def add_empty_experts(self):
         for i in range(self.config.moe_num_experts):
@@ -651,3 +649,7 @@ class MoEModel(BaseExpertModel, MultiExpertMixin):
                     f"Added all {self.config.moe_num_experts} experts to container."
                 )
                 break
+
+    @property
+    def moe_num_experts(self):
+        return len(self.experts_names)

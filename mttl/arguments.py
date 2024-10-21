@@ -467,6 +467,9 @@ class TrainingArgs(DataArgs):
     def to_hf_training_args(self) -> "TrainingArguments":
         from transformers import TrainingArguments
 
+        # NOTE: unclear how `warmup_steps` and `warmup_ratio` are used in HF args
+        # given that we build the optimzer and scheduler ourselves
+
         return TrainingArguments(
             run_name=self.wandb_run_name
             or self.expert_name

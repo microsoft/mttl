@@ -65,7 +65,12 @@ class RougeEvaluator(GenerativeEvaluator):
             sources_texts = batch["sources_texts"]
 
             predictions = self.generate_for_batch(model, batch).generated_texts
-            references = [[l] for l in labels_texts]
+
+            # if we only have one label per prediction, wrap each label in a list
+            if not isinstance(labels_texts[0], (list, tuple)):
+                references = [[l] for l in labels_texts]
+            else:
+                references = labels_texts
 
             eval_metrics = compute_metrics(predictions, references, reduction="none")
             all_rougeL.extend(eval_metrics["rougeL"])
