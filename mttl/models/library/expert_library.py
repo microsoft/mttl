@@ -221,7 +221,7 @@ class ExpertLibrary:
             logger.info(f"Metadata for {metadata.expert_name} uploaded successfully.")
 
     def keys(self):
-        return self.data.keys()
+        return sorted(list(self.data.keys()))
 
     def items(self):
         for k in list(self.keys()):
@@ -254,6 +254,30 @@ class ExpertLibrary:
             expert_info=self.data[expert_name],
             expert_weights=model,
         )
+
+    def add_experts_from_ckpts(self, ckpt_paths: List[str], force: bool = False):
+        import concurrent.futures
+        import threading
+
+        import tqdm
+
+        lock = threading.Lock()
+
+        def process_ckpt(ckpt_path):
+            expert_dump = load_expert(ckpt_path)
+            with lock:
+                self.add_expert(expert_dump, force=force)
+
+        with self.batched_commit():
+            with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+                future_results = executor.map(process_ckpt, ckpt_paths)
+                for _ in tqdm.tqdm(
+                    future_results,
+                    total=len(ckpt_paths),
+                    desc="Adding experts...",
+                    unit="expert",
+                ):
+                    pass
 
     def __len__(self):
         return len(self.data)

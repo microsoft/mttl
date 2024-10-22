@@ -265,10 +265,18 @@ def load_expert_from_hf_checkpoint(
     # load the expert weights
     import os
 
-    from mttl.models.expert_model import ExpertModel
+    from mttl.models.base_model import WEIGHTS_NAME
+    from mttl.models.expert_config import CONFIG_NAME, AutoModelConfig
+    from mttl.models.expert_model import ExpertModel, ExpertModelConfig
     from mttl.models.hf.trainer import MTTL_ARGS_NAME
 
     logger.info(f"Loading expert from {expert_path}...")
+
+    config = AutoModelConfig.from_pretrained(expert_path)
+    if not isinstance(config, ExpertModelConfig):
+        raise ValueError(
+            f"Expected an ExpertModelConfig when loading a checkpoint, got {config.__class__} instead."
+        )
 
     # gather mttl training arguments from the checkpoint if available
     mttl_args_file = os.path.join(expert_path, MTTL_ARGS_NAME)
@@ -283,11 +291,25 @@ def load_expert_from_hf_checkpoint(
     else:
         training_config = None
 
-    # we assume it's an expert model, which is used to train single experts
-    expert: Expert = ExpertModel.from_pretrained(
-        expert_path, device_map="cpu"
-    ).as_expert(training_config=training_config)
+    state_dict = torch.load(os.path.join(expert_path, WEIGHTS_NAME), weights_only=True)
 
+    # we assume it's an expert model, which is used to train single experts
+    state_dict = {
+        k[len("model.") :]: v for k, v in state_dict.items() if k.startswith("model.")
+    }
+
+    # inject expert info in the expert checkpoint
+    expert_info = ExpertInfo(
+        expert_name=config.expert_name,
+        expert_task_name=config.task_name,
+        expert_model=config.base_model,
+        expert_config=config.modifier_config,
+        training_config=training_config,
+    )
+    expert = Expert(
+        expert_info=expert_info,
+        expert_weights=state_dict,
+    )
     # override expert name
     if expert_name is not None:
         expert.name = expert_name

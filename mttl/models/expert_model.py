@@ -257,32 +257,29 @@ class MultiExpertMixin:
 
         import tqdm
 
-        if type(library) == str:
+        if isinstance(library, str):
             from mttl.models.library.expert_library import ExpertLibrary
 
             library = ExpertLibrary.get_expert_library(library)
 
-        def add_module(self, module_name):
+        def add_module(module_name):
             expert_dump = library[module_name]
             self.add_expert_instance(expert_dump)
 
+        elements = list(library.keys())
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
-            # Create a list to hold the futures
-            futures = []
-            for element in library.keys():
-                futures.append(executor.submit(partial(add_module, self), element))
+            # Use executor.map to keep the order
+            future_results = executor.map(add_module, elements)
 
-            # Progress bar setup
-            with tqdm.tqdm(
-                total=len(library), desc="Adding experts...", unit="expert"
-            ) as progress_bar:
-                for result in concurrent.futures.as_completed(futures):
-                    # raise exception
-                    if result.exception():
-                        raise result.exception()
-                    progress_bar.update(1)
-
-        # TODO: should we sort experts by name ?
+            # Wrap the iterator with tqdm for the progress bar
+            for _ in tqdm.tqdm(
+                future_results,
+                total=len(elements),
+                desc="Adding experts...",
+                unit="expert",
+            ):
+                pass  # The progress bar updates with each iteration
 
     def add_experts_from_dict(self, experts_dict, action="route"):
         for expert_name, expert_dump in experts_dict.items():

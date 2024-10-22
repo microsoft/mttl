@@ -6,13 +6,13 @@ from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 
 
 def find_directories_with_config(start_dir):
-    matching_dirs = []
+    matching_dirs = set()
 
     for root, dirs, files in os.walk(start_dir):
-        if "mttl_config.json" in files:
-            matching_dirs.append(root)
+        if "best_model" in dirs:
+            matching_dirs.add(os.path.join(root, "best_model/"))
 
-    return matching_dirs
+    return list(matching_dirs)
 
 
 @click.command()
@@ -22,7 +22,7 @@ def create(ckpt_path, local_path):
     library = ExpertLibrary.get_expert_library("local://" + local_path, create=True)
     expert_paths = find_directories_with_config(ckpt_path)
 
-    print(expert_paths)
+    print("Found: ", len(expert_paths))
     for expert_path in expert_paths:
         library.add_expert_from_ckpt(expert_path)
         print("Length...", len(library))
