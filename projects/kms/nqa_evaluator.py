@@ -28,6 +28,8 @@ class NQAZeroShotEvaluator(RougeEvaluator):
                 subsample_train=dataset_args.subsample_train,
                 subsample_dev=dataset_args.subsample_dev,
                 subsample_test=dataset_args.subsample_test,
+                dataloader_num_workers=dataset_args.dataloader_num_workers,
+                max_input_length=dataset_args.max_input_length,
             ),
             for_generation=True,
         )
