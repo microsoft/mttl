@@ -153,3 +153,13 @@ class MiniNQADatasetConfig(NQADatasetConfig):
 @DataModule.register("mini_nqa", config_cls=MiniNQADatasetConfig)
 class MiniNQADatamodule(NQADatamodule):
     pass
+
+
+@dataclass
+class TinyNQADatasetConfig(NQADatasetConfig):
+    subsample_file: str = "nqa_tiny_split.json"
+
+
+@DataModule.register("tiny_nqa", config_cls=MiniNQADatasetConfig)
+class TinyNQADatamodule(NQADatamodule):
+    pass
