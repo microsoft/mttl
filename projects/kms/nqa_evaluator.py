@@ -17,7 +17,7 @@ class NQAZeroShotEvaluator(RougeEvaluator):
 
         from mttl.datamodule.base import get_datamodule
 
-        dataset_args.prompt = "Answer the following question, according to the format of these example answers: 'A student.', 'Evelyn.', 'walks away.'"
+        dataset_args.prompt = "Answer the following question, following the format of these example answers: 'A student.', 'Evelyn.', 'walks away.'. Question : "
         datamodule = get_datamodule(dataset_args, for_generation=True)
 
         super().__init__(datamodule, generation_kwargs=generation_kwargs)
