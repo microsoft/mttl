@@ -176,12 +176,11 @@ class DocumentDataset(torch.utils.data.Dataset):
     def build_labels(self, datapoint):
         all_tokens = datapoint["input_ids"]
 
-        # Keeping in line with the Pytorch Lightning implementation,
-        # Let's do the offset on the trainer side
-        label_ids = all_tokens  # [1:]
-        input_ids = all_tokens  # [:-1]
+        # clone the data
+        input_ids = all_tokens[:]
+        label_ids = all_tokens[:]
 
-        datapoint["attention_mask"] = datapoint["attention_mask"][:-1]
+        # datapoint["attention_mask"] = datapoint["attention_mask"][:-1]
 
         # input ids will be split into
         # [ context ] [warmup] [labels]
@@ -245,7 +244,7 @@ class LMDatasetConfig(KMDatasetConfig):
     label_frac: float = 0.23  # to match summary proportion
     # Once we have a label / target within a passage, how
     # many tokens to use as "warmup" ?
-    prefix_length: int = 64
+    prefix_length: int = 0
 
 
 class LMDataCollator(DefaultCollator):
