@@ -44,6 +44,7 @@ class DCDTrainer(ExpertModelTrainer):
         return model
 
     def compute_loss(self, model, inputs, return_outputs=False):
+
         # document + small task prompt + task output (e.g. summary, or question and answer)
         input_ids = inputs["input_ids"]
         labels = inputs["labels"]
@@ -155,6 +156,7 @@ def train_km(training_args):
 
         data_args = copy.deepcopy(training_args)
         data_args.dataset = training_args.nqa_dataset
+        data_args.dataset_type = "narrativeqa"
         callback = NQAZeroShotCallback(model, data_args)
         callbacks.append(callback)
 
@@ -181,7 +183,7 @@ def train_km(training_args):
         logger.info("Best model checkpoint: %s", best_model_path)
 
     trainer.save_model(args.output_dir + "/best_model")
-    trainer.save_state(args.output_dir + "/best_model")
+    trainer.save_state()
 
     # Maybe save to Expert Library
     if args.library_id:

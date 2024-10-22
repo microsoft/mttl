@@ -160,8 +160,13 @@ class LMTrainer(ExpertModelTrainer):
 
         attention_mask = batch.pop("attention_mask")
 
+        # NOTE: when using `LMTrainer` for training the KM, batch has unwanted keys.
+        # This Trainer is also used for training the KE.
+
         outputs = model(
-            input_ids=input_ids, attention_mask=attention_mask, labels=labels, **batch
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            labels=labels,  # **batch
         )
 
         return (outputs.loss, outputs.logits) if return_outputs else outputs.loss

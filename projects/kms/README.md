@@ -35,3 +35,11 @@ Assuming generated data under `./nqa_summary_data`
 2. Use `python train_km.py -c phi-3.json -k dataset=local://nqa_summary_data -k finetune_task_name=NQA_DOCUMENT_ID task_name_field=document_id nqa_dataset=your_hf_id/narrativeqa`
 
 `nqa_dataset` might be left `None` if one doesn't want zero-shot eval during training.
+
+### Preliminary Reproduction results 
+Note : KEs we trained on a subset of 100 training documents (commit `b1a47e98f610b819373377285942ad528bb3473d`) 
+
+1. Phi-3 + KE = 19.92 
+2. Phi-3 + IC summary + KE = 75.94
+4. Phi-3 + RAG + KE = 33.16
+3. Phi-3 + IC summary =  31.94

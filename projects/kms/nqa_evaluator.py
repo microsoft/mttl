@@ -5,34 +5,21 @@ from nqa_datamodule import (
     NQADatasetConfig,
 )
 
+from mttl.arguments import create_config_class_from_args
 from mttl.datamodule.base import DataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
+from mttl.logging import warn_once
 
 
 class NQAZeroShotEvaluator(RougeEvaluator):
     def __init__(self, dataset_args, generation_kwargs):
-        if dataset_args.dataset_type == "mini_nqa":
-            dm_cls, dm_cfg_cls = MiniNQADatamodule, MiniNQADatasetConfig
-        else:
-            dm_cls, dm_cfg_cls = NQADatamodule, NQADatasetConfig
 
-        datamodule = dm_cls(
-            dm_cfg_cls(
-                dataset=dataset_args.dataset,
-                model=dataset_args.model,
-                model_family=dataset_args.model_family,
-                predict_batch_size=dataset_args.predict_batch_size,
-                finetune_task_name=dataset_args.finetune_task_name,
-                include_context=dataset_args.include_context,
-                subsample_train=dataset_args.subsample_train,
-                subsample_dev=dataset_args.subsample_dev,
-                subsample_test=dataset_args.subsample_test,
-                dataloader_num_workers=dataset_args.dataloader_num_workers,
-                max_input_length=dataset_args.max_input_length,
-            ),
-            for_generation=True,
-        )
+        from mttl.datamodule.base import get_datamodule
+
+        dataset_args.prompt = "Answer the following question, following the format of these example answers: 'A student.', 'Evelyn.', 'walks away.'. Question : "
+        datamodule = get_datamodule(dataset_args, for_generation=True)
+
         super().__init__(datamodule, generation_kwargs=generation_kwargs)
 
     def evaluate(self, model, split=None, **kwargs):
@@ -43,10 +30,13 @@ class NQAZeroShotEvaluator(RougeEvaluator):
         if split is not None:
             assert split in splits, f"Split {split} not found in {splits}"
             dataset = getattr(self.datamodule, f"{split}_dataset")
-            assert dataset and len(
-                dataset
-            ), f"invalid dataset for split {split}, \n{dataset}"
-        else:
+            if dataset is None or len(dataset) == 0:
+                warn_once(
+                    f"invalid dataset for split {split}, \n{dataset}. Using default split."
+                )
+                split = None
+
+        if split is None:
             for split in splits:
                 dataset = getattr(self.datamodule, f"{split}_dataset")
                 if dataset and len(dataset):

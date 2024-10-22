@@ -59,10 +59,24 @@ def eval_qa(training_args):
     # Build model (will have 0 experts if `library_id` is None)
     model_config = MoEModelConfig(
         base_model=training_args.model,
-        library_id=training_args.library_id,
+        library_id=None,
         selector_config=training_args.selector_config,
     )
     model = MoEModel(model_config)
+
+    # Build evaluator, and fetch tasks names for which we need a KM
+    training_args.dataset = training_args.nqa_dataset
+
+    from nqa_evaluator import NQAZeroShotEvaluator
+
+    evaluator = NQAZeroShotEvaluator(training_args, generation_kwargs={})
+
+    if training_args.library_id:
+        test_tasks = set(evaluator.datamodule.test_dataset["document_id"])
+        expert_lib = ExpertLibrary.get_expert_library(
+            training_args.library_id, selection=list(test_tasks)
+        )
+        model.add_experts_from_library(expert_lib)
 
     # We first try to load a QA expert if provided
     if training_args.ke_hf_path:
@@ -70,11 +84,8 @@ def eval_qa(training_args):
         model.add_expert_instance(ke_expert, expert_name=training_args.ke_expert_name)
 
     model = model.cuda()
-    # Call the NQA callback
-    from nqa_evaluator import NQAZeroShotEvaluator
 
-    training_args.dataset = training_args.nqa_dataset
-    evaluator = NQAZeroShotEvaluator(training_args, generation_kwargs={})
+    # Call the NQA callback
     rougeL, predictions = evaluator.evaluate(
         model, split="test", return_predictions=True
     )
