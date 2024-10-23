@@ -42,7 +42,7 @@ class ExpertModelTrainer(Trainer):
                 )
 
             if len(kwargs["eval_dataset"]) == 0:
-                raise ValueError(
+                logger.warning(
                     "Evaluation Dataset is empty. Please check the datamodule."
                 )
         else:
