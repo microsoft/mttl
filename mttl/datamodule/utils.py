@@ -33,30 +33,12 @@ def maybe_filter_hf_dataset_by_task(
             )
 
     train_dataset, dev_dataset, test_dataset = None, None, None
-
-    if "split" in dataset.column_names["train"]:
-        train_dataset = dataset.filter(
-            lambda x: x["split"] == "train",
-            num_proc=n_proc,
-            desc="Creating train set",
-        )["train"]
-        dev_dataset = dataset.filter(
-            lambda x: x["split"] in ["validation", "valid", "dev"],
-            num_proc=n_proc,
-            desc="Creating valid set",
-        )["train"]
-        test_dataset = dataset.filter(
-            lambda x: x["split"] == "test",
-            num_proc=n_proc,
-            desc="Creating test set",
-        )["train"]
-    else:
-        if "train" in dataset:
-            train_dataset = dataset["train"]
-        if "validation" in dataset:
-            dev_dataset = dataset["validation"]
-        if "test" in dataset:
-            test_dataset = dataset["test"]
+    if "train" in dataset:
+        train_dataset = dataset["train"]
+    if "validation" in dataset:
+        dev_dataset = dataset["validation"]
+    if "test" in dataset:
+        test_dataset = dataset["test"]
 
     if task_names is not None:
         train_dataset = train_dataset.filter(
