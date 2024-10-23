@@ -57,7 +57,7 @@ class NQADatamodule(DataModule):
             train_dataset
         )
 
-        def expand_questions(examples):
+        def expand_questions(examples, tokenizer):
             batch = {
                 "source": [],
                 "target": [],
@@ -113,7 +113,7 @@ class NQADatamodule(DataModule):
                         ]
 
                     batch["source"].append(
-                        self.tokenizer.apply_chat_template(
+                        tokenizer.apply_chat_template(
                             source, add_generation_prompt=True, tokenize=False
                         )
                     )
@@ -124,9 +124,10 @@ class NQADatamodule(DataModule):
 
         for split in ["train", "dev", "test"]:
             dataset = getattr(self, f"{split}_dataset")
+
             if dataset:
                 dataset = dataset.map(
-                    expand_questions,
+                    lambda examples: expand_questions(examples, self.tokenizer),
                     batched=True,
                     batch_size=1000,
                     num_proc=16,
