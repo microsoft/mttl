@@ -162,11 +162,12 @@ class LMTrainer(ExpertModelTrainer):
 
         # NOTE: when using `LMTrainer` for training the KM, batch has unwanted keys.
         # This Trainer is also used for training the KE.
-
+        # Also: I need **batch for the KE training with knowledge modules (the task names)
         outputs = model(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            labels=labels,  # **batch
+            labels=labels,
+            task_names=batch.get("task_names"),
         )
 
         return (outputs.loss, outputs.logits) if return_outputs else outputs.loss
