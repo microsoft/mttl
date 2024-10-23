@@ -14,7 +14,7 @@ from mttl.models.containers.selectors.selector_output import (
 @dataclass
 class KnowledgeExtractorSelectorConfig(SelectorConfig):
     field_name: str = "task_names"
-    ke_expert_name: str = None
+    ke_expert_name: str = "KE"
 
 
 @Selector.register("ke_selector", KnowledgeExtractorSelectorConfig)
