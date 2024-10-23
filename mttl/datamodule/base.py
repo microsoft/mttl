@@ -704,6 +704,7 @@ class DataModule(LightningDataModule, Registrable):
 
         total_size = len(dataset)
         # make this deterministic to always sample the same subset
+        idxs = get_dst_idxs_sampled(n_samples, total_size)
         if isinstance(dataset, ArrowDataset):
             if per_task:
                 task_names = dataset.unique(self.config.task_name_field)
@@ -733,7 +734,6 @@ class DataModule(LightningDataModule, Registrable):
                     )
                 subsampled_dataset = concatenate_datasets(subsampled_dataset)
             else:
-                idxs = get_dst_idxs_sampled(n_samples, total_size)
                 subsampled_dataset = dataset.select(idxs)
         else:
             assert (
@@ -874,6 +874,9 @@ class DataModule(LightningDataModule, Registrable):
             subsample = getattr(self.config, f"subsample_{split}", None)
             if subsample and subsample > 0:
                 dataset = getattr(self, f"{split}_dataset")
+                if dataset is None:
+                    continue
+
                 logger.warning(
                     f"subsampling the {split} dataset to {subsample} samples"
                 )
