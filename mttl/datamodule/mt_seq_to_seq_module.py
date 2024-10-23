@@ -6,7 +6,7 @@ import numpy
 from datasets import Dataset, concatenate_datasets
 
 from mttl.datamodule.base import DataModule, DatasetConfig
-from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
+from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task, split_on_split_column
 from mttl.logging import logger
 from mttl.models.library.dataset_library import DatasetLibrary
 
@@ -138,7 +138,7 @@ def apply_source_template(dataset, source_template):
 class FlatMultiTaskModule(DataModule):
     def setup_dataset(self):
         self.dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
-        n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
+        num_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
 
         if "split" not in self.dataset.column_names["train"]:
             logger.warning(
@@ -150,7 +150,7 @@ class FlatMultiTaskModule(DataModule):
 
             self.dataset = self.dataset.map(
                 partial(create_split, numpy.random.RandomState(42)),
-                num_proc=n_proc,
+                num_proc=num_proc,
                 desc="Creating split column.",
             )
 
@@ -163,7 +163,7 @@ class FlatMultiTaskModule(DataModule):
             dev_dataset,
             test_dataset,
         ) = maybe_filter_hf_dataset_by_task(
-            self.dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
+            self.dataset, "task_name", self.config.finetune_task_name, num_proc=num_proc
         )
 
         if self.config.augment_few_shot > 0:
@@ -223,7 +223,7 @@ class FlanModule(DataModule):
             raise ValueError("Please specify a flan dataset to load.")
 
         dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
-        n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
+        num_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
 
         if "split" not in dataset.column_names["train"]:
             raise ValueError(
@@ -236,7 +236,7 @@ class FlanModule(DataModule):
                     filter_template_type,
                     set(self.config.include_template_type.split(",")),
                 ),
-                num_proc=n_proc,
+                num_proc=num_proc,
                 desc="Filtering template types",
             )
 
@@ -245,25 +245,23 @@ class FlanModule(DataModule):
                 partial(
                     filter_task_source, set(self.config.include_task_source.split(","))
                 ),
-                num_proc=n_proc,
+                num_proc=num_proc,
                 desc="Filtering task sources",
             )
 
-        (
-            self._task_names,
-            self._task_to_id,
-            train_dataset,
-            dev_dataset,
-            test_dataset,
-        ) = maybe_filter_hf_dataset_by_task(
-            dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
+        (self._task_names, self._task_to_id, train_dataset, _, _) = (
+            maybe_filter_hf_dataset_by_task(
+                dataset, "task_name", self.config.finetune_task_name, num_proc=num_proc
+            )
         )
 
         train_dataset = apply_source_template(
             train_dataset, self.config.source_template
         )
-        dev_dataset = apply_source_template(dev_dataset, self.config.source_template)
-        test_dataset = apply_source_template(test_dataset, self.config.source_template)
+
+        train_dataset, dev_dataset, test_dataset = split_on_split_column(
+            train_dataset, num_proc=num_proc
+        )
 
         if self.config.remove_phi_eval_tasks:
             assert not any(
@@ -274,7 +272,7 @@ class FlanModule(DataModule):
             for ds in [train_dataset, dev_dataset, test_dataset]:
                 ds = ds.filter(
                     lambda x: not is_phi2_eval_task(x["task_name"]),
-                    num_proc=n_proc,
+                    num_proc=num_proc,
                     desc="Filtering phi-2 eval tasks",
                 )
 

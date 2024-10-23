@@ -66,6 +66,28 @@ def maybe_filter_hf_dataset_by_task(
     return task_names, task_to_id, train_dataset, dev_dataset, test_dataset
 
 
+def split_on_split_column(dataset, num_proc=16):
+    if "split" not in dataset.features:
+        raise ValueError("Dataset does not have the required 'split' column!")
+
+    train_dataset = dataset.filter(
+        lambda x: x["split"] == "train",
+        num_proc=num_proc,
+        desc="Creating train set",
+    )
+    dev_dataset = dataset.filter(
+        lambda x: x["split"] in ["validation", "valid"],
+        num_proc=num_proc,
+        desc="Creating valid set",
+    )
+    test_dataset = dataset.filter(
+        lambda x: x["split"] in ["test"],
+        num_proc=num_proc,
+        desc="Creating test set",
+    )
+    return train_dataset, dev_dataset, test_dataset
+
+
 def tokenizer_merges_space(tokenizer):
     test1 = "this"
     test2 = " this"
