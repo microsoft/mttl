@@ -255,7 +255,16 @@ class ExpertLibrary:
             expert_weights=model,
         )
 
-    def add_experts_from_ckpts(self, ckpt_paths: List[str], force: bool = False):
+    def add_experts_from_ckpts(
+        self, ckpt_paths: List[str], force: bool = False, update: bool = False
+    ):
+        """Add experts from a list of checkpoint paths.
+
+        Args:
+            ckpt_paths (List[str]): List of checkpoint paths.
+            force (bool, optional): Overwrite existing experts. Defaults to False.
+            update (bool, optional): Update existing library. If an expert with the same name exists, it skips addition.
+        """
         import concurrent.futures
         import threading
 
@@ -265,7 +274,14 @@ class ExpertLibrary:
 
         def process_ckpt(ckpt_path):
             expert_dump = load_expert(ckpt_path)
+
             with lock:
+                if update and expert_dump.name in self.data:
+                    logger.info(
+                        f"Expert {expert_dump.name} already exists. Skipping..."
+                    )
+                    return
+
                 self.add_expert(expert_dump, force=force)
 
         with self.batched_commit():
