@@ -54,4 +54,4 @@ class NQAZeroShotCallback(TrainerCallback):
         metrics={},
         **kwargs,
     ) -> None:
-        return self.on_predict(args, state, control, metrics=metrics, **kwargs)
+        return self.on_evaluate(args, state, control, metrics=metrics, **kwargs)

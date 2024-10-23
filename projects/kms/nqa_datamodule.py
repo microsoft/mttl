@@ -130,27 +130,7 @@ class NQADatamodule(DataModule):
                     lambda examples: expand_questions(examples, self.tokenizer),
                     batched=True,
                     batch_size=1000,
-                    num_proc=16,
+                    num_proc=1,
                     remove_columns=dataset.column_names,
                 )
                 setattr(self, f"{split}_dataset", dataset)
-
-
-@dataclass
-class MiniNQADatasetConfig(NQADatasetConfig):
-    subsample_file: str = "nqa_mini_split.json"
-
-
-@DataModule.register("mini_nqa", config_cls=MiniNQADatasetConfig)
-class MiniNQADatamodule(NQADatamodule):
-    pass
-
-
-@dataclass
-class TinyNQADatasetConfig(NQADatasetConfig):
-    subsample_file: str = "nqa_tiny_split.json"
-
-
-@DataModule.register("tiny_nqa", config_cls=MiniNQADatasetConfig)
-class TinyNQADatamodule(NQADatamodule):
-    pass
