@@ -2,7 +2,7 @@ import json
 from dataclasses import dataclass
 
 from mttl.datamodule.base import DataModule, DatasetConfig
-from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
+from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task, split_on_split_column
 
 
 @dataclass
@@ -46,11 +46,15 @@ class NQADatamodule(DataModule):
         (
             self._task_names,
             self._task_to_id,
-            self.train_dataset,
-            self.dev_dataset,
-            self.test_dataset,
+            train_dataset,
+            _,
+            _,
         ) = maybe_filter_hf_dataset_by_task(
             dataset, self.config.task_name_field, self.config.finetune_task_name
+        )
+
+        self.train_dataset, self.dev_dataset, self.test_dataset = split_on_split_column(
+            train_dataset
         )
 
         def expand_questions(examples):
@@ -118,31 +122,17 @@ class NQADatamodule(DataModule):
                     batch["document_id"].append(examples["document_id"][i])
             return batch
 
-        # create expanded versions of the dataset
-        if self.train_dataset:
-            self.train_dataset = self.train_dataset.map(
-                expand_questions,
-                batched=True,
-                batch_size=1000,
-                num_proc=16,
-                remove_columns=self.train_dataset.column_names,
-            )
-        if self.dev_dataset:
-            self.dev_dataset = self.dev_dataset.map(
-                expand_questions,
-                batched=True,
-                batch_size=1000,
-                num_proc=16,
-                remove_columns=self.dev_dataset.column_names,
-            )
-        if self.test_dataset:
-            self.test_dataset = self.test_dataset.map(
-                expand_questions,
-                batched=True,
-                batch_size=1000,
-                num_proc=16,
-                remove_columns=self.test_dataset.column_names,
-            )
+        for split in ["train", "dev", "test"]:
+            dataset = getattr(self, f"{split}_dataset")
+            if dataset:
+                dataset = dataset.map(
+                    expand_questions,
+                    batched=True,
+                    batch_size=1000,
+                    num_proc=16,
+                    remove_columns=dataset.column_names,
+                )
+                setattr(self, f"{split}_dataset", dataset)
 
 
 @dataclass
