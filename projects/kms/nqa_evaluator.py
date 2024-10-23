@@ -1,9 +1,4 @@
-from nqa_datamodule import (
-    MiniNQADatamodule,
-    MiniNQADatasetConfig,
-    NQADatamodule,
-    NQADatasetConfig,
-)
+from nqa_datamodule import NQADatamodule, NQADatasetConfig
 
 from mttl.arguments import create_config_class_from_args
 from mttl.datamodule.base import DataModule, DatasetConfig
