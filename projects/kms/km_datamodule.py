@@ -194,12 +194,9 @@ class DocumentDataset(torch.utils.data.Dataset):
         # ensure that nothing before `label_start` has loss computed
         label_ids[:label_start] = [-100] * label_start
 
-        datapoint["input_ids"] = input_ids
         datapoint["nc_input_ids"] = input_ids[warmup_start:]
-        datapoint["labels"] = label_ids
         datapoint["nc_labels"] = label_ids[warmup_start:]
         datapoint["nc_attention_mask"] = datapoint["attention_mask"][warmup_start:]
-
         return datapoint
 
     def __getitem__(self, idx):
@@ -220,17 +217,15 @@ class DocumentDataset(torch.utils.data.Dataset):
             ).item()
             end_idx = start_idx + self.config.max_input_length
 
-        output = {"start_idx": start_idx, "end_idx": end_idx}
-        for key in self.docs[doc_idx].keys():
-            if key in ["input_ids", "attention_mask"]:
-                output[key] = self.docs[doc_idx][key][start_idx:end_idx]
-            elif key == "seq_lens":
-                output[key] = [self.config.max_input_length]
-            else:
-                output[key] = self.docs[doc_idx][key]
+        output = {
+            "input_ids": self.docs[doc_idx]["input_ids"][start_idx:end_idx],
+            "labels": self.docs[doc_idx]["input_ids"][start_idx:end_idx],
+            "attention_mask": self.docs[doc_idx]["attention_mask"][start_idx:end_idx],
+            "seq_lens": [self.config.max_input_length],
+            "task_names": self.docs[doc_idx]["document_id"],
+        }
 
-        output = self.build_labels(output)
-        return output
+        return self.build_labels(output)
 
     def __len__(self):
         if not hasattr(self, "_len"):
