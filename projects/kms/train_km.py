@@ -44,6 +44,7 @@ class DCDTrainer(ExpertModelTrainer):
         return model
 
     def compute_loss(self, model, inputs, return_outputs=False):
+
         # document + small task prompt + task output (e.g. summary, or question and answer)
         input_ids = inputs["input_ids"]
         labels = inputs["labels"]
@@ -121,6 +122,7 @@ class KMArguments(ExpertConfig):
     loss_function: str = "dcd"
     # set the following if you want to enable the NQA callback during training
     nqa_dataset: str = "sordonia/narrativeqa"
+    method: str = None
 
 
 def train_km(training_args):
@@ -154,6 +156,7 @@ def train_km(training_args):
 
         data_args = copy.deepcopy(training_args)
         data_args.dataset = training_args.nqa_dataset
+        data_args.dataset_type = "narrativeqa"
         callback = NQAZeroShotCallback(model, data_args)
         callbacks.append(callback)
 
@@ -180,6 +183,7 @@ def train_km(training_args):
         logger.info("Best model checkpoint: %s", best_model_path)
 
     trainer.save_model(args.output_dir + "/best_model")
+    trainer.save_state()
 
     # Maybe save to Expert Library
     if args.library_id:
@@ -193,4 +197,31 @@ def train_km(training_args):
 
 if __name__ == "__main__":
     args = KMArguments.parse()
+
+    # If `method` is provided, we default to the following configurations
+    if args.method == "summary_dcd":
+        args.loss_function = "dcd"
+        args.dataset_type = "dcd_km"
+        args.task_name_field = "document_id"
+        if not args.dataset or "summar" not in args.dataset:
+            args.dataset = "sordonia/nqa_summaries_qa_phi-3_medium"
+            logger.warning(
+                "You are training a DCD model on a dataset that is not a summarization dataset."
+                f"Overwriting the dataset type to dataset to {args.dataset}"
+            )
+    elif args.method == "lm":
+        args.loss_function = "lm"
+        args.dataset_type = "doc_km"
+        if not args.dataset:
+            args.task_name_field = "document_id"
+            args.dataset = "sordonia/narrativeqa_sanitized"
+    elif args.method == "doc_dcd":
+        args.loss_function = "dcd"
+        args.dataset_type = "doc_km"
+        if not args.dataset:
+            args.task_name_field = "document_id"
+            args.dataset = "sordonia/narrativeqa_sanitized"
+    else:
+        assert args.method is None, f"Unsupported method: {args.method}"
+
     train_km(args)
