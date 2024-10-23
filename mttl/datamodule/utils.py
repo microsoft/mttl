@@ -76,7 +76,7 @@ def split_on_split_column(dataset, num_proc=16):
         desc="Creating train set",
     )
     dev_dataset = dataset.filter(
-        lambda x: x["split"] in ["validation", "valid"],
+        lambda x: x["split"] in ["dev", "validation", "valid"],
         num_proc=num_proc,
         desc="Creating valid set",
     )
