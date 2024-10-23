@@ -41,7 +41,7 @@ class ExpertModelTrainer(Trainer):
                     "Training Dataset is empty. Please check the datamodule."
                 )
 
-            if len(kwargs["eval_dataset"]) == 0:
+            if kwargs["eval_dataset"] is None or len(kwargs["eval_dataset"]) == 0:
                 logger.warning(
                     "Evaluation Dataset is empty. Please check the datamodule."
                 )
