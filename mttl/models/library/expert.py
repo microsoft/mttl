@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, Union
+from typing import Any, Dict, Union
 
 import torch
 
@@ -21,7 +21,7 @@ class ExpertInfo(Serializable):
     # configuration for this expert, i.e. a modifier config
     expert_config: AutoModifierConfig = None
     # arguments with which the expert was trained, i.e. the full training config
-    training_config: "mttl.arguments.AutoArgs" = None
+    training_config: Dict[str, Any] = None
     expert_model: str = None
 
     @property
@@ -108,7 +108,7 @@ class Expert:
         return cls(**data)
 
     @property
-    def training_config(self) -> "Args":
+    def training_config(self) -> Dict:
         # back-compatibility, returns expert config
         return self.expert_info.training_config
 
@@ -170,6 +170,7 @@ def load_expert(
 
     if "adapter_config.json" in files:
         # PEFT expert!
+        breakpoint()
         return load_expert_from_peft_checkpoint(expert_path, expert_name)
     elif WEIGHTS_NAME in files:
         # MTTL expert trained with HFTrainer
