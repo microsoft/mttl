@@ -3,6 +3,7 @@ import pytest
 from pytorch_lightning import seed_everything
 from transformers import AutoModelForCausalLM
 
+from mttl.models.containers.lora_containers import LoRAExpertContainer
 from mttl.models.containers.selectors.arrow_selector import (
     ArrowSelector,
     ArrowSelectorConfig,
@@ -56,6 +57,50 @@ def test_expert_model(monkeypatch):
 
     assert len(model.selectors["lora"]) == 12
     assert isinstance(model.selectors["lora"][0], TaskNameSelector)
+
+
+def test_disable_enable_adapters(monkeypatch, mocker, dummy_batch):
+    from mttl.models.expert_model import disable_adapters
+
+    seed_everything(0)
+
+    model = MultiExpertModel(MultiExpertModelConfig("EleutherAI/gpt-neo-125m"))
+    model.add_empty_expert(
+        "a", LoRAConfig(modify_layers=".*out_proj.*"), is_default=True
+    )
+    assert model.experts_containers[0].default_expert_name == "a"
+    container: LoRAExpertContainer = model.experts_containers[0]
+    mock = mocker.spy(container, "container_forward")
+
+    assert container._enabled
+
+    with disable_adapters(model):
+        assert not container._enabled
+        model(**dummy_batch)
+        assert mock.call_count == 0
+
+    assert container._enabled
+    model(**dummy_batch)
+    assert mock.call_count == 1
+
+    model = ExpertModel(
+        ExpertModelConfig(
+            "EleutherAI/gpt-neo-125m",
+            modifier_config=LoRAConfig(modify_layers=".*out_proj.*"),
+        )
+    )
+
+    assert model.modifiers[0]._enabled
+    mock = mocker.spy(model.modifiers[0], "dropout_layer")
+
+    with disable_adapters(model):
+        assert not model.modifiers[0]._enabled
+        model(**dummy_batch)
+        assert mock.call_count == 0
+
+    assert container._enabled
+    model(**dummy_batch)
+    assert mock.call_count == 1
 
 
 def test_expert_model_skilled(monkeypatch):

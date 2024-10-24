@@ -29,6 +29,9 @@ class LoRA(Modifier, MergeableModifierMixin):
     ):
         super().__init__()
 
+        if type(layer) not in [nn.Linear, bnb.nn.Linear8bitLt]:
+            raise ValueError("LoRA can only be applied to torch.nn.Linear layers.")
+
         # assign self variables
         self.config = config
         self.rank = config.lora_rank
@@ -57,6 +60,13 @@ class LoRA(Modifier, MergeableModifierMixin):
         self.reset_parameters()
 
         self.merged_with_layer = False
+        self._enabled = True
+
+    def enable(self):
+        self._enabled = True
+
+    def disable(self):
+        self._enabled = False
 
     def state_dict(self, *args, destination=None, prefix="", keep_vars=False):
         """Override state dict for this adapter to avoid saving layer weights."""
@@ -71,78 +81,67 @@ class LoRA(Modifier, MergeableModifierMixin):
 
     def merge_with_layer(self):
         """Merge this adapter with the layer!"""
-        if isinstance(self.layer, nn.Linear):
-            self.merged_with_layer = True
+        self.merged_with_layer = True
 
-            # for back-compatibility, try the two sides:
-            if self.lora_a.data.shape[0] == self.layer.weight.shape[0]:
-                to_merge = self.lora_a.data @ self.lora_b.data
-            else:
-                to_merge = (self.lora_a.data @ self.lora_b.data).T
-            to_merge = to_merge * self.scaling
-
-            if isinstance(self.layer, bnb.nn.Linear8bitLt):
-                if self.layer.state.SCB is None:
-                    self.layer.state.SCB = self.layer.weight.SCB
-
-                # Dequantize the result of identity matrix and int8 weight because bitsandbytes does not support int8
-                # dequantization directly
-                im = (
-                    torch.eye(self.layer.weight.data.shape[-1])
-                    .contiguous()
-                    .half()
-                    .to(self.weight.device)
-                )
-                im, imt, SCim, SCimt, coo_tensorim = bnb.functional.double_quant(im)
-                im, Sim = bnb.functional.transform(im, "col32")
-
-                if self.layer.state.CxB is None:
-                    (
-                        self.layer.state.CxB,
-                        self.layer.state.SB,
-                    ) = bnb.functional.transform(
-                        self.layer.weight.data, to_order=self.layer.state.formatB
-                    )
-
-                out32, Sout32 = bnb.functional.igemmlt(
-                    im, self.layer.state.CxB, Sim, self.layer.state.SB
-                )
-                output = bnb.functional.mm_dequant(
-                    out32, Sout32, SCim, self.layer.state.SCB, bias=None
-                ).t()
-                w_data = output.to(to_merge.dtype).to(to_merge.device) + to_merge
-
-                self.layer.weight = bnb.nn.Int8Params(
-                    w_data.to("cpu"),
-                    requires_grad=False,
-                    has_fp16_weights=self.layer.weight.has_fp16_weights,
-                ).to(self.layer.weight.device)
-                self.layer.state.reset_grads()
-            else:
-                self.layer.weight.data.add_(to_merge.to(self.layer.weight.device))
+        # for back-compatibility, try the two sides:
+        if self.lora_a.data.shape[0] == self.layer.weight.shape[0]:
+            to_merge = self.lora_a.data @ self.lora_b.data
         else:
-            raise NotImplementedError("LoRA only supports nn.Linear layers.")
+            to_merge = (self.lora_a.data @ self.lora_b.data).T
+        to_merge = to_merge * self.scaling
+
+        if isinstance(self.layer, bnb.nn.Linear8bitLt):
+            if self.layer.state.SCB is None:
+                self.layer.state.SCB = self.layer.weight.SCB
+
+            # Dequantize the result of identity matrix and int8 weight because bitsandbytes does not support int8
+            # dequantization directly
+            im = (
+                torch.eye(self.layer.weight.data.shape[-1])
+                .contiguous()
+                .half()
+                .to(self.weight.device)
+            )
+            im, imt, SCim, SCimt, coo_tensorim = bnb.functional.double_quant(im)
+            im, Sim = bnb.functional.transform(im, "col32")
+
+            if self.layer.state.CxB is None:
+                (
+                    self.layer.state.CxB,
+                    self.layer.state.SB,
+                ) = bnb.functional.transform(
+                    self.layer.weight.data, to_order=self.layer.state.formatB
+                )
+
+            out32, Sout32 = bnb.functional.igemmlt(
+                im, self.layer.state.CxB, Sim, self.layer.state.SB
+            )
+            output = bnb.functional.mm_dequant(
+                out32, Sout32, SCim, self.layer.state.SCB, bias=None
+            ).t()
+            w_data = output.to(to_merge.dtype).to(to_merge.device) + to_merge
+
+            self.layer.weight = bnb.nn.Int8Params(
+                w_data.to("cpu"),
+                requires_grad=False,
+                has_fp16_weights=self.layer.weight.has_fp16_weights,
+            ).to(self.layer.weight.device)
+            self.layer.state.reset_grads()
+        else:
+            self.layer.weight.data.add_(to_merge.to(self.layer.weight.device))
 
     def create_for_layer(self, layer):
-        if isinstance(layer, nn.Linear):
-            self.lora_a = nn.Parameter(
-                torch.empty(layer.in_features, self.rank).to(
-                    device=layer.weight.device
-                ),
-            )
-            self.lora_b = nn.Parameter(
-                torch.empty(self.rank, layer.out_features).to(
-                    device=layer.weight.device
-                ),
-            )
-            self.forward_fn = self.forward_linear_
-        else:
-            raise NotImplementedError("LoRA only supports nn.Linear layers.")
+        self.lora_a = nn.Parameter(
+            torch.empty(layer.in_features, self.rank).to(device=layer.weight.device),
+        )
+        self.lora_b = nn.Parameter(
+            torch.empty(self.rank, layer.out_features).to(device=layer.weight.device),
+        )
 
-    def forward_linear_(self, input, **kwargs):
+    def forward(self, input, **kwargs):
         output = self.layer(input)
 
-        if self.merged_with_layer or not self.enabled:
+        if self.merged_with_layer or not self._enabled:
             return output
         else:
             input_lora = input.to(self.lora_a.dtype)
@@ -205,9 +204,6 @@ class LoRA(Modifier, MergeableModifierMixin):
                 self.lora_b.uniform_(-std, std)
         else:
             torch.nn.init.zeros_(self.lora_b)
-
-    def forward(self, *args, **kwargs):
-        return self.forward_fn(*args, **kwargs)
 
 
 @dataclass
@@ -276,28 +272,24 @@ class SkilledLoRA(LoRA):
         self.n_skills += 1
 
     def create_for_layer(self, layer):
-        if isinstance(layer, nn.Linear):
-            self.lora_a = nn.Parameter(
-                torch.empty(
-                    self.n_skills,
-                    self.n_splits,
-                    layer.in_features // self.n_splits,
-                    self.rank,
-                ).to(device=self.weight.device)
-            )
-            self.lora_b = nn.Parameter(
-                torch.empty(
-                    self.n_skills,
-                    self.rank,
-                    self.n_splits,
-                    layer.out_features // self.n_splits,
-                ).to(device=self.weight.device)
-            )
-            self.forward_fn = self.forward_linear_
-        else:
-            raise NotImplementedError("SkilledLoRA only supports nn.Linear layers.")
+        self.lora_a = nn.Parameter(
+            torch.empty(
+                self.n_skills,
+                self.n_splits,
+                layer.in_features // self.n_splits,
+                self.rank,
+            ).to(device=self.weight.device)
+        )
+        self.lora_b = nn.Parameter(
+            torch.empty(
+                self.n_skills,
+                self.rank,
+                self.n_splits,
+                layer.out_features // self.n_splits,
+            ).to(device=self.weight.device)
+        )
 
-    def forward_linear_(self, input, weights):
+    def forward(self, input, weights):
         layer_out = self.layer(input)
 
         if not self.enabled:
@@ -482,11 +474,6 @@ class LoRAView(LoRA):
         super().__init__(config, layer)
         self.lora_a = lora_a
         self.lora_b = lora_b
-
-        if isinstance(layer, nn.Linear):
-            self.forward_fn = self.forward_linear_
-        else:
-            raise NotImplementedError("LoRAView only supports nn.Linear layers.")
 
     def create_for_layer(self, layer):
         pass

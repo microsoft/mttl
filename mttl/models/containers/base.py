@@ -175,8 +175,13 @@ class ExpertContainer(nn.Module, Container):
         return self.__layer_name__
 
     @abstractmethod
-    def forward(self, input, **kwargs):
+    def container_forward(self, input, **kwargs):
         pass
+
+    def forward(self, input, **kwargs):
+        if not len(self) or not self._enabled:
+            return self.layer(input, **kwargs)
+        return self.container_forward(input, **kwargs)
 
     def get(self, key: Union[int, str]):
         if type(key) == int:

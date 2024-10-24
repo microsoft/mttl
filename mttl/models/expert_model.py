@@ -1,3 +1,4 @@
+import contextlib
 import re
 import threading
 from dataclasses import dataclass
@@ -33,6 +34,20 @@ from mttl.models.modifiers.base import (
 from mttl.models.modifiers.modify_model import modify_transformer
 
 
+@contextlib.contextmanager
+def disable_adapters(model):
+    """Context manager to disable all adapters in a model.
+
+    Args:
+        model (BaseExpertModel): The model to disable adapters in.
+    """
+    model.disable_adapters()
+
+    yield
+
+    model.enable_adapters()
+
+
 @dataclass
 class ExpertModelConfig(BaseExpertModelConfig):
     task_name: str = None
@@ -53,15 +68,21 @@ class ExpertModel(BaseExpertModel):
         if config.modifier_config is not None:
             modify_transformer(self.model, config.modifier_config)
 
-    def disable_adapter(self):
-        for name, module in self.model.named_modules():
-            if isinstance(module, Modifier):
-                module.disable()
+    def enable_adapters(self):
+        for module in self.modifiers:
+            module.enable()
 
-    def enable_adapter(self):
+    def disable_adapters(self):
+        for module in self.modifiers:
+            module.disable()
+
+    @property
+    def modifiers(self):
+        modifiers = []
         for name, module in self.model.named_modules():
             if isinstance(module, Modifier):
-                module.enable()
+                modifiers.append(module)
+        return modifiers
 
     def merge_and_save_base_model(self, output_dir, device="cpu"):
         """
@@ -149,6 +170,14 @@ class MultiExpertMixin:
     @selector_config.setter
     def selector_config(self, value: AutoSelectorConfig):
         self._selector_config = value
+
+    def enable_adapters(self):
+        for module in self.experts_containers:
+            module.enable()
+
+    def disable_adapters(self):
+        for module in self.experts_containers:
+            module.disable()
 
     @property
     def experts_names(self):
@@ -379,16 +408,6 @@ class MultiExpertMixin:
                 # reload the expert instance to fill the weights properly if this was an empty expert
                 expert_instance = self.get_expert_instance(expert_instance.name)
                 return expert_instance
-
-    def disable_adapters(self):
-        for name, module in self.model.named_modules():
-            if isinstance(module, ExpertContainer):
-                module.disable()
-
-    def enable_adapters(self):
-        for name, module in self.model.named_modules():
-            if isinstance(module, ExpertContainer):
-                module.enable()
 
     def set_selector(
         self,
