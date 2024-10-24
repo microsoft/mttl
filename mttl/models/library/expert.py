@@ -36,9 +36,12 @@ class ExpertInfo(Serializable):
             return self.training_config.get("model")
 
     @property
-    def dataset(self):
+    def dataset(self) -> str:
         """Returns the dataset name from training config or an empty string."""
-        return getattr(self, "training_config", {}).get("dataset", "")
+        training_config = getattr(self, "training_config", {})
+        if training_config is not None:
+            return training_config.get("dataset", "")
+        return "undefined"
 
     @property
     def modifier_name(self):
