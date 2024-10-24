@@ -1,8 +1,18 @@
 import pytest
 
 from mttl.models.containers.selectors.poly_selector import PolySelectorConfig
-from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
+from mttl.models.expert_model import (
+    ExpertModel,
+    MultiExpertModel,
+    MultiExpertModelConfig,
+)
 from mttl.models.modifiers.lora import LoRAConfig
+
+
+def test_load_peft_expert(tmp_path):
+    model = ExpertModel.from_pretrained_peft("andmev/phi-3-mini-LoRA")
+
+    model = MultiExpertModel.from_pretrained_peft("andmev/phi-3-mini-LoRA")
 
 
 def test_load_expert_from_checkpoint(tmp_path):
