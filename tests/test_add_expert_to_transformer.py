@@ -6,7 +6,6 @@ from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
 
 def test_add_expert_to_transformer(monkeypatch):
     seed_everything(0)
-    monkeypatch.setenv("COALESCED_LORA_CONTAINER", "0")
 
     # logic:
     # modify_modules -- will check if the module name contains the string

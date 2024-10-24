@@ -533,6 +533,7 @@ class HiddenStateComputer(LibraryTransform):
         default_args=None,
         device="cpu",
     ) -> Expert:
+        from mttl.arguments import ExpertConfig
         from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
 
         if isinstance(library, str):
@@ -551,7 +552,7 @@ class HiddenStateComputer(LibraryTransform):
         output = {}
 
         for _, (expert_name, expert) in enumerate(library.items()):
-            training_config = expert.training_config
+            training_config = ExpertConfig.from_dict(expert.training_config)
 
             if default_args is not None:
                 self._update_args(training_config, default_args)
@@ -712,7 +713,9 @@ class PhatgooseTransform(HiddenStateComputer):
                 outputs[expert_name] = loaded_output[expert_name]
                 continue
 
-            training_config: ExpertConfig = expert.training_config
+            training_config: ExpertConfig = ExpertConfig.from_dict(
+                expert.training_config
+            )
 
             if default_args is not None:
                 self._update_args(training_config, default_args)
@@ -979,6 +982,7 @@ class ArrowTransform(LibraryTransform):
 
         vectors, eigvals = self.fetch(library, scale=False)
         already_computed = []
+
         for expert_name, expert in library.items():
             if expert_name in vectors and not recompute:
                 logger.info(
