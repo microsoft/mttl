@@ -178,10 +178,10 @@ class ExpertContainer(nn.Module, Container):
     def container_forward(self, input, **kwargs):
         pass
 
-    def forward(self, input, **kwargs):
+    def forward(self, *args, **kwargs):
         if not len(self) or not self._enabled:
-            return self.layer(input, **kwargs)
-        return self.container_forward(input, **kwargs)
+            return self.layer(*args, **kwargs)
+        return self.container_forward(*args, **kwargs)
 
     def get(self, key: Union[int, str]):
         if type(key) == int:
