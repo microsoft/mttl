@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, Union
+from typing import Any, Dict, Union
 
 import torch
 
@@ -20,8 +20,8 @@ class ExpertInfo(Serializable):
     parent_node: str = None
     # configuration for this expert, i.e. a modifier config
     expert_config: AutoModifierConfig = None
-    # arguments with which the expert was trained, i.e. the full training config
-    training_config: "mttl.arguments.AutoArgs" = None
+    # arguments with which the expert was trained, just for info
+    training_config: Dict[str, Any] = None
     expert_model: str = None
 
     @property
@@ -280,12 +280,10 @@ def load_expert_from_hf_checkpoint(
 
     # gather mttl training arguments from the checkpoint if available
     mttl_args_file = os.path.join(expert_path, MTTL_ARGS_NAME)
-    if os.path.isfile(mttl_args_file):
-        from mttl.arguments import AutoArgs
 
+    if os.path.isfile(mttl_args_file):
         try:
             training_config = torch.load(mttl_args_file, weights_only=False)
-            training_config = AutoArgs.fromdict(training_config)
         except:
             training_config = None
     else:
