@@ -74,32 +74,29 @@ async def oai_get_completions_batched(
     return results
 
 
-def chunk_text(text, tokenizer, block_size, token_overlap=0):
-    """
-    A generator that chunks the given text into blocks of size `block_size` with `token_overlap` between chunks using the provided tokenizer.
+def chunk_text(text, tokenizer, block_size):
+    chunks = text.split("\n")
+    chunks = [tokenizer.encode(chunk, add_special_tokens=False) for chunk in chunks]
+    sep = tokenizer.encode("\n", add_special_tokens=False)
 
-    Args:
-    text (str): The long document to be chunked.
-    tokenizer: The tokenizer object to use for tokenizing the text.
-    block_size (int): Maximum size of each chunk (in tokens).
-    token_overlap (int): Number of tokens to overlap between consecutive chunks.
+    c = 0
+    s = 0
+    while c < len(chunks):
+        curr = []
+        while c < len(chunks):
+            if len(curr) + len(sep) + len(chunks[c]) - s <= block_size:
+                if curr:
+                    curr += sep
+                curr += chunks[c][s:]
+                c += 1
+                s = 0
+            elif not curr:
+                curr += chunks[c][s : s + block_size]
+                s += block_size
+            else:
+                break
 
-    Yields:
-    str: A chunk of text with a maximum size of `block_size` tokens and `token_overlap` overlap.
-    """
-    # Tokenize the entire text
-    tokens = tokenizer.encode(text, add_special_tokens=False)
-
-    # Create the chunks with overlap
-    start = 0
-    while start < len(tokens):
-        end = start + block_size
-        chunk_tokens = tokens[start:end]
-        chunk_text = tokenizer.decode(chunk_tokens, skip_special_tokens=True)
-        yield chunk_tokens, chunk_text
-
-        # Move the start position by block_size - token_overlap
-        start += block_size - token_overlap
+        yield curr, tokenizer.decode(curr)
 
 
 class GenerationTask(Registrable):
