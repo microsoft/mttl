@@ -224,10 +224,10 @@ class MultiExpertMixin:
         Args:
             hf_expert_path (str): Path to the HuggingFace checkpoint.
         """
-        from mttl.models.library.peft import create_expert_from_peft_path
+        from mttl.models.library.peft import load_expert_from_peft_checkpoint
 
         self.add_expert_instance(
-            create_expert_from_peft_path(hf_expert_path, expert_name=expert_name),
+            load_expert_from_peft_checkpoint(hf_expert_path, expert_name=expert_name),
             expert_name=expert_name,
             action=action,
             is_default=is_default,

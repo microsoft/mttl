@@ -147,6 +147,7 @@ def load_expert(
     from huggingface_hub import list_repo_files
 
     from mttl.models.base_model import WEIGHTS_NAME
+    from mttl.models.library.peft import load_expert_from_peft_checkpoint
     from mttl.models.lightning.base_module import CHECKPOINT_PATH_IN_HUB
 
     if expert_library is not None and expert_path in expert_library:
@@ -164,12 +165,17 @@ def load_expert(
         files = list_repo_files(expert_path)
     except:
         raise ValueError(
-            f"Could not find expert at {expert_path}, are you sure it's a huggingface repository?"
+            f"Could not list {expert_path}, are you sure it's a HF repository?"
         )
 
-    if WEIGHTS_NAME in files:
+    if "adapter_config.json" in files:
+        # PEFT expert!
+        return load_expert_from_peft_checkpoint(expert_path, expert_name)
+    elif WEIGHTS_NAME in files:
+        # MTTL expert trained with HFTrainer
         return load_expert_from_hf_checkpoint(expert_path, expert_name)
     elif CHECKPOINT_PATH_IN_HUB in files:
+        # MTTL expert trained with PytorchLightning
         return load_expert_from_pl_checkpoint(expert_path, expert_name)
 
 
@@ -250,7 +256,7 @@ def load_expert_from_hf_checkpoint(
     expert_name: str = None,
     **kwargs,
 ):
-    """Transforms a potentially lightning checkpoint into an Expert object."""
+    """Transforms an expert model trained with MTTL or PEFT into an Expert object."""
     # load the expert weights
     import os
 

@@ -45,7 +45,7 @@ def load_peft_weights(peft_dir) -> Dict[str, torch.Tensor]:
     return tensors
 
 
-def create_expert_from_peft_path(peft_path: str, expert_name: str = None) -> Expert:
+def load_expert_from_peft_checkpoint(peft_path: str, expert_name: str = None) -> Expert:
     """
     Load the PEFT adapter from the given path.
 
@@ -57,6 +57,12 @@ def create_expert_from_peft_path(peft_path: str, expert_name: str = None) -> Exp
     """
     peft_dir = snapshot_download(peft_path)
     config_path = os.path.join(peft_dir, "adapter_config.json")
+
+    if not os.path.exists(config_path):
+        raise ValueError(
+            f"The provided repository does not seem to be a PEFT repository."
+        )
+
     with open(config_path) as f:
         config = json.load(f)
 
@@ -91,12 +97,12 @@ def create_expert_from_peft_path(peft_path: str, expert_name: str = None) -> Exp
 
         tensors = {parse_lora_weight(name): tensor for name, tensor in tensors.items()}
     else:
-        raise ValueError(f"Not supported PEFT type {config['peft_type']}")
+        raise ValueError(f"Not supported PEFT type {config['peft_type']}, yet!")
 
     expert_info = ExpertInfo(
         expert_config=modifier_config,
         expert_name=expert_name or peft_path.replace("/", "_"),
-        training_config=None,
+        training_config={},
         expert_model=base_model,
     )
 
