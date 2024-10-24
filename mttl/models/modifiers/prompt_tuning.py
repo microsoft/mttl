@@ -318,7 +318,7 @@ class PromptTuningConfig(ModifierConfig):
     model: str = "gpt-neo"
     soft_prompt_length: int = 10
     n_tasks: int = None
-    # This argument is deprecated, to ensure compatibility with `add_expert_to_transformer`
+    # This argument is deprecated
     patch_last_k_layers: int = -1
     prompt_placement: str = "prefix"
 
