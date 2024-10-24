@@ -3,9 +3,9 @@ import os
 from copy import deepcopy
 
 import torch
-import wandb
 from pytorch_lightning import seed_everything
 
+import wandb
 from mttl.arguments import EvaluationConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
@@ -20,7 +20,11 @@ from mttl.models.library.library_transforms import (
     WeightedLinearMergeConfig,
 )
 from mttl.models.lightning.callbacks import LossCallback
-from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
+from mttl.models.lightning.expert_module import (
+    ExpertModule,
+    MoEModule,
+    MultiExpertModule,
+)
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.utils import remote_login
 
@@ -185,6 +189,10 @@ def run_eval(args: EvaluationConfig):
 
         module = MultiExpertModule(**vars(expert.training_config)).to("cuda")
         module.add_expert_instance(expert, is_default=True)
+
+    elif args.merge_or_route in ["peer"]:
+        module: MoEModule = MoEModule(**vars(an_expert.training_config)).to("cuda")
+        module.model.model.load_state_dict(an_expert.expert_weights, strict=False)
 
     elif args.merge_or_route == "uniform_lora_after_op":
         # Here we merge the LoRA experts after the outer product we cannot really do it
