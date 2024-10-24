@@ -221,7 +221,8 @@ class ExpertLibrary:
             logger.info(f"Metadata for {metadata.expert_name} uploaded successfully.")
 
     def keys(self):
-        return self.data.keys()
+        # always returns elements in sorted order by name
+        return sorted(self.data.keys())
 
     def items(self):
         for k in list(self.keys()):

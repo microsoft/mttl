@@ -191,6 +191,11 @@ class MultiExpertMixin:
 
         import tqdm
 
+        if type(library) == str:
+            from mttl.models.library.expert_library import ExpertLibrary
+
+            library = ExpertLibrary.get_expert_library(library)
+
         def add_module(self, module_name):
             expert_dump = library[module_name]
             self.add_expert_instance(expert_dump)
