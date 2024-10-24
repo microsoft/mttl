@@ -264,19 +264,19 @@ class MultiExpertMixin:
         is_default: bool = False,
         expert_library: ExpertLibrary = None,
     ):
-        from mttl.models.library.expert import load_expert
+        from mttl.models.library.expert import Expert, load_expert
 
-        expert = load_expert(
+        expert: Expert = load_expert(
             expert_path,
             expert_name=expert_name,
             expert_library=expert_library,
         )
 
-        if self.hparams.model != expert.training_config.model:
+        if self.hparams.model != expert.expert_info.expert_model:
             raise ValueError(
                 "The expert has been trained on top of a different model!"
                 " Detected: {} - Expected: {}".format(
-                    expert.training_config.model, self.hparams.model
+                    expert.expert_info.expert_model, self.hparams.model
                 )
             )
 
