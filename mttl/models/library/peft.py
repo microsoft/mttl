@@ -29,7 +29,7 @@ def load_peft_weights(peft_dir) -> Dict[str, torch.Tensor]:
 
     if os.path.isfile(tensor_path):
         tensors: Dict[str, torch.Tensor] = {}
-        with safetensors.safe_open(lora_tensor_path, framework="pt") as f:  # type: ignore
+        with safetensors.safe_open(tensor_path, framework="pt") as f:  # type: ignore
             for module in f.keys():
                 tensors[module] = f.get_tensor(module)
 
@@ -92,10 +92,12 @@ def load_expert_from_peft_checkpoint(peft_path: str, expert_name: str = None) ->
                         name = ".".join(parts[2:-2])
                         # in peft, lora_B = lora_a, lora_A = lora_b
                         is_a = parts[-2] == "lora_A"
-                        return name + (".lora_b" if is_a else ".lora_a")
+                        return name + (".lora_a" if is_a else ".lora_b")
             raise ValueError(f"Can't parse lora weight {name}!")
 
-        tensors = {parse_lora_weight(name): tensor for name, tensor in tensors.items()}
+        tensors = {
+            parse_lora_weight(name): tensor.T for name, tensor in tensors.items()
+        }
     else:
         raise ValueError(f"Not supported PEFT type {config['peft_type']}, yet!")
 

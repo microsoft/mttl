@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional, Union
 import torch
 from huggingface_hub import hf_hub_download
 from transformers.modeling_outputs import CausalLMOutput
+from transformers.utils import PushToHubMixin
 
 from mttl.logging import logger
 from mttl.models.expert_config import AutoModelConfig, BaseExpertModelConfig
@@ -24,7 +25,7 @@ def filter_kwargs(func, kwargs):
     return {k: v for k, v in kwargs.items() if k in inspect.signature(func).parameters}
 
 
-class BaseExpertModel(torch.nn.Module, Registrable):
+class BaseExpertModel(torch.nn.Module, Registrable, PushToHubMixin):
     def __init__(
         self, config: BaseExpertModelConfig, model_object=None, **loading_kwargs
     ):
