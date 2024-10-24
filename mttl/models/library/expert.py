@@ -265,6 +265,8 @@ def load_expert_from_hf_checkpoint(
     # load the expert weights
     import os
 
+    from huggingface_hub import hf_hub_download
+
     from mttl.models.base_model import WEIGHTS_NAME
     from mttl.models.expert_config import CONFIG_NAME, AutoModelConfig
     from mttl.models.expert_model import ExpertModel, ExpertModelConfig
@@ -278,10 +280,21 @@ def load_expert_from_hf_checkpoint(
             f"Expected an ExpertModelConfig when loading a checkpoint, got {config.__class__} instead."
         )
 
+    # instead of calling from_pretrained, we load the expert directly, this avoids the need of instantiating the full base model
     # gather mttl training arguments from the checkpoint if available
     mttl_args_file = os.path.join(expert_path, MTTL_ARGS_NAME)
 
-    if os.path.isfile(mttl_args_file):
+    if not os.path.exists(mttl_args_file):
+        from huggingface_hub.errors import EntryNotFoundError
+
+        try:
+            mttl_args_file = hf_hub_download(expert_path, MTTL_ARGS_NAME)
+        except EntryNotFoundError:
+            logger.debug("No MTTL args file found in the expert checkpoint!")
+
+            mttl_args_file = None
+
+    if mttl_args_file and os.path.isfile(mttl_args_file):
         try:
             training_config = torch.load(mttl_args_file, weights_only=False)
         except:
@@ -289,7 +302,11 @@ def load_expert_from_hf_checkpoint(
     else:
         training_config = None
 
-    state_dict = torch.load(os.path.join(expert_path, WEIGHTS_NAME), weights_only=True)
+    weights_file = os.path.join(expert_path, WEIGHTS_NAME)
+    if not os.path.exists(weights_file):
+        weights_file = hf_hub_download(expert_path, WEIGHTS_NAME)
+
+    state_dict = torch.load(weights_file, weights_only=True)
 
     # we assume it's an expert model, which is used to train single experts
     state_dict = {
@@ -302,7 +319,7 @@ def load_expert_from_hf_checkpoint(
         expert_task_name=config.task_name,
         expert_model=config.base_model,
         expert_config=config.modifier_config,
-        training_config=training_config,
+        training_config=training_config or {},
     )
     expert = Expert(
         expert_info=expert_info,
