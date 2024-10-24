@@ -1,4 +1,5 @@
 import copy
+import json
 import logging
 from dataclasses import dataclass
 
@@ -22,7 +23,8 @@ logger.setLevel(logging.INFO)
 @dataclass
 class KEArguments(MultiExpertConfig):
     # set the following if you want to enable the NQA callback during training
-    nqa_dataset: str = "sordonia/narrativeqa"
+    nqa_dataset: str = None
+    # Where to save the KE expert
     ke_hf_path: str = None
 
 
@@ -37,41 +39,27 @@ def train_ke(training_args):
 
     if training_args.library_id:
         logger.info("Loading expert library: %s", training_args.library_id)
-        if training_args.router_granularity != "coarsegrained":
-            logger.warning("Overwriting `router_granularity` to 'coarsegrained'")
-            training_args.router_granularity = "coarsegrained"
 
-        if training_args.router_selector != "ke_selector":
-            logger.warning("Overwriting `router_selector` to 'ke_selector'")
-            training_args.router_selector = "ke_selector"
-
-        # expert_library = create_library(training_args)
         model_config = KMMoEModelConfig(
             base_model=training_args.model,
             library_id=training_args.library_id,
-            selector_config=training_args.selector_config,
+            expert_selection=args.finetune_task_name,
         )
         model = KMMoEModel(model_config)
+
         if model.ke_expert_name not in training_args.trainable_param_names:
             # Let's provide a fix that works for the current setup
-            if training_args.trainable_param_names == ".*lora_[ab].*":
-                logger.warning("Overwriting `trainable_param_names` to include the KE")
-                training_args.trainable_param_names = (
-                    f".*lora_[ab].{model.ke_expert_name}.*"
-                )
-            else:
-                raise ValueError(
-                    "Please ensure that the Knowledge Extractor will be trained"
-                )
+            logger.warning("Overwriting `trainable_param_names` to include the KE")
+            training_args.trainable_param_names = f".*{model.ke_expert_name}.*"
 
-        # Make sure that when creating the datamodule, we only load tasks
         # for which we have trained KM experts
-        if training_args.finetune_task_name:
-            logger.warning("Overwriting `finetune_task_name` to match the KM experts")
-
-        training_args.finetune_task_name = list(
-            filter(lambda x: x != model.ke_expert_name, model.experts_names)
-        )
+        if not training_args.finetune_task_name:
+            logger.info(
+                f"Setting `finetune_task_name` to match with experts in the model"
+            )
+            training_args.finetune_task_name = list(
+                filter(lambda x: x != model.ke_expert_name, model.experts_names)
+            )
     else:
         logger.info("Loading model without expert library")
         model_config = ExpertModelConfig(
@@ -123,5 +111,20 @@ def train_ke(training_args):
 if __name__ == "__main__":
     args = KEArguments.parse()
     assert args.dataset_config
+
+    if args.nqa_dataset is None:
+        logger.info(f"Setting callback dataset to {args.dataset}")
+        args.nqa_dataset = args.dataset
+
+    # Allow to set trainable tasks from a json split file (e.g. nqa_mini_split.json)
+    if isinstance(args.finetune_task_name, str) and args.finetune_task_name.endswith(
+        ".json"
+    ):
+        with open(args.finetune_task_name, "r") as f:
+            split_dict = json.load(f)
+
+        tasks = split_dict["train"] + split_dict["dev"]
+        logger.info(f"Setting finetune_task_name to {tasks}")
+        args.finetune_task_name = tasks
 
     train_ke(args)
