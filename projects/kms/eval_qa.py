@@ -3,12 +3,13 @@ import logging
 from dataclasses import dataclass
 
 import torch.nn.functional as F
-
-# register this datamodule!
 from lightning_fabric import seed_everything
-from train_qa import KEArguments, post_process_args
+from train_qa import KEArguments
 
 from mttl.logging import setup_logging
+from mttl.models.containers.selectors.km_selector import (
+    KnowledgeExtractorSelectorConfig,
+)
 from mttl.models.expert_model import MoEModel
 from mttl.models.hf.trainer import LMTrainer
 from mttl.models.km_model import KMMoEModel, KMMoEModelConfig
@@ -40,6 +41,7 @@ def eval_qa(training_args):
         base_model=training_args.model,
         library_id=None,
         expert_selection=args.finetune_task_name,
+        selector_config=KnowledgeExtractorSelectorConfig(),
     )
 
     # create a model without any experts
