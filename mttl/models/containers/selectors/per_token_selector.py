@@ -106,7 +106,13 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
         else:
             mean_angle = angle.mean()
 
-        task = self.routing_infos.task_sources[0]
+        task = (
+            self.routing_infos.task_names[0]
+            if self.routing_infos.task_names is not None
+            and len(self.routing_infos.task_names) > 0
+            else "default"
+        )
+
         to_store = {"angle": mean_angle.item()}
         self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)
         self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
@@ -125,7 +131,8 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
         else:
             mean_entropy = entropy.mean()
 
-        task = self.routing_infos.task_sources[0]
+        task = self.routing_infos.task_names[0]
+
         to_store = {"ent_routing": mean_entropy.item()}
         self.metric_logger.update(prefix=f"task_{task}", value_dict=to_store)
         self.metric_logger.update(prefix=self.__layer_name__, value_dict=to_store)
@@ -134,7 +141,7 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
         self.metric_logger.update(value_dict=to_store)
 
     @safe_logging
-    def _maybe_log_in_dist(self, logits):
+    def _log_in_dist(self, logits):
         probs = F.softmax(logits, dim=-1)
         bs, seq_len, _ = probs.size()
         task_names = self.routing_infos.task_names
@@ -188,7 +195,10 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
         angle = router_logits / input.norm(p=2, dim=-1, keepdim=True).clamp(min=EPS)
         angle = angle / prototypes.norm(p=2, dim=-1).view(1, 1, -1).clamp(min=EPS)
 
-        self._log_angle(angle)
+        task_names = self.routing_infos.task_names
+        in_dist = task_names is not None and all(
+            [t in self.task_to_expert_name for t in task_names]
+        )
 
         # control entropy of distribution
         router_logits /= temp
@@ -209,7 +219,9 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
             router_probs = F.softmax(router_logits, dim=-1, dtype=torch.float)
 
         self._log_entropy(router_logits)
-        self._maybe_log_in_dist(router_logits)
+        if in_dist:
+            self._log_angle(angle)
+            self._log_in_dist(router_logits)
 
         return BatchSequenceExpertsAndWeightsSelectorOutput(
             experts=experts, weights=router_probs
@@ -224,7 +236,7 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
             ).view(1, -1)
         else:
             warn_once(
-                f"Library artifacts not loaded for {self.__class__}, using zero initialization."
+                f"Library artifacts not loaded for {self.__class__.__name__}, using zero initialization."
             )
             proto = torch.zeros(
                 1,

@@ -7,10 +7,7 @@ def test_load_selectors_from_config():
         TaskNameSelectorConfig,
         get_selector,
     )
-    from mttl.models.containers.selectors.moe_selector import (
-        MOERKHSSelector,
-        MOERKHSSelectorConfig,
-    )
+    from mttl.models.containers.selectors.moe_selector import MOERKHSSelectorConfig
 
     config = MOERKHSSelectorConfig(emb_dim=10)
 

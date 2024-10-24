@@ -11,7 +11,6 @@ import torch
 from transformers import StoppingCriteria, StoppingCriteriaList
 
 from mttl.logging import logger
-from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
 
 
 def decode(preds, tokenizer, clean_up_tokenization_spaces=True):
@@ -268,6 +267,11 @@ class GenerativeEvaluator(Evaluator):
         return generation_output
 
     def generate_for_batch(self, model, batch):
+        from mttl.models.expert_model import BaseExpertModel
+        from mttl.models.lightning.base_module import LightningEfficientCheckpoint
+        from mttl.models.utils import transfer_batch_to_device
+
+        # wrapped model
         if hasattr(model, "module"):
             model = model.module
 
@@ -293,9 +297,11 @@ class GenerativeEvaluator(Evaluator):
         batch = transfer_batch_to_device(batch, device)
 
         with torch.no_grad():
-            if isinstance(model, EfficientCheckpointModule):
+            if isinstance(model, LightningEfficientCheckpoint) or isinstance(
+                model, BaseExpertModel
+            ):
                 predictions = model.generate(
-                    batch,
+                    **batch,
                     generation_config=model.generation_config,
                     return_dict_in_generate=True,
                     output_scores=True,

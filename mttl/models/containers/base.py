@@ -1,25 +1,17 @@
 import abc
-from typing import Dict, List, Union
+from typing import List, Union
 
-import torch
 from pyparsing import abstractmethod
-from torch import Tensor, nn
+from torch import nn
 
-from mttl.logging import warn_once
 from mttl.models.containers.selectors.base import Selector, TaskNameSelector
-from mttl.models.containers.selectors.kv_selector import KVTaskNameSelector
-from mttl.models.containers.selectors.selector_output import (
-    BatchExpertsAndWeightsSelectorOutput,
-    BatchExpertsSelectorOutput,
-    BatchSequenceExpertsAndWeightsSelectorOutput,
-    ExpertsAndWeightsSelectorOutput,
-    SelectorOutput,
-)
 from mttl.models.library.expert import Expert
-from mttl.models.modifiers.base import ModifierConfig, ModifyMixin
-from mttl.models.modifiers.kv_adapter import KVAdapter, KVAdapterConfig
-from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
-from mttl.models.modifiers.modify_model import get_modifier_name
+from mttl.models.modifiers.base import ModifierConfig
+
+
+class ContainerFullException(Exception):
+    def __init__(self):
+        super().__init__("Container is full. Cannot add more experts.")
 
 
 class Container(abc.ABC):

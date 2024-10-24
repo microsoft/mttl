@@ -1,15 +1,41 @@
+import functools
 import glob
 import hashlib
 import os
 import random
 import string
+from datetime import time
+from functools import wraps
+from time import sleep
 from typing import Optional
 
 import torch
 import torch.nn as nn
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
-from mttl.logging import logger
+from mttl.logging import logger, warn_once
+
+
+def retry(max_retries=10, wait_seconds=60):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(1, max_retries + 1):
+                try:
+                    result = func(*args, **kwargs)
+                    return result
+                except Exception as e:  # requests.exceptions.HTTPError as e:
+                    print(e, type(e), "retrying...")
+                    if attempt < max_retries:
+                        print(f"Waiting {wait_seconds} seconds before retrying...")
+                        sleep(wait_seconds)
+            raise RuntimeError(
+                f"Function {wrapper.__name__} failed after {max_retries} attempts."
+            )
+
+        return wrapper
+
+    return decorator
 
 
 def remote_login(token: Optional[str] = None):
@@ -131,6 +157,23 @@ def agg_dicts(list_of_dicts, agg="mean", tag=False):
         for k, v in out.items():
             out[k] = v / len(list_of_dicts)
     return out
+
+
+def deprecated(message=None):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapped(*args, **kwargs):
+            warning_msg = (
+                message
+                if message
+                else f"{func.__name__}() is deprecated and will be removed in a future version."
+            )
+            warn_once(warning_msg)
+            return func(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
 
 
 def get_checkpoint_path(path, step=None, use_last=False):

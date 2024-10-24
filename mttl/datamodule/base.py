@@ -1,7 +1,8 @@
+import dataclasses
 import itertools
 from collections import defaultdict
-from dataclasses import dataclass
-from typing import Any, Dict, Optional, Union
+from dataclasses import dataclass, make_dataclass
+from typing import Any, Dict, List, Optional, Type, Union
 
 import numpy as np
 import torch
@@ -86,6 +87,7 @@ class DatasetConfig:
     model_family: str = "gpt"
     train_on_inputs: bool = False
     add_eos_to_targets: bool = True
+    add_eos_to_downstream_targets: bool = True
     finetune_task_name: str = None
     subsample_train: int = None
     subsample_dev: int = None
@@ -95,10 +97,96 @@ class DatasetConfig:
     pack_sequences: bool = False  # True
     pad_to_multiple_of: int = 8
     max_seq_per_pack: int = 4
+    task_id_field: str = "task_id"
+    task_name_field: str = "task_name"
+    task_source_field: str = "task_source"
+
+
+class PackedMixin:
+    @classmethod
+    def pad_sequence_wrapper(
+        cls, tensor_list, batch_first, padding_value, side="right"
+    ):
+        """Padding Sequence Fn that supports left padding"""
+        if side == "left":
+            tensor_list = [x.flip(0) for x in tensor_list]
+
+        padded = pad_sequence(
+            tensor_list, batch_first=batch_first, padding_value=padding_value
+        )
+
+        if side == "left":
+            padded = padded.flip(1)
+
+        return padded
+
+    def _get_nested_type(self, item):
+        while isinstance(item, (list, tuple)):
+            item = item[0]
+        return type(item)
+
+    def _tensor_dtype(self, item):
+        dtype = self._get_nested_type(item)
+        return {"int": torch.int64, "float": torch.float32, "bool": torch.bool}.get(
+            dtype.__name__, None
+        )
+
+    def packed_collate(self, batch):
+        output_batch = defaultdict(list)
+
+        for batch_item in batch:
+            for key, value in batch_item.items():
+                dtype = self._tensor_dtype(value)
+
+                if dtype:
+                    output_batch[key].append(torch.Tensor(value).to(dtype))
+                else:
+                    output_batch[key].append(value)
+
+        # create proper containers
+        for key, value in output_batch.items():
+            if isinstance(value[0], torch.Tensor):
+                pad_token = {
+                    "input_ids": self.tokenizer.pad_token_id,
+                    "labels": self.label_pad_token_id,
+                }.get(key, 0)
+
+                value = self.pad_sequence_wrapper(
+                    value,
+                    batch_first=True,
+                    padding_value=pad_token,
+                    side=self.tokenizer.padding_side,
+                )
+                output_batch[key] = value
+
+        packed_seq_lens = output_batch["seq_lens"].flatten().cumsum(0)
+        output_batch["packed_seq_lens"] = F.pad(packed_seq_lens, (1, 0)).to(torch.int32)
+
+        # build the appropriate "block"-lower triangular mask for sdpa attention
+        bs, seq_len = output_batch["input_ids"].shape
+        packed_attn_mask = torch.zeros(bs, 1, seq_len, seq_len, dtype=torch.bool)
+        for i in range(bs):
+            start_idx = 0
+            for seq_len in output_batch["seq_lens"][i]:
+                packed_attn_mask[
+                    i,
+                    :,
+                    start_idx : start_idx + seq_len,
+                    start_idx : start_idx + seq_len,
+                ] = True
+                start_idx += seq_len
+
+            # For whatever reason, we need to let padding tokens attend the previous context ¯\_(ツ)_/¯
+            # Otherwise SDPA has nans
+            packed_attn_mask[i, :, start_idx:, :start_idx] = True
+
+        packed_attn_mask = packed_attn_mask.tril()
+        output_batch["packed_attn_mask"] = packed_attn_mask
+        return dict(output_batch)
 
 
 @dataclass
-class DefaultCollator:
+class DefaultCollator(PackedMixin):
     """Simple collator
 
     Converts a batch of examples into a batch of inputs and labels for a sequence to sequence task.
@@ -118,6 +206,14 @@ class DefaultCollator:
     train_on_inputs: bool = False
     task_to_id: dict = None
     add_eos_to_targets: bool = True
+    task_id_field: str = (
+        "task_id"  # where to read task id information from in the batch
+    )
+    task_name_field: str = (
+        "task_name"  # where to read task name information from in the batch
+    )
+    task_source_field: str = "task_source"
+    collate_extra_fields: Optional[List] = None
 
     def enforce_eos(self, targets):
         # simulate the default behaviour of LLamatokenizer, when adding eos token and truncating: the last token must always be eos
@@ -321,95 +417,16 @@ class DefaultCollator:
         output_batch["labels"] = targets
         return output_batch
 
-    def _get_nested_type(self, item):
-        while isinstance(item, (list, tuple)):
-            item = item[0]
-        return type(item)
-
-    def _tensor_dtype(self, item):
-        dtype = self._get_nested_type(item)
-        return {"int": torch.int64, "float": torch.float32, "bool": torch.bool}.get(
-            dtype.__name__, None
-        )
-
-    def __call__(self, batch: Dict):
-        # is our input already tokenized ?
-        # trim according to the attention mask and return
-
-        def pad_sequence_wrapper(tensor_list, batch_first, padding_value, side="right"):
-            """Padding Sequence Fn that supports left padding"""
-            if side == "left":
-                tensor_list = [x.flip(0) for x in tensor_list]
-
-            padded = pad_sequence(
-                tensor_list, batch_first=batch_first, padding_value=padding_value
-            )
-
-            if side == "left":
-                padded = padded.flip(1)
-
-            return padded
-
+    def __call__(self, batch):
         if "input_ids" in batch[0]:
-            output_batch = defaultdict(list)
-            for batch_item in batch:
-                for key, value in batch_item.items():
-                    dtype = self._tensor_dtype(value)
-
-                    if dtype:
-                        output_batch[key].append(torch.Tensor(value).to(dtype))
-                    else:
-                        output_batch[key].append(value)
-
-            # create proper containers
-            for key, value in output_batch.items():
-                if isinstance(value[0], torch.Tensor):
-                    pad_token = {
-                        "input_ids": self.tokenizer.pad_token_id,
-                        "labels": self.label_pad_token_id,
-                    }.get(key, 0)
-                    value = pad_sequence_wrapper(
-                        value,
-                        batch_first=True,
-                        padding_value=pad_token,
-                        side=self.tokenizer.padding_side,
-                    )
-                    output_batch[key] = value
-
-            packed_seq_lens = output_batch["seq_lens"].flatten().cumsum(0)
-            output_batch["packed_seq_lens"] = F.pad(packed_seq_lens, (1, 0)).to(
-                torch.int32
-            )
-
-            # build the appropriate "block"-lower triangular mask for sdpa attention
-            bs, seq_len = output_batch["input_ids"].shape
-            packed_attn_mask = torch.zeros(bs, 1, seq_len, seq_len, dtype=torch.bool)
-            for i in range(bs):
-                start_idx = 0
-                for seq_len in output_batch["seq_lens"][i]:
-                    packed_attn_mask[
-                        i,
-                        :,
-                        start_idx : start_idx + seq_len,
-                        start_idx : start_idx + seq_len,
-                    ] = True
-                    start_idx += seq_len
-
-                # For whatever reason, we need to let padding tokens attend the previous context ¯\_(ツ)_/¯
-                # Otherwise SDPA has nans
-                packed_attn_mask[i, :, start_idx:, :start_idx] = True
-
-            packed_attn_mask = packed_attn_mask.tril()
-            output_batch["packed_attn_mask"] = packed_attn_mask
-
-            return dict(output_batch)
+            return self.packed_collate(batch)
 
         # Otherwise process as expected
         sources = [b["source"] for b in batch]
         labels = [b["target"] for b in batch]
-        task_ids = [b.get("task_id", None) for b in batch]
-        task_names = [b.get("task_name", None) for b in batch]
-        task_sources = [b.get("task_source", None) for b in batch]
+        task_ids = [b.get(self.task_id_field, None) for b in batch]
+        task_names = [b.get(self.task_name_field, None) for b in batch]
+        task_sources = [b.get(self.task_source_field, None) for b in batch]
 
         output_batch = (
             self.prepare_inputs_for_gpt_family(sources, labels)
@@ -436,10 +453,11 @@ class DefaultCollator:
         output_batch["labels_texts"] = labels
         output_batch["task_sources"] = task_sources
 
-        # append other fields that might be available
-        for key in batch[0].keys():
-            if key not in output_batch:
-                output_batch[key] = [b[key] for b in batch]
+        # integrate extra fields in the batch if required
+        if self.collate_extra_fields:
+            for field in self.collate_extra_fields:
+                output_batch[field] = [b[field] for b in batch]
+
         return output_batch
 
 
@@ -520,6 +538,11 @@ def subsample_dst(dataset, subsample: int, rng: torch.Generator = None):
 
 
 class DataModule(LightningDataModule, Registrable):
+    # default collator class
+    collate_class: Type = DefaultCollator
+    # if you want the collator to return extra fields, you can set this to the list of fields
+    collate_extra_fields: List[str] = None
+
     def train_dataloader(self, subsample=None):
         subsample = subsample or self.config.subsample
         train_dataset = self.train_dataset
@@ -570,7 +593,7 @@ class DataModule(LightningDataModule, Registrable):
 
     @property
     def collate_fn(self):
-        return DefaultCollator(
+        return self.collate_class(
             tokenizer=self.tokenizer,
             padding="longest",
             max_input_length=self.config.max_input_length,
@@ -582,11 +605,16 @@ class DataModule(LightningDataModule, Registrable):
             train_on_inputs=self.config.train_on_inputs,
             add_eos_to_targets=self.config.add_eos_to_targets,
             task_to_id=self.task_to_id,
+            task_name_field=self.config.task_name_field,
+            task_id_field=self.config.task_id_field,
+            task_source_field=self.config.task_source_field,
+            collate_extra_fields=self.collate_extra_fields,
         )
 
     def print_infos(self):
         logger.info("Dataset name: %s", self.config.dataset)
         logger.info("Reader class: %s", self.__class__.__name__)
+
         if self.train_dataset is not None and len(self.train_dataset) > 0:
             logger.info("Training steps: %s" % len(self.train_dataloader()))
             logger.info("Training samples: %s" % len(self.train_dataset))
@@ -607,7 +635,11 @@ class DataModule(LightningDataModule, Registrable):
     def task_to_id(self):
         return self._task_to_id
 
-    def create_train_valid_split(self, dataset, validation_portion=None):
+    def create_train_valid_split(
+        self,
+        dataset: Union[ArrowDataset, torch.utils.data.Dataset],
+        validation_portion: float = 0.05,
+    ):
         # always use the same split for the dataset
         validation_portion = validation_portion or self.config.validation_portion
 
@@ -617,17 +649,26 @@ class DataModule(LightningDataModule, Registrable):
             )
             return dataset, None
 
-        n_tr_samples = int(len(dataset) * (1 - validation_portion))
-
-        train_dataset, dev_dataset = torch.utils.data.random_split(
-            dataset,
-            [
-                n_tr_samples,
-                len(dataset) - n_tr_samples,
-            ],
-            generator=self.rng,
-        )
-        return train_dataset, dev_dataset
+        if isinstance(dataset, ArrowDataset):
+            split_dataset = dataset.train_test_split(
+                test_size=validation_portion, generator=self.rng_numpy
+            )
+            return split_dataset["train"], split_dataset["test"]
+        elif isinstance(dataset, torch.utils.data.Dataset):
+            n_tr_samples = int(len(dataset) * (1 - validation_portion))
+            train_dataset, dev_dataset = torch.utils.data.random_split(
+                dataset,
+                [
+                    n_tr_samples,
+                    len(dataset) - n_tr_samples,
+                ],
+                generator=self.rng,
+            )
+            return train_dataset, dev_dataset
+        else:
+            raise ValueError(
+                "Only ArrowDataset and torch.utils.data.Dataset are supported for train/valid split."
+            )
 
     def subsample_dataset(self, dataset, n_samples, per_task=False):
         """
@@ -657,7 +698,7 @@ class DataModule(LightningDataModule, Registrable):
         # make this deterministic to always sample the same subset
         if isinstance(dataset, ArrowDataset):
             if per_task:
-                task_names = dataset.unique("task_name")
+                task_names = dataset.unique(self.config.task_name_field)
                 subsampled_dataset = []
                 for i, task_name in enumerate(task_names):
                     logger.info(
@@ -666,7 +707,9 @@ class DataModule(LightningDataModule, Registrable):
                     task_idxs = torch.tensor(
                         [
                             index
-                            for index, value in enumerate(dataset["task_name"])
+                            for index, value in enumerate(
+                                dataset[self.config.task_name_field]
+                            )
                             if value == task_name
                         ]
                     )
@@ -674,7 +717,12 @@ class DataModule(LightningDataModule, Registrable):
                     task_idxs = task_idxs[idxs]
                     task_dataset = dataset.select(task_idxs)
                     subsampled_dataset.append(task_dataset)
-                    assert all([t == task_name for t in task_dataset["task_name"]])
+                    assert all(
+                        [
+                            t == task_name
+                            for t in task_dataset[self.config.task_name_field]
+                        ]
+                    )
                 subsampled_dataset = concatenate_datasets(subsampled_dataset)
             else:
                 idxs = get_dst_idxs_sampled(n_samples, total_size)
@@ -690,13 +738,15 @@ class DataModule(LightningDataModule, Registrable):
         self, config: Union[DatasetConfig, Any], for_generation=False, val_mixin=None
     ):
         super().__init__()
-        self.rng = torch.Generator().manual_seed(1234)
+
         self.config = config
         self._task_names = []
         self._task_to_id = {}
         self.val_mixin = val_mixin
         self.for_generation = for_generation
         self.tokenizer = get_tokenizer(config, for_generation=for_generation)
+        self.rng = torch.Generator().manual_seed(1234)
+        self.rng_numpy = np.random.RandomState(1234)
         self.setup_dataset()
         self.post_setup_dataset()
 
@@ -706,26 +756,27 @@ class DataModule(LightningDataModule, Registrable):
     def setup_dataset(self):
         pass
 
-    def tokenize_dataset(self, dataset):
+    def tokenize_dataset(self, dataset: ArrowDataset):
+        """Tokenize the full dataset in preparation for packing.
 
+        We call collate_fn and copy it to not disrupt the behavior of the collate_fn
+        for this dataset.
+        """
         # NOTE: padding is hardcoded to `longest` already.
         # return tensors is harcoded to `pt`, but tokenizer in dataset.map overwrites this
-        # TODO: write a test for this
-        pad_to_multiple = self.config.pad_to_multiple_of
-        self.config.pad_to_multiple_of = 1
-
-        # remove `rng` before mapping, as it's not pickleable
-        rng = self.rng
-        self.rng = None
+        collate_fn_ = dataclasses.replace(self.collate_fn)
+        collate_fn_.pad_to_multiple_of = 1
+        collate_fn_.padding = "longest"
 
         def collate_fn_wrapper(batch):
-            out = self.collate_fn([batch])
+            out = collate_fn_([batch])
             return {k: v[0] for k, v in out.items()}
 
-        dataset = dataset.map(collate_fn_wrapper, batched=False, num_proc=20)
-        self.rng = rng
-        self.collate_fn.pad_to_multiple_of = pad_to_multiple
-
+        dataset = dataset.map(
+            collate_fn_wrapper,
+            batched=False,
+            num_proc=20,
+        )
         return dataset
 
     def pack_sequences(self, dataset, max_sequences=4, shuffle=True):
@@ -736,16 +787,12 @@ class DataModule(LightningDataModule, Registrable):
         if shuffle:
             dataset = dataset.shuffle(seed=42)
 
-        # TODO: first partition dataset according to `task_name`, and
-        # pack each task individually to ensure that we don't mix tasks
-
         # Very basic code that will iterate over sequences one by one,
         # and merge together until the max_input_length is reached
         # This is not optimal, but it's a start
         max_length = self.config.max_input_length
 
         def group(examples):
-
             def new_container():
                 # for when starting a new packed batch
                 return {k: [] for k in list(examples.keys()) + ["seq_lens"]}
@@ -759,9 +806,8 @@ class DataModule(LightningDataModule, Registrable):
                     elif isinstance(v, list):
                         container[k] += v
                     else:
-                        raise ValueError(f"Unknown type {type(v)}")
+                        raise ValueError(f"Unknown type {type(v)} for key {k}.")
 
-                # TODO: THis is SOMEHOW WRONG. CHECK.
                 container["seq_lens"] += [len(example["input_ids"])]
 
             def add_finished_sequence(container, example):
@@ -793,6 +839,7 @@ class DataModule(LightningDataModule, Registrable):
                 else:
                     if len(current_lens) > 0:
                         add_finished_sequence(grouped_samples, packed)
+
                     packed = new_container()
                     current_lens = []
                     trim_ex(ex)
@@ -830,6 +877,7 @@ class DataModule(LightningDataModule, Registrable):
 
             if self.config.pack_sequences and split == "train":
                 dataset = getattr(self, f"{split}_dataset")
+
                 logger.info(f"Packing sequences for {split} dataset")
                 dataset = self.tokenize_dataset(dataset)
                 dataset = self.pack_sequences(
@@ -855,6 +903,9 @@ class MultiChoiceDataModule(DataModule):
             train_on_inputs=self.config.train_on_inputs,
             task_to_id=self.task_to_id,
             add_eos_to_targets=self.config.add_eos_to_targets,
+            task_name_field=self.config.task_name_field,
+            task_id_field=self.config.task_id_field,
+            task_source_field=self.config.task_source_field,
         )
 
 
@@ -879,10 +930,14 @@ class MultiChoiceSourceDataModule(DataModule):
             task_to_id=self.task_to_id,
             multisource=True,
             add_eos_to_targets=self.config.add_eos_to_targets,
+            task_name_field=self.config.task_name_field,
+            task_id_field=self.config.task_id_field,
+            task_source_field=self.config.task_source_field,
         )
 
 
 def get_datamodule(args, for_generation=False, dataset_override=None):
+    from mttl.arguments import DataArgs
     from mttl.datamodule.arc_data_module import ArcDataConfig, ArcMultiChoiceDataModule
     from mttl.datamodule.codex_data_module import CodexDataConfig, CodexDataModule
     from mttl.datamodule.hellaswag_data_module import (
@@ -912,6 +967,14 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         WinograndeDataConfig,
         WinograndeMultiChoiceDataModule,
     )
+
+    # if we have a DataArgs object, we can directly create the datamodule
+    if isinstance(args, DataArgs) and args.dataset_type is not None:
+        dataset_config = args.dataset_config
+
+        return DataModule.get_class_by_config_class(type(dataset_config))(
+            dataset_config, for_generation=for_generation
+        )
 
     # refactor all the common arguments below into a dict common kwargs
     dataset = args.dataset if not dataset_override else dataset_override

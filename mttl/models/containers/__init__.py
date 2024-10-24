@@ -3,11 +3,11 @@ from typing import Tuple
 
 from mttl.logging import logger, warn_once
 from mttl.models.containers.base import ExpertContainer
-from mttl.models.containers.kv_containers import KVExpertContainer
 from mttl.models.containers.lora_containers import (
     CoalescedLoRAExpertContainer,
     LoRAExpertContainer,
 )
+from mttl.models.containers.peer_container import PEERMLPContainer
 from mttl.models.containers.selectors.base import (
     Selector,
     SelectorConfig,
@@ -16,7 +16,6 @@ from mttl.models.containers.selectors.base import (
     get_selector,
 )
 from mttl.models.library.expert import Expert
-from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.modifiers.base import Modifier
 from mttl.utils import logger
 
@@ -52,8 +51,8 @@ def get_container_class(modifier: str):
                 "COALESCED_LORA_CONTAINER is not set to 1, but still using it for SkilledLoRA"
             )
         return CoalescedLoRAExpertContainer
-    elif modifier == "kv_adapter":
-        return KVExpertContainer
+    elif modifier == "peer":
+        return PEERMLPContainer
     else:
         raise ValueError(f"Cannot find modifier: {modifier}")
 
@@ -138,6 +137,16 @@ def replace_selector_for_container(
     """
     expert_containers = []
     for _, module in dict(transformer.named_modules()).items():
+        if isinstance(module, ExpertContainer):
+            # check if the container holds the same modifier type, e.g. PEERConfig --> "peers"
+            for supports_config in module.__supports_configs__:
+                container_modifier = Modifier.get_name_by_config_class(supports_config)
+                # selector does not apply to this container
+                if not container_modifier == modifier_name:
+                    continue
+                else:
+                    expert_containers.append(module)
+
         for _, layer in dict(module.named_children()).items():
             if isinstance(layer, ExpertContainer):
                 # check if the container holds the same modifier type, e.g. LoRAConfig --> "lora"
@@ -238,7 +247,7 @@ class Trie:
             self._print_all_words_helper(child_node, prefix + char)
 
 
-def get_modules_to_modify_trie(transformer):
+def get_modifiable_modules(transformer):
     """Get modules to modify in the transformer model.
     Filter out modules that are inside expert containers."""
     trie = Trie()
@@ -253,6 +262,43 @@ def get_modules_to_modify_trie(transformer):
         ):  # it indicate the m_name is from the expert container
             continue
         yield m_name, module
+
+
+def create_modif_regex(modify_modules, modify_layers=None):
+    """
+    Combine modify_modules and modify_layers into a single regex to keep add_expert_to_transformer slim
+    """
+    is_set = lambda x: x is not None and x != ""
+
+    if not is_set(modify_modules) and not is_set(modify_layers):
+        raise ValueError(
+            "Neither modify_modules nor modify_layers are set, will not modify anything"
+        )
+
+    if is_set(modify_modules) and not is_set(modify_layers):
+        return modify_modules
+    if not is_set(modify_modules) and is_set(modify_layers):
+        return modify_layers
+
+    # keep backward compatibility
+    modules = modify_modules.split("|")
+    layers = modify_layers.split("|")
+    parts = []
+    for m in modules:
+        for l in layers:
+            if m == ".*":
+                l.replace(".*", "")
+            parts.append(f"{m}\\.{l}")
+    return "|".join(parts)
+
+
+def match_modules_to_modify(transformer, modify_modules):
+    """
+    Match modules in the transformer model based on the modify_modules regex
+    """
+    for m_name, module in get_modifiable_modules(transformer):
+        if re.fullmatch(modify_modules, m_name):
+            yield m_name, module
 
 
 def add_expert_to_transformer(
@@ -298,41 +344,39 @@ def add_expert_to_transformer(
     added_layers = []
     added_containers = []
 
-    for m_name, module in get_modules_to_modify_trie(transformer):
-        if re.fullmatch(expert_config.modify_modules, m_name):
-            for c_name, layer in dict(module.named_children()).items():
-                if re.fullmatch(expert_config.modify_layers, c_name):
-                    total_layers += 1
-                    layer_name = f"{m_name}.{c_name}"
+    modify_modules = create_modif_regex(
+        expert_config.modify_modules, expert_config.modify_layers
+    )
+    for m_name, module in match_modules_to_modify(transformer, modify_modules):
+        # no layers to modify, try modifying the module
+        total_layers += 1
+        module_name = f"{m_name}"
 
-                    if not isinstance(layer, ExpertContainer):
-                        CONTAINER_CLASS = get_container_class(model_modifier)
-                        expert_container = CONTAINER_CLASS(
-                            expert_config,
-                            layer,
-                            lora_merge_after=(
-                                selector_config.lora_merge_after
-                                if selector_config
-                                else False
-                            ),
-                        )
-                        expert_container.__layer_name__ = layer_name
-                        setattr(
-                            module,
-                            c_name,
-                            expert_container,
-                        )
-                        added_containers.append(expert_container)
-                    else:
-                        expert_container = layer
+        if not isinstance(module, ExpertContainer):
+            CONTAINER_CLASS = get_container_class(model_modifier)
+            expert_container = CONTAINER_CLASS(
+                expert_config,
+                module,
+            )
+            expert_container.__layer_name__ = module_name
 
-                    added_layers.append(expert_container.__layer_name__)
-                    expert_container.add_expert(
-                        expert,
-                        action=action,
-                        is_default=is_default,
-                    )
+            parent_name, child_name = m_name.rsplit(".", 1)
+            parent_module = dict(transformer.named_modules())[parent_name]
+            setattr(
+                parent_module,
+                child_name,
+                expert_container,
+            )
+            added_containers.append(expert_container)
+        else:
+            expert_container = module
 
+        added_layers.append(expert_container.__layer_name__)
+        expert_container.add_expert(
+            expert,
+            action=action,
+            is_default=is_default,
+        )
     ### PARAM TYING ###
     # Note: because experts are added into expert containers
     # instead of parameter names being e.g. model.layers.4.self_attn.q_proj.lora_a,

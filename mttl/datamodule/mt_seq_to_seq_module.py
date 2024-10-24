@@ -8,7 +8,7 @@ from datasets import Dataset, concatenate_datasets
 from mttl.datamodule.base import DataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from mttl.logging import logger
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.models.library.dataset_library import DatasetLibrary
 
 
 def is_phi2_eval_task(task):

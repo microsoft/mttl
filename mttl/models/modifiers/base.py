@@ -7,6 +7,8 @@ from torch import nn
 
 from mttl.logging import logger
 from mttl.registrable import Registrable
+from mttl.serializable import AutoSerializable, Serializable
+from mttl.utils import deprecated
 
 
 class Modifier(nn.Module, Registrable):
@@ -30,61 +32,64 @@ class MergeableModifierMixin(ABC):
 
 
 @dataclass
-class ModifierConfig(object):
+class ModifierConfig(Serializable):
     modify_modules: str = ".*"
-    modify_layers: str = ".*"
+    modify_layers: str = (
+        None  # this is depriciated but still kept for backward compatibility
+    )
     tie_params: str = None
-
-    def __eq__(self, other):
-        # compare all the attributes
-        return self.__dict__ == other.__dict__
-
-    def asdict(self) -> Dict:
-        """Dump the config to a string."""
-        from dataclasses import asdict
-
-        data = asdict(self)
-        # store the model modifier for easy loading
-        data["__model_modifier__"] = self.modifier_name
-        return data
-
-    @classmethod
-    def fromdict(cls, dumped: Dict) -> "ModifierConfig":
-        if "__model_modifier__" not in dumped:
-            raise ValueError(
-                "Cannot load config from dict, missing '__model_modifier__' key."
-            )
-        mod = dumped.pop("__model_modifier__")
-        return Modifier.get_config_class_by_name(mod)(**dumped)
 
     @property
     def modifier_name(self):
         return Modifier.get_name_by_config_class(type(self))
 
-    @staticmethod
+    @classmethod
     def from_training_config(
-        training_config: Union["Args", "ModifierConfig"]
+        cls, training_config: Union["Args", "ModifierConfig"]
     ) -> Union["ModifierConfig", None]:
         """Build modifier config from the training config.
 
         Returns None if no modifier is set.
         """
-        from mttl.config import create_config_class_from_args
+        from mttl.arguments import create_config_class_from_args
 
         if isinstance(training_config, ModifierConfig):
             # nothing to do here
             return training_config
 
-        if training_config.model_modifier is None:
-            return None
+        if cls.__name__ == "ModifierConfig":
+            if training_config.model_modifier is None:
+                return None
 
-        if training_config.model_modifier not in Modifier.registered_names():
-            raise ValueError(
-                f"Model modifier '{training_config.model_modifier}' not found, has it been registered?"
+            if training_config.model_modifier not in Modifier.registered_names():
+                raise ValueError(
+                    f"Model modifier '{training_config.model_modifier}' not found, has it been registered?"
+                )
+
+            config_klass = Modifier.get_config_class_by_name(
+                training_config.model_modifier
             )
-
-        config_klass = Modifier.get_config_class_by_name(training_config.model_modifier)
+        else:
+            config_klass = cls
         return create_config_class_from_args(config_klass, training_config)
+
+
+class AutoModifierConfig(AutoSerializable):
+    @classmethod
+    @deprecated(
+        message="The config appears to be a legacy config and will be discontinued in the next release."
+    )
+    def fromdict_legacy(cls, data) -> "ModifierConfig":
+        modifier_name = data.pop("__model_modifier__")
+        config_cls: ModifierConfig = Modifier.get_config_class_by_name(modifier_name)
+        return config_cls.fromdict(data)
+
+    @classmethod
+    def fromdict(cls, data: Dict) -> "ModifierConfig":
+        try:
+            return AutoSerializable.fromdict(data)
+        except ValueError:
+            return cls.fromdict_legacy(data)
 
 
 class ModifyMixin:

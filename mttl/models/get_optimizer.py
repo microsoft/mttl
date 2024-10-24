@@ -104,3 +104,38 @@ def get_optimizer(model, args, no_decay=None):
         raise ValueError("Invalid Optimizer name %s" % optim_name)
 
     return optimizer, trainable_param_names
+
+
+def get_optimizer_and_scheduler(model, args, num_train_examples, no_decay=None):
+    from mttl.models.get_scheduler import get_scheduler
+    from mttl.models.utils import get_global_batch_size
+
+    optimizer, trainable_param_names = get_optimizer(
+        model, args, no_decay=["bias", "LayerNorm.weight"]
+    )
+    global_bs = get_global_batch_size(
+        args.train_batch_size, args.gradient_accumulation_steps
+    )
+
+    if args.total_steps == -1:
+        args.total_steps = (num_train_examples // global_bs) * args.num_train_epochs
+
+        if args.warmup_steps == -1 or args.warmup_proportion > 0.0:
+            logger.warning(
+                "Warmup proportion is set to {}, has priority over warmup_steps".format(
+                    args.warmup_proportion
+                )
+            )
+
+            args.warmup_steps = int(args.warmup_proportion * args.total_steps)
+
+        logger.info("Optimizer setup:")
+        logger.info("Total steps: {}".format(args.total_steps))
+        logger.info("Warmup steps: {}".format(args.warmup_steps))
+        logger.info("Scheduler: {}".format(args.scheduler))
+
+        scheduler = get_scheduler(optimizer, args)
+
+    optimizer, trainable_param_names = get_optimizer(model, args, no_decay=no_decay)
+    scheduler = get_scheduler(optimizer, args)
+    return (optimizer, scheduler), trainable_param_names

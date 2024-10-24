@@ -2,7 +2,6 @@ import os
 
 import pytest
 import torch
-import torch.nn.functional as F
 from pytorch_lightning import seed_everything
 
 from mttl.models.modifiers import modify_transformer
@@ -14,7 +13,6 @@ from mttl.models.modifiers.lora import (
     SkilledLoRAConfig,
     SkilledLoRAView,
 )
-from mttl.models.modifiers.routing import RoutingInfo
 
 
 def test_lora_adapter():

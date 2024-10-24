@@ -186,7 +186,6 @@ def test_setup_evaluators():
 
 def test_runner(mocker, gpt_neo):
     from mttl.evaluators.base import setup_evaluators
-    from mttl.evaluators.mmlu_evaluator import MMLUEvaluatorFast
 
     runner = setup_evaluators(
         "EleutherAI/gpt-neo-125m",

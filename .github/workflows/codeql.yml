@@ -49,8 +49,7 @@ jobs:
     - name: Install dependencies
       run: |
         pip install --upgrade pip
-        pip install -e '.[dev]'
-        pip install -e '.[flash-attn]'
+        pip install -e ".[dev]"
     # Initializes the CodeQL tools for scanning.
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v3

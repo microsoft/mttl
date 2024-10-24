@@ -16,6 +16,7 @@ class InfoContainer:
 
     def __enter__(self):
         InfoContainer.local.context = self
+        return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         # delete the context
@@ -42,22 +43,33 @@ class InfoContainer:
         self._routing_gates = value
 
     @classmethod
-    def wrap_forward(cls, f):
+    def create_context(cls, f):
         """
-        Decorator method that wraps a ``forward()`` function of a model class.
+        Decorator method that wraps a ``forward`` or ``generate`` function of a model class.
         """
         from mttl.models.modifiers.routing import RoutingInfo
 
+        if f.__name__ not in ["forward", "generate"]:
+            raise ValueError(
+                f"Unknown wrap method: {f.__name__}, must be 'forward' or 'generate'."
+            )
+
         @functools.wraps(f)
-        def wrapper_func(model, *args, **kwargs):
-            if not isinstance(args[0], dict) and "input_ids" not in args[0]:
+        def wrapper_func(model, **kwargs):
+            if "input_ids" not in kwargs:
                 raise ValueError(
-                    "The first argument of the function to wrap must be a dictionary with 'input_ids' key."
+                    "The first argument of the function to wrap must be 'input_ids'."
                 )
 
-            with cls(model, RoutingInfo.from_batch(args[0])) as context:
-                results = f(model, *args, **kwargs)
-                if kwargs.get("return_context", False):
+            return_context = kwargs.pop("return_context", False)
+            with cls(model, RoutingInfo.from_batch(kwargs)) as context:
+                if f.__name__ == "forward":
+                    RoutingInfo.prepare_for_forward(kwargs)
+                elif f.__name__ == "generate":
+                    RoutingInfo.prepare_for_generate(kwargs)
+
+                results = f(model, **kwargs)
+                if return_context:
                     context_returns = {
                         "routing_infos": context.routing_infos,
                         "routing_gates": context.routing_gates,
