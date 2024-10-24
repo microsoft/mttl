@@ -29,12 +29,16 @@ class ExpertInfo(Serializable):
         """Returns the expert model associated with the expert. Tries to get it
         from training_config if expert_model is None for back-compatibility.
         """
-        return self.expert_model or getattr(self.training_config, "model", None)
+        if self.expert_model:
+            return self.expert_model
+        elif self.training_config:
+            # fallback to training config
+            return self.training_config.get("model")
 
     @property
     def dataset(self):
         """Returns the dataset name from training config or an empty string."""
-        return getattr(getattr(self, "training_config", {}), "dataset", "")
+        return getattr(self, "training_config", {}).get("dataset", "")
 
     @property
     def modifier_name(self):
