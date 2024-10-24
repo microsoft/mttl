@@ -33,16 +33,21 @@ def make_arrow(experts, push_to_hub):
     for path in repos:
         library.add_expert_from_ckpt(path)
 
-    # compute arrow prototypes
+    # compute arrow prototypes and store them in the library
     arrow_config = ArrowConfig()
     transform = ArrowTransform(arrow_config)
     transform.transform(library, persist=True)
 
     # save arrowed model to HF, can be reloaded with MultiExpertModel.from_pretrained(push_to_hub)
+    arrow_selector = ArrowSelectorConfig(
+        top_k=2, selector_data_id=arrow_config.save_name
+    )
     expert_model = MultiExpertModel.from_pretrained_library(
-        temporary_id, selector_config=ArrowSelectorConfig(top_k=2)
+        temporary_id, selector_config=arrow_selector
     )
     expert_model.push_to_hub(push_to_hub)
+
+    # alternatively we could also store the library in HF (for ex, if we want to swap selectors with the same experts)
 
 
 if __name__ == "__main__":

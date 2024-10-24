@@ -979,6 +979,7 @@ class ArrowTransform(LibraryTransform):
 
         vectors, eigvals = self.fetch(library, scale=False)
         already_computed = []
+
         for expert_name, expert in library.items():
             if expert_name in vectors and not recompute:
                 logger.info(
