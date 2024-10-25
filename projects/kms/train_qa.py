@@ -100,12 +100,13 @@ def train_ke(training_args):
         # TODO: make sure that pushing expert in MoE works
         if isinstance(model, KMMoEModel):
             ke_expert = model.get_expert_instance(model.ke_expert_name)
-            # creat a library and upload that expert
-            lib_path, exp_name = args.ke_hf_path.rsplit("/", 1)
-            expert_library = ExpertLibrary.get_expert_library(lib_path, create=True)
-            expert_library.add_expert(ke_expert, exp_name)
         else:
-            model.push_to_hub(args.ke_hf_path)
+            ke_expert = model.as_expert()
+
+        # create a library and upload that expert
+        lib_path, exp_name = args.ke_hf_path.rsplit("/", 1)
+        expert_library = ExpertLibrary.get_expert_library(lib_path, create=True)
+        expert_library.add_expert(ke_expert, exp_name)
 
 
 if __name__ == "__main__":
