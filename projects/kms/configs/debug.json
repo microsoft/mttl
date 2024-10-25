@@ -1,0 +1,8 @@
+{
+    "subsample_train": 32,
+    "subsample_dev": 4,
+    "subsample_test": 4,
+    "eval_every": 2,
+    "save_every": 2,
+    "total_steps": 10
+}
