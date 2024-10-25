@@ -497,6 +497,7 @@ class TrainingArgs(DataArgs):
             save_steps=self.save_every,
             eval_steps=self.eval_every,
             ddp_find_unused_parameters=False,
+            eval_on_start=self.eval_before_training,
         )
 
 
