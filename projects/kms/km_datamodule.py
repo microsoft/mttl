@@ -188,12 +188,13 @@ class DocumentDataset(torch.utils.data.Dataset):
         # the input to the frozen model will be [context] [warmup] [labels]
         # the input to the KM model will be [warmup] [labels]
 
-        label_start = max(0, int(len(input_ids) * self.config.label_frac))
+        label_start = max(0, int(len(input_ids) * (1 - self.config.label_frac)))
         warmup_start = max(0, label_start - self.config.prefix_length)
 
         # ensure that nothing before `label_start` has loss computed
         label_ids[:label_start] = [-100] * label_start
 
+        datapoint["labels"] = label_ids
         datapoint["nc_input_ids"] = input_ids[warmup_start:]
         datapoint["nc_labels"] = label_ids[warmup_start:]
         datapoint["nc_attention_mask"] = datapoint["attention_mask"][warmup_start:]
