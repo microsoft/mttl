@@ -1,0 +1,6 @@
+{
+    "loss_function": "lm",
+    "dataset_type": "doc_km",
+    "dataset": "sordonia/narrativeqa_sanitized",
+    "nqa_dataset": "sordonia/narrativeqa_sanitized"
+}
