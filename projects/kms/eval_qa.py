@@ -2,7 +2,6 @@ import json
 import logging
 from dataclasses import dataclass
 
-import torch.nn.functional as F
 from lightning_fabric import seed_everything
 from train_qa import KEArguments
 
@@ -11,12 +10,10 @@ from mttl.models.containers.selectors.km_selector import (
     KnowledgeExtractorSelectorConfig,
 )
 from mttl.models.expert_model import MoEModel
-from mttl.models.hf.trainer import LMTrainer
-from mttl.models.km_model import KMMoEModel, KMMoEModelConfig
-from mttl.models.library.expert import Expert, ExpertInfo, load_expert
+from mttl.models.km_model import KMMoEModelConfig
+from mttl.models.library.expert import load_expert
 from mttl.models.library.expert_library import ExpertLibrary
-from mttl.models.lightning.expert_module import ExpertModule, MoEModule
-from mttl.utils import create_library, remote_login, upload_library
+from mttl.utils import remote_login
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
