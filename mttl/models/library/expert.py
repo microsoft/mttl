@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Dict, Union
+from typing import Any, Dict, Union
 
 import torch
 
@@ -21,7 +21,7 @@ class ExpertInfo(Serializable):
     # configuration for this expert, i.e. a modifier config
     expert_config: AutoModifierConfig = None
     # arguments with which the expert was trained, i.e. the full training config
-    training_config: "mttl.arguments.AutoArgs" = None
+    training_config: Dict[str, Any] = None
     expert_model: str = None
 
     @property
@@ -29,12 +29,19 @@ class ExpertInfo(Serializable):
         """Returns the expert model associated with the expert. Tries to get it
         from training_config if expert_model is None for back-compatibility.
         """
-        return self.expert_model or getattr(self.training_config, "model", None)
+        if self.expert_model:
+            return self.expert_model
+        elif self.training_config:
+            # fallback to training config
+            return self.training_config.get("model")
 
     @property
-    def dataset(self):
+    def dataset(self) -> str:
         """Returns the dataset name from training config or an empty string."""
-        return getattr(getattr(self, "training_config", {}), "dataset", "")
+        training_config = getattr(self, "training_config", {})
+        if training_config is not None:
+            return training_config.get("dataset", "")
+        return "undefined"
 
     @property
     def modifier_name(self):
@@ -108,7 +115,7 @@ class Expert:
         return cls(**data)
 
     @property
-    def training_config(self) -> "Args":
+    def training_config(self) -> Dict:
         # back-compatibility, returns expert config
         return self.expert_info.training_config
 
@@ -147,6 +154,7 @@ def load_expert(
     from huggingface_hub import list_repo_files
 
     from mttl.models.base_model import WEIGHTS_NAME
+    from mttl.models.library.peft import load_expert_from_peft_checkpoint
     from mttl.models.lightning.base_module import CHECKPOINT_PATH_IN_HUB
 
     if expert_library is not None and expert_path in expert_library:
@@ -164,12 +172,18 @@ def load_expert(
         files = list_repo_files(expert_path)
     except:
         raise ValueError(
-            f"Could not find expert at {expert_path}, are you sure it's a huggingface repository?"
+            f"Could not list {expert_path}, are you sure it's a HF repository?"
         )
 
-    if WEIGHTS_NAME in files:
+    if "adapter_config.json" in files:
+        # PEFT expert!
+        breakpoint()
+        return load_expert_from_peft_checkpoint(expert_path, expert_name)
+    elif WEIGHTS_NAME in files:
+        # MTTL expert trained with HFTrainer
         return load_expert_from_hf_checkpoint(expert_path, expert_name)
     elif CHECKPOINT_PATH_IN_HUB in files:
+        # MTTL expert trained with PytorchLightning
         return load_expert_from_pl_checkpoint(expert_path, expert_name)
 
 
@@ -250,7 +264,7 @@ def load_expert_from_hf_checkpoint(
     expert_name: str = None,
     **kwargs,
 ):
-    """Transforms a potentially lightning checkpoint into an Expert object."""
+    """Transforms an expert model trained with MTTL or PEFT into an Expert object."""
     # load the expert weights
     import os
 
