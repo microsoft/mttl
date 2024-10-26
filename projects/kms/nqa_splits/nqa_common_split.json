@@ -99,7 +99,7 @@
         "879287f285743b08d86c3bd0831ec1e49fa92e39",
         "03690ff2154ebecb454ea267cec529358ab6923b",
         "9b567ac919aae1fa2a2a6d8e528b8ad8648b90fe",
-        "5200e75f4a31da29a89ea5542261a0533773a500",
+        "5200e75f4a31da29a89ea5542261a0533773a500"
     ],
     "dev": [
         "e5a717d519b7648ce17e3f1f78dd4ba0548c8338",
@@ -121,7 +121,7 @@
         "1528f4c003dde308ae74bdec458466765944ca6a",
         "40d8b1ee377a7a4addca58e31f12d80c77fd8cb8",
         "0d306f911ca339bc6ef6f484b29d30a809b08356",
-        "b3722b89039e50d5cd20240b40172f2006236d39",
+        "b3722b89039e50d5cd20240b40172f2006236d39"
     ],
     "test": [
         "16380f54b88ffa64ca4cd82d3dc5481e78ad5118",
@@ -143,6 +143,6 @@
         "6bb78f3d321f2a5b63edf9ffcfb4900f73ecd4dc",
         "19eb3ac68eb7fcdc2164cfe0c635c595fed660d5",
         "6fc88efa5357b958b072332a14efd3e33cf4e4c0",
-        "9f0b7365cdadd4735b9f899ab140a37d4df89c9c",
-    ],
+        "9f0b7365cdadd4735b9f899ab140a37d4df89c9c"
+    ]
 }

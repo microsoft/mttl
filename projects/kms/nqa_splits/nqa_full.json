@@ -1101,7 +1101,7 @@
         "ae22f4943bbe95e00fc6c0f6e83f1958cf18dea2",
         "fdfbfabc1a72a0fb7f31ac7ad9e1ced05c838ef0",
         "325e35ad828135e197cca8c01c07474f7f21c4db",
-        "4a599766d68f40bbe14cb3bdde5eab5cb60dbd47",
+        "4a599766d68f40bbe14cb3bdde5eab5cb60dbd47"
     ],
     "dev": [
         "26118a3592e63a620bed0d65d1b0943d502e55ef",
@@ -1218,7 +1218,7 @@
         "12ec522e344ec19702bc8bc74d85b4e5adf2d229",
         "681778326e846ea9979ff3aed4ee9668abe7d489",
         "4f485054f9d450534fddba184f0996e32575d1be",
-        "edb92e9d9fe05242da8ead459d53853c8815716b",
+        "edb92e9d9fe05242da8ead459d53853c8815716b"
     ],
     "test": [
         "15b1a5fe8ab222deba12f514f8a2311f901ab1d2",
@@ -1575,6 +1575,6 @@
         "0269408ac78193a0e13f1033bec6f658b00437b3",
         "2fc2cfddbe1ca72a7c2ae750a6c8b656dad60f9b",
         "f91675dfda3bf99e3668a7f1ff06f9eacedaf28c",
-        "7c41a74fb0e568bd5fc658282facbf79bf541271",
-    ],
+        "7c41a74fb0e568bd5fc658282facbf79bf541271"
+    ]
 }
