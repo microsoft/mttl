@@ -14,6 +14,10 @@ from mttl.utils import remote_login
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, default="sordonia/narrativeqa_sanitized")
+    parser.add_argument(
+        "--subsample_file", type=str, default=None
+    )  # "nqa_splits/nqa_common_split.json")
+    parser.add_argument("--subsample_split", type=str, default=None)
     parser.add_argument("--model", type=str, default="Salesforce/SFR-Embedding-2_R")
     parser.add_argument("--hf_id", type=str, required=True)
 
@@ -26,8 +30,7 @@ def main():
     parser.add_argument("--worker_id", type=int, default=0)
     parser.add_argument(
         "--token_overlap",
-        type=int,
-        default=0,
+        default=0.1,
         help="chunk (text segment between two `\n`) overlap between RAG passages",
     )
 
@@ -40,12 +43,31 @@ def main():
     model = SentenceTransformer(args.model, device="cuda")
     final_dataset = []
 
+    valid_files = None
+    if args.subsample_file is not None:
+        import json
+
+        with open(args.subsample_file, "r") as f:
+            valid_files = json.load(f)
+
+        if args.subsample_split is not None:
+            valid_files = valid_files[args.subsample_split]
+        else:
+            valid_files = (
+                valid_files["train"] + valid_files["dev"] + valid_files["test"]
+            )
+
     for split in ["train", "validation", "test"]:
 
         if len(dataset) == 3:
             dataset_split = dataset[split]
         else:
             dataset_split = dataset["train"].filter(lambda x: x["split"] == split)
+
+        if valid_files is not None:
+            dataset_split = dataset_split.filter(
+                lambda x: x["document_id"] in valid_files
+            )
 
         for ex_id, example in enumerate(tqdm.tqdm(dataset_split)):
 
@@ -97,7 +119,12 @@ def main():
             final_dataset += [example]
 
     final_dataset = Dataset.from_list(final_dataset)
-    final_dataset.push_to_hub(f"{args.hf_id}_{args.worker_id}_{args.num_workers}")
+
+    breakpoint()
+    if args.num_workers == 1:
+        final_dataset.push_to_hub(f"{args.hf_id}")
+    else:
+        final_dataset.push_to_hub(f"{args.hf_id}_{args.worker_id}_{args.num_workers}")
 
 
 if __name__ == "__main__":
