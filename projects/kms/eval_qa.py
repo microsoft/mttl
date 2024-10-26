@@ -78,6 +78,9 @@ if __name__ == "__main__":
         logger.info(f"Setting callback dataset to {args.dataset}")
         args.nqa_dataset = args.dataset
 
+    # Callback actually reads from `args.dataset`
+    args.dataset = args.nqa_dataset
+
     # Allow to set trainable tasks from a json split file (e.g. nqa_mini_split.json)
     if isinstance(args.finetune_task_name, str) and args.finetune_task_name.endswith(
         ".json"
