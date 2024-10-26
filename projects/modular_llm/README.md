@@ -44,7 +44,7 @@ python create_flan.py --dataset_library_id=local://modular_artifacts/flan-flat
 A *private* library consists of one expert per task in Flan. To train one expert starting from Phi-2, we can use the following command:
 
 ```bash
-python train_experts_main.py \
+python train_experts.py \
   -c configs/models/phi-2_hf.json \
   -k remove_phi_eval_tasks=False \
   finetune_task_name=ai2_arc_ARC_Easy_1_0_0 \
@@ -73,7 +73,7 @@ After this, to analyze the content of your expert library, you can use the scrip
 To train an MBC library, we need to cluster a private library. To do so:
 
 ```bash
-python run_mbc_clustering.py -k \
+python mbc_clustering.py -k \
   library_id=local://modular_artifacts/library \
   num_clusters=10 \
   output_file=modular_artifacts/mbc_10.json
