@@ -74,29 +74,26 @@ async def oai_get_completions_batched(
     return results
 
 
-def chunk_text(text, tokenizer, block_size):
-    chunks = text.split("\n")
-    chunks = [tokenizer.encode(chunk, add_special_tokens=False) for chunk in chunks]
-    sep = tokenizer.encode("\n", add_special_tokens=False)
+def chunk_text(
+    text: str,
+    tokenizer: AutoTokenizer,
+    block_size: int = 2048,
+    chunk_overlap: Union[float, int] = 0.1,
+):
+    if isinstance(chunk_overlap, float):
+        assert 0.0 <= chunk_overlap < 1.0
+        chunk_overlap = int(block_size * chunk_overlap)
 
-    c = 0
-    s = 0
-    while c < len(chunks):
-        curr = []
-        while c < len(chunks):
-            if len(curr) + len(sep) + len(chunks[c]) - s <= block_size:
-                if curr:
-                    curr += sep
-                curr += chunks[c][s:]
-                c += 1
-                s = 0
-            elif not curr:
-                curr += chunks[c][s : s + block_size]
-                s += block_size
-            else:
-                break
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-        yield curr, tokenizer.decode(curr)
+    text_splitter = RecursiveCharacterTextSplitter.from_huggingface_tokenizer(
+        tokenizer=tokenizer,
+        chunk_size=block_size,
+        chunk_overlap=chunk_overlap,
+    )
+    chunks = text_splitter.split_text(text)
+    for chunk in chunks:
+        yield tokenizer.encode(chunk), chunk
 
 
 class GenerationTask(Registrable):
