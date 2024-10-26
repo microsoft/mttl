@@ -88,7 +88,7 @@ class NQADatamodule(DataModule):
                                     f"Passage {k+1}: {context[k]}\n\n"
                                     for k in range(
                                         min(self.config.topk_context, len(context))
-                                    )
+                                    )[::-1]
                                 ]
                             )
                             source = [
