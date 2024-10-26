@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 
+from mttl.logging import warn_once
 from mttl.models.containers.selectors.base import (
     Selector,
     SelectorConfig,
@@ -47,11 +48,13 @@ class KnowledgeExtractorSelector(Selector):
         if all(task in self.expert_names for task in task_names):
             mode = "KM"
             expert_names = [[ke_expert_name, task_name] for task_name in task_names]
+            warn_once(f"Knowledge Extractor Mode : {mode}")
         elif any(task in self.expert_names for task in task_names):
             raise ValueError("Some, *but not all*, tasks are not in the expert names!")
         else:
             mode = "KE"  # no knowledge modules
             expert_names = [[ke_expert_name]] * len(task_names)
+            warn_once(f"Knowledge Extractor Mode : {mode}")
 
         if KnowledgeExtractorSelector.MODE is None:
             KnowledgeExtractorSelector.MODE = mode
