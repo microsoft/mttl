@@ -10,9 +10,9 @@ from mttl.models.modifiers.lora import LoRAConfig
 
 
 def test_load_peft_expert(tmp_path):
-    model = ExpertModel.from_pretrained_peft("andmev/phi-3-mini-LoRA")
-
-    model = MultiExpertModel.from_pretrained_peft("andmev/phi-3-mini-LoRA")
+    model = ExpertModel.from_pretrained_peft("edbeeching/gpt-neo-125M-imdb-lora")
+    model = MultiExpertModel.from_pretrained_peft("edbeeching/gpt-neo-125M-imdb-lora")
+    assert "edbeeching_gpt-neo-125M-imdb-lora" in model.experts_names
 
 
 def test_load_expert_from_checkpoint(tmp_path):
