@@ -20,8 +20,6 @@ from mttl.evaluators import MMLUEvaluator
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.evaluators import Evaluator
 from mttl.logging import logger
-from mttl.models.modifiers.base import ModifierConfig
-from mttl.models.modifiers.sparse_mask import SparseMaskAdapter
 from mttl.models.utils import transfer_batch_to_device
 
 DEBUG = False
