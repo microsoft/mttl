@@ -32,6 +32,16 @@ class SparseLinearConfig(ModifierConfig):
     block_size: int = 16  # e.g. 16x16\]
     sps_type: str = "block_sparse"  # ['block_sparse','regular_sparse','row_sparse']
     use_sparse_bias: bool = True
+    adapter_dtype: str = None
+
+    def __post_init__(self):
+        if self.adapter_dtype:
+            dtypes = {
+                "bfloat": torch.bfloat16,
+                "float": torch.float32,
+                "half": torch.float16,
+            }
+            self.adapter_dtype = dtypes[self.adapter_dtype]
 
 
 class SparseLinear(ABC):
@@ -53,11 +63,16 @@ class SparseLinear(ABC):
             self.base_bias = base_bias.contiguous()
             self.base_bias.requires_grad = False
         self.base_weight.requires_grad = False
+        self.adapter_dtype = (
+            self.base_weight.dtype
+            if config.adapter_dtype is None
+            else config.adapter_dtype
+        )
 
         self.sparse_bias = None
         if config.use_sparse_bias:
             self.sparse_bias = nn.Parameter(
-                torch.zeros(self.base_weight.shape[0], dtype=self.base_weight.dtype),
+                torch.zeros(self.base_weight.shape[0], dtype=self.adapter_dtype),
                 requires_grad=True,
             )
 
@@ -283,13 +298,11 @@ class MaskedLinear(SparseLinear, nn.Module):
         mask: torch.Tensor = None,
     ):
         super().__init__(base_weight, base_bias, config, parent_name)
-
         self.block_size = config.block_size
         self.keep_ratio = config.keep_ratio
+
         if init_all_ones:
-            binary_mask = torch.ones_like(
-                self.base_weight, dtype=self.base_weight.dtype
-            )
+            binary_mask = torch.ones_like(self.base_weight, dtype=self.adapter_dtype)
         else:
             binary_mask = init_sparse_weights(
                 self.config.sps_type,
@@ -300,27 +313,27 @@ class MaskedLinear(SparseLinear, nn.Module):
             binary_mask = binary_mask.to(self.device)
         self.sparse_weights = nn.Parameter(
             torch.zeros_like(
-                self.base_weight, dtype=self.base_weight.dtype, device=self.device
+                self.base_weight, dtype=self.adapter_dtype, device=self.device
             ),
             requires_grad=True,
         )
         self.register_buffer("binary_mask", binary_mask)
 
     def forward(self, x):
+        input_dtype = x.dtype
         base_out = torch.nn.functional.linear(x, self.base_weight, self.base_bias)
+        x = x.to(self.sparse_weights.dtype)
         # self.binary_mask = self.binary_mask.to(self.device).to(self.base_weight.dtype)
+        assert self.sparse_weights.max() <= 1.0, "Sparse weights should be binary"
         sparse_out = torch.nn.functional.linear(
             x, self.sparse_weights * self.binary_mask, self.sparse_bias
         )
-        return base_out + sparse_out
+        return base_out + sparse_out.to(input_dtype)
 
     def get_weights_for_mask_learning(self):
         return (
             self.base_weight,
             self.base_bias,
-            # csr_matrix(
-            #     self.sparse_weights.data.cpu().float(), shape=self.sparse_weights.shape
-            # ),
             self.sparse_weights,
             self.sparse_bias,
         )
@@ -330,8 +343,11 @@ class MaskedLinear(SparseLinear, nn.Module):
         Only resets the binary mask, weights for this adapter are never reset.
         """
         mask.values().copy_(torch.ones_like(mask.values()))  # ake sure its binary
+        mask = mask.to_dense()
+        mask[mask != 0] = 1
+        assert mask.max() == 1, "Mask should be binary"
         self.binary_mask = torch.tensor(
-            mask.to_dense(),
+            mask.data,
             device=self.base_weight.device,
             dtype=self.base_weight.dtype,
         )
@@ -358,7 +374,13 @@ class SparseLinearModule(SparseWeights, SparseLinear):
         parent_name=None,
         sparse_func=None,
     ):
-        SparseWeights.__init__(self, config, weight.shape, weight.dtype, weight.device)
+        SparseWeights.__init__(
+            self,
+            config,
+            weight.shape,
+            config.adapter_dtype or weight.dtype,
+            weight.device,
+        )
         SparseLinear.__init__(self, weight, bias, config, parent_name)
         self.sparse_func = sparse_func
         if self.sparse_func is None:

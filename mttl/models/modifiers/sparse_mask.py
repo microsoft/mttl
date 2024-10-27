@@ -41,11 +41,8 @@ class SparseMaskConfig(SparseLinearConfig):
         -1
     )  # how many mask updates to do. If > 0, the mask updater will be removed after this many updates
     mask_updater: str = None  # "snip"
-    remove_mask_updater_after_update_step: int = (
-        None  # number of mask update steps after which the mask updater is removed and the mask is fixed for the rest of training
-    )
     skip_zeros_mask_update: bool = (
-        False  # if True, until the first mask update operate in full FT regime.
+        False  # DEPRECATED if True, until the first mask update operate in full FT regime. DEPRECATED
     )
 
 
@@ -131,12 +128,12 @@ class SNIPMaskUpdater(MaskUpdater):
             selected_params_dense = get_top_k_sparcity(
                 mask.grad, self.config.sps_type, self.keep_ratio, self.block_size
             )
-            selected_params = selected_params_dense.float().to_sparse_coo()  # .cpu()
+            selected_params = selected_params_dense.float().to_sparse_csr()  # .cpu()
             if self._selected_indices == None:
-                self._selected_indices = selected_params.coalesce()
+                self._selected_indices = selected_params  # .coalesce()
             else:
                 self._selected_indices += selected_params
-                self._selected_indices = self._selected_indices.coalesce()
+                self._selected_indices = self._selected_indices  # .coalesce()
 
             mask.grad = None  # be efficient, throw aways the grads
             return None
@@ -153,15 +150,7 @@ class SNIPMaskUpdater(MaskUpdater):
         # update the mask of the sparse layer
         # SNIP weight accumulation: we set the newly selected weights to zeros,
         # but weights that have been already learned in the past are kept
-        r_idx, c_idx = self.selected_indices
-        csr_weights = create_csr_tensor(
-            r_idx,
-            c_idx,
-            self.accumulated_sparse_weights[r_idx, c_idx],
-            self.accumulated_sparse_weights.shape[0],
-            self.accumulated_sparse_weights.shape[1],
-        )
-        sparse_layer.reset_sparse_weights(csr_weights)
+        sparse_layer.reset_sparse_weights(self.selected_indices)
         self._selected_indices = None
         self.binary_mask = None
         self._n_mask_updates += 1
@@ -169,16 +158,14 @@ class SNIPMaskUpdater(MaskUpdater):
     @property
     def selected_indices(self) -> torch.Tensor:
         if self.config.steps_in_mask_selection == 1:
-            return (
-                self._selected_indices.indices()[0].cpu(),
-                self._selected_indices.indices()[1].cpu(),
-            )
+            return self._selected_indices
+
+        raise NotImplementedError
         # _selected_indices keeps track of how many times each parameter has been selected
         # an alternative, coudl be to actually accumulate gradients for the mask, but it can be too memory expensive, we coudl use cuantization.
         # Now we need to take keep_ratio of the selected params
         # since we used more than 1 batch to estimate the most important ones, some will be selected more than once and some only once
         # self._selected_indices = self._selected_indices
-
         selected_indices_dense = self._selected_indices.to_dense()
         selected_indices_dense = get_top_k_sparcity(
             selected_indices_dense,
@@ -186,8 +173,7 @@ class SNIPMaskUpdater(MaskUpdater):
             self.keep_ratio,
             self.block_size,
         )
-        idxs = selected_indices_dense.cpu().nonzero(as_tuple=True)
-        return idxs[0], idxs[1]
+        return selected_indices_dense.to_sparse_csr()
 
     def _time_to_update_mask(self, sparse_layer: SparseLinear):
         return (
@@ -231,18 +217,17 @@ class SNIPMaskUpdater(MaskUpdater):
             self._steps_since_last_mask_update += 1
 
     def forward(self, sparse_layer: SparseLinear, x: torch.Tensor):
-        self.prepare_mask_or_weights_learning(sparse_layer)
+        input_dtype = x.dtype
+        x = x.to(self.sparse_layer_weights.dtype)
         bias = (
-            self.sparse_layer_biases.detach()
+            self.sparse_layer_biases.detach().to(self.sparse_layer_weights.dtype)
             if self.sparse_layer_biases is not None
             else None
         )
-        if self.updating_the_mask:
-            assert self.sparse_layer_weights is not None
-            return torch.nn.functional.linear(
-                x, self.sparse_layer_weights.detach() * self.binary_mask, bias
-            )
-        return sparse_layer(x)
+        assert self.sparse_layer_weights is not None
+        return torch.nn.functional.linear(
+            x, self.sparse_layer_weights.detach() * self.binary_mask, bias
+        ).to(input_dtype)
 
     def unregister_hooks(self):
         for hook in self._backward_hooks:
@@ -274,11 +259,22 @@ class SparseMaskAdapter(Modifier, ModifyMixin):
                 base_weights_shape=self.dense_layer_weight.shape,
                 base_weights_shape_dtype=self.dense_layer_weight.dtype,
             )
+        self.maks_update_mode = False
 
     def forward(self, input):
-        if self.mask_updater is not None and self.training:
+        if self.maks_update_mode and self.training:
             return self.mask_updater(self.sparse_layer, input)
         return self.sparse_layer(input)
+
+    def prepare_for_mask_update(self):
+        if self.mask_updater is not None:
+            self.mask_updater.switch_to_mask_update_mode(self.sparse_layer)
+            self.maks_update_mode = True
+
+    def prepare_for_weights_update(self):
+        if self.mask_updater is not None:
+            self.mask_updater.switch_to_weights_update_mode(self.sparse_layer)
+            self.maks_update_mode = False
 
 
 @dataclass
