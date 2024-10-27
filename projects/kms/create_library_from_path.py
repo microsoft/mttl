@@ -1,6 +1,9 @@
+import glob
+import json
 import os
 
 import click
+import torch
 
 from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 
@@ -8,24 +11,40 @@ from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 def find_directories_with_config(start_dir):
     matching_dirs = set()
 
-    for root, dirs, files in os.walk(start_dir):
-        if "best_model" in dirs:
-            matching_dirs.add(os.path.join(root, "best_model/"))
+    # this dir is a list of ids
+    # loop through the first level of directories
+    missing = []
+    for id in glob.glob(os.path.join(start_dir, "*")):
+        # loop through the second level of directories
+        checkpoint_dirs = []
+        for ckpt in glob.glob(os.path.join(id, "*")):
+            if "checkpoint" in ckpt or "best_model" in ckpt:
+                checkpoint_dirs.append(os.path.join(start_dir, id, "best_model/"))
 
-    return list(matching_dirs)
+        has_best_model = [ckpt for ckpt in checkpoint_dirs if "best_model" in ckpt]
+        if has_best_model:
+            matching_dirs.add(has_best_model[0])
+        else:
+            missing.append(id)
+
+    return list(matching_dirs), missing
 
 
 @click.command()
 @click.option("--ckpt_path", type=str)
-@click.option("--local_path", type=str)
-def create(ckpt_path, local_path):
-    library = ExpertLibrary.get_expert_library("local://" + local_path, create=True)
-    expert_paths = find_directories_with_config(ckpt_path)
+@click.option("--library_path", type=str)
+def create(ckpt_path, library_path):
+    library = ExpertLibrary.get_expert_library(library_path, create=True)
+    expert_paths, missing = find_directories_with_config(ckpt_path)
+    if missing:
+        print("Missing documents:")
+        print(missing)
 
-    print("Found: ", len(expert_paths))
-    for expert_path in expert_paths:
-        library.add_expert_from_ckpt(expert_path)
-        print("Length...", len(library))
+    library.add_experts_from_ckpts(expert_paths, force=False, update=True)
+    with open(os.path.join(expert_paths[0], "mttl_args.bin"), "r") as f:
+        training_args = json.dumps(torch.load(f, weights_only=False), indent=4)
+
+    library.update_readme(extra_info=training_args)
 
 
 if __name__ == "__main__":
