@@ -41,9 +41,10 @@ def create(ckpt_path, library_path):
         print(missing)
 
     library.add_experts_from_ckpts(expert_paths, force=False, update=True)
-    with open(os.path.join(expert_paths[0], "mttl_args.bin"), "r") as f:
-        training_args = json.dumps(torch.load(f, weights_only=False), indent=4)
-
+    training_args = json.dumps(
+        torch.load(os.path.join(expert_paths[0], "mttl_args.bin"), weights_only=False),
+        indent=4,
+    )
     library.update_readme(extra_info=training_args)
 
 
