@@ -396,7 +396,7 @@ class SparseLinearModule(SparseWeights, SparseLinear):
 
     def forward(self, input):
         bias = self.base_bias
-        if self.sparse_bias is not None:
+        if bias and self.sparse_bias:
             bias = self.base_bias + self.sparse_bias
         return self.sparse_func.apply(
             input,
@@ -467,7 +467,7 @@ class BlockSparseLinearModule(BlockSparseWeights, SparseLinear):
 
     def forward(self, input):
         bias = self.base_bias
-        if self.sparse_bias is not None:
+        if bias and self.sparse_bias:
             bias = self.base_bias + self.sparse_bias
         return self.sparse_func.apply(
             input,
@@ -517,7 +517,7 @@ class BlockSparseLinearModuleScatter(BlockSparseLinearModule):
 
     def forward(self, input):
         bias = self.base_bias
-        if self.sparse_bias is not None:
+        if bias and self.sparse_bias:
             bias = self.base_bias + self.sparse_bias
         return self.sparse_func.apply(
             input,
@@ -569,7 +569,7 @@ class ScatteredSparseLinearModule(SparseWeights, SparseLinear):
             self.base_weight, self.sparse_weights, self.idxs
         )
         bias = self.base_bias
-        if self.sparse_bias is not None:
+        if bias and self.sparse_bias:
             bias = self.base_bias + self.sparse_bias
         return torch.nn.functional.linear(input, weights, bias)
 
@@ -627,7 +627,7 @@ class SpieLSparseLinearModule(SparseLinearModule):
 
     def forward(self, input):
         bias = self.base_bias
-        if self.sparse_bias is not None:
+        if bias and self.sparse_bias:
             bias = self.base_bias + self.sparse_bias
         return self.sparse_func.apply(
             input,

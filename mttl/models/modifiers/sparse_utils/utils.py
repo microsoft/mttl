@@ -135,6 +135,96 @@ def torch_coo_to_scipy_csr(coo_tensor):
     )
 
 
+def scipy_csr_to_torch_csr(scipy_csr_matrix):
+    """
+    Converts a SciPy CSR matrix to a PyTorch CSR tensor.
+
+    Args:
+        scipy_csr_matrix (scipy.sparse.csr_matrix): A SciPy CSR matrix.
+
+    Returns:
+        torch.sparse_csr_tensor: The equivalent PyTorch CSR tensor.
+
+    Raises:
+        TypeError: If the input is not a SciPy CSR matrix.
+        ValueError: If the input matrix is not in CSR format.
+    """
+    # Validate input type
+    if not isinstance(scipy_csr_matrix, csr_matrix):
+        raise TypeError("Input must be a SciPy CSR matrix (scipy.sparse.csr_matrix).")
+
+    # Ensure the matrix is in CSR format
+    if not scipy_csr_matrix.format == "csr":
+        raise ValueError(
+            f"Input matrix must be in CSR format. Current format: {scipy_csr_matrix.format}"
+        )
+
+    # Extract CSR components from the SciPy matrix
+    data = scipy_csr_matrix.data
+    indices = scipy_csr_matrix.indices
+    indptr = scipy_csr_matrix.indptr
+    shape = scipy_csr_matrix.shape
+
+    # Convert the components to PyTorch tensors
+    # Ensure integer types for indices and indptr
+    # PyTorch expects indptr and indices to be of type int32 or int64
+    # Depending on the size of the matrix, int32 may suffice
+    # Here, we'll use int64 for generality
+    torch_data = torch.from_numpy(data).to(
+        dtype=torch.float32
+    )  # Adjust dtype as needed
+    torch_indices = torch.from_numpy(indices).to(dtype=torch.int64)
+    torch_indptr = torch.from_numpy(indptr).to(dtype=torch.int64)
+
+    # Create the PyTorch CSR tensor
+    torch_csr = torch.sparse_csr_tensor(
+        crow_indices=torch_indptr,
+        col_indices=torch_indices,
+        values=torch_data,
+        size=shape,
+        dtype=torch_data.dtype,
+    )
+
+    return torch_csr
+
+
+def torch_csr_to_scipy_csr(torch_csr_tensor):
+    """
+    Converts a PyTorch CSR tensor to a SciPy CSR matrix.
+
+    Args:
+        torch_csr_tensor (torch.Tensor): A PyTorch tensor with CSR layout.
+
+    Returns:
+        scipy.sparse.csr_matrix: The equivalent SciPy CSR matrix.
+
+    Raises:
+        TypeError: If the input is not a PyTorch tensor.
+        ValueError: If the tensor is not in CSR layout.
+    """
+    # Validate input type
+    if not isinstance(torch_csr_tensor, torch.Tensor):
+        raise TypeError("Input must be a PyTorch tensor.")
+
+    # Validate tensor layout
+    if not torch_csr_tensor.layout == torch.sparse_csr:
+        raise ValueError("Input tensor must be in CSR layout (torch.sparse_csr).")
+
+    # Ensure tensor is on CPU
+    torch_csr_cpu = torch_csr_tensor.to("cpu")
+
+    # Extract CSR components
+    crow = torch_csr_cpu.crow_indices().numpy()  # indptr
+    col = torch_csr_cpu.col_indices().numpy()  # indices
+    data = torch_csr_cpu.values().numpy()  # data
+    shape = torch_csr_cpu.size()
+
+    # Construct SciPy CSR matrix
+    scipy_csr = csr_matrix((data, col, crow), shape=shape)
+
+    return scipy_csr
+
+
 def load_mask(f_name):
     mask_dict = np.load(f"{f_name}.npz", allow_pickle=True)["arr"]
     return mask_dict

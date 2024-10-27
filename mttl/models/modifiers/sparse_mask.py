@@ -18,13 +18,10 @@ from mttl.models.modifiers.sparse_utils.sparse_linear import (
     SparseLinearConfig,
 )
 from mttl.models.modifiers.sparse_utils.utils import (
-    _scatter_add_flattened,
-    create_csr_tensor,
     get_2d_indices_from_csr_matrix,
     get_top_k_sparcity,
-    init_sparse_weights,
-    to_block_sparse_layout,
-    torch_coo_to_scipy_csr,
+    scipy_csr_to_torch_csr,
+    torch_csr_to_scipy_csr,
 )
 from mttl.registrable import Registrable
 
@@ -150,7 +147,19 @@ class SNIPMaskUpdater(MaskUpdater):
         # update the mask of the sparse layer
         # SNIP weight accumulation: we set the newly selected weights to zeros,
         # but weights that have been already learned in the past are kept
-        sparse_layer.reset_sparse_weights(self.selected_indices)
+        if isinstance(sparse_layer, MaskedLinear):
+            new_weights = self.selected_indices
+        else:
+            # other sparse layers than MaskedLinear, do not accumulate weights
+            # so its handeled here
+            new_weights = self.selected_indices
+            new_weights = torch_csr_to_scipy_csr(new_weights)
+            r, c = get_2d_indices_from_csr_matrix(new_weights)
+            new_weights *= 0.0
+            new_weights[r, c] = self.accumulated_sparse_weights[r, c].float()
+            new_weights = scipy_csr_to_torch_csr(new_weights)
+
+        sparse_layer.reset_sparse_weights(new_weights)
         self._selected_indices = None
         self.binary_mask = None
         self._n_mask_updates += 1
