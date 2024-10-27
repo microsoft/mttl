@@ -615,7 +615,7 @@ class ExpertLibrary:
     def update_readme(self, extra_info=None):
         self._update_readme(extra_info=extra_info)
 
-    def _update_readme(self, extra_info=None):
+    def _update_readme(self, extra_info: str = None):
         buffer = io.BytesIO()
         buffer.write(
             f"Number of experts present in the library: {len(self)}\n\n".encode("utf-8")
@@ -641,7 +641,7 @@ class ExpertLibrary:
         )
 
         if extra_info is not None:
-            buffer.write(extra_info)
+            buffer.write(extra_info.encode("utf-8"))
 
         buffer.flush()
 
