@@ -612,7 +612,10 @@ class ExpertLibrary:
             force=force,
         )
 
-    def _update_readme(self):
+    def update_readme(self, extra_info=None):
+        self._update_readme(extra_info=extra_info)
+
+    def _update_readme(self, extra_info=None):
         buffer = io.BytesIO()
         buffer.write(
             f"Number of experts present in the library: {len(self)}\n\n".encode("utf-8")
@@ -636,6 +639,10 @@ class ExpertLibrary:
                 "utf-8"
             )
         )
+
+        if extra_info is not None:
+            buffer.write(extra_info)
+
         buffer.flush()
 
         addition = CommitOperationAdd(path_in_repo=f"README.md", path_or_fileobj=buffer)
