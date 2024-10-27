@@ -165,11 +165,6 @@ def scipy_csr_to_torch_csr(scipy_csr_matrix):
     indptr = scipy_csr_matrix.indptr
     shape = scipy_csr_matrix.shape
 
-    # Convert the components to PyTorch tensors
-    # Ensure integer types for indices and indptr
-    # PyTorch expects indptr and indices to be of type int32 or int64
-    # Depending on the size of the matrix, int32 may suffice
-    # Here, we'll use int64 for generality
     torch_data = torch.from_numpy(data).to(
         dtype=torch.float32
     )  # Adjust dtype as needed
