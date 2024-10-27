@@ -76,7 +76,7 @@ class KMDatasetModule(DataModule):
                 return example["type"] in types.split(",")
 
             dataset = dataset.filter(
-                partial(filter_types, type=self.config.use_only_type), num_proc=20
+                partial(filter_types, types=self.config.use_only_type), num_proc=20
             )
 
         def expand_targets_and_chat(example):
