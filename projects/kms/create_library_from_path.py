@@ -45,7 +45,10 @@ def create(ckpt_path, library_path):
         torch.load(os.path.join(expert_paths[0], "mttl_args.bin"), weights_only=False),
         indent=4,
     )
-    library.update_readme(extra_info=training_args)
+    library.update_readme(
+        extra_info=f"Training arguments:\n```json\n{training_args}\n```"
+    )
+    print("Library uploaded to: ", f"https://huggingface.co/{library_path}")
 
 
 if __name__ == "__main__":
