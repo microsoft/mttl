@@ -37,8 +37,8 @@ def eval_qa(training_args):
     model_config = KMMoEModelConfig(
         base_model=training_args.model,
         library_id=None,
-        expert_selection=args.finetune_task_name,
-        selector_config=KnowledgeExtractorSelectorConfig(),
+        expert_selection=training_args.finetune_task_name,
+        selector_config=training_args.selector_config,
     )
 
     # create a model without any experts

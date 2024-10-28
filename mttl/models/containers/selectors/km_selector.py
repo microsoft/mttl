@@ -18,6 +18,9 @@ class KnowledgeExtractorSelectorConfig(SelectorConfig):
     ke_expert_name: str = "KE"
     # argument that allows heterogenous batches, with some having a KM and some not
     allow_missing_kms: bool = False
+    # In some cases, if we are transferring a KE trained with a different config,
+    # some layers may not have a KE. This argument allows for that.
+    allow_missing_ke: bool = False
 
 
 @Selector.register("ke_selector", KnowledgeExtractorSelectorConfig)
@@ -41,11 +44,16 @@ class KnowledgeExtractorSelector(Selector):
         ]
 
         if len(ke_expert_name) != 1:
-            raise ValueError(
-                f"Expected exactly one KE expert with name {self.config.ke_expert_name}, found {ke_expert_name}"
-            )
-
-        ke_expert_name = ke_expert_name[0]
+            if not self.config.allow_missing_ke:
+                raise ValueError(
+                    f"Expected exactly one KE expert with name {self.config.ke_expert_name}, found {ke_expert_name}"
+                )
+            # create a dummy ke expert
+            ke_expert_name = self.expert_names[0]
+            ke_weight = 0.0
+        else:
+            ke_expert_name = ke_expert_name[0]
+            ke_weight = 1.0
 
         if all(task in self.expert_names for task in task_names):
             mode = "KM"
@@ -80,7 +88,9 @@ class KnowledgeExtractorSelector(Selector):
             warn_once(msg)
 
         # build weight vector
-        weights = input.new(size=(len(expert_names), len(expert_names[0]))).fill_(1.0)
+        # (batch_size, 1 if KE only else 2)
+        weights = input.new_ones(size=(len(expert_names), len(expert_names[0])))
+        weights[:, 0] = ke_weight
         if mode == "mixed":
             weights[missing_km_idx] = 0.5
         return BatchExpertsAndWeightsSelectorOutput(expert_names, weights)
