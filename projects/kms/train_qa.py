@@ -7,6 +7,7 @@ from lightning_fabric import seed_everything
 
 # register this datamodule!
 from nqa_datamodule import NQADatamodule
+from utils.callbacks import LogMttlArgs
 
 from mttl.arguments import MultiExpertConfig
 from mttl.logging import setup_logging
@@ -80,7 +81,8 @@ def train_ke(training_args):
             attn_implementation=training_args.attn_implementation,
         )
 
-    callbacks = []
+    # Not all argument are being logged. This remedies it
+    callbacks = [LogMttlArgs(training_args)]
     if training_args.nqa_dataset is not None:
         # load the NQA callback to monitor zero-shot performance
         from nqa_callback import NQAZeroShotCallback
