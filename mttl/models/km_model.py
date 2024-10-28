@@ -30,6 +30,9 @@ class KMMoEModel(BaseExpertModel, MultiExpertMixin):
 
         # If no selectors have been provided, we default to the KnowledgeExtractorSelector
         if config.selector_config is None:
+            logger.info(
+                "No selector_config provided, defaulting to KnowledgeExtractorSelector"
+            )
             config.selector_config = KnowledgeExtractorSelectorConfig(
                 ke_expert_name=config.ke_expert_name, router_granularity="coarsegrained"
             )

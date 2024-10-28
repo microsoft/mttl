@@ -10,6 +10,9 @@ from nqa_datamodule import NQADatamodule
 
 from mttl.arguments import MultiExpertConfig
 from mttl.logging import setup_logging
+
+# import Selector before args
+from mttl.models.containers.selectors.km_selector import KnowledgeExtractorSelector
 from mttl.models.expert_model import ExpertModel, ExpertModelConfig
 from mttl.models.hf.trainer import LMTrainer
 from mttl.models.km_model import KMMoEModel, KMMoEModelConfig
@@ -44,6 +47,7 @@ def train_ke(training_args):
             base_model=training_args.model,
             library_id=training_args.library_id,
             expert_selection=args.finetune_task_name,
+            selector_config=training_args.selector_config,
         )
         model = KMMoEModel(model_config)
 
