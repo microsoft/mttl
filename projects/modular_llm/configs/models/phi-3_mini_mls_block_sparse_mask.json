@@ -23,7 +23,7 @@
     "model_modifier": "mls_sparse_adapter",
     "modify_modules": ".*",
     "modify_layers": ".*dense|.*q_proj|.*v_proj|.*k_proj",
-    "trainable_param_names": ".*sparse_weights.|.*sparse_bias.**",
+    "trainable_param_names": ".*sparse_weights.*|.*sparse_bias.*",
     "keep_ratio": 0.01,
     "sps_type": "block_sparse",
     "block_size": 16,

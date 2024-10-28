@@ -35,7 +35,7 @@ class SparseLinearConfig(ModifierConfig):
     adapter_dtype: str = None
 
     def __post_init__(self):
-        if self.adapter_dtype:
+        if self.adapter_dtype and isinstance(self.adapter_dtype, str):
             dtypes = {
                 "bfloat": torch.bfloat16,
                 "float": torch.float32,
