@@ -185,10 +185,12 @@ def test_from_pretrained_with_arrow(tmp_path):
     name1 = selector.expert_names[0]
     name2 = selector.expert_names[1]
     ln = selector.layer_name.replace(".selector", "")
+
     assert np.allclose(
         selector.prototypes[0].sum().item(),
         protos[name1][ln].sum().item(),
     )
+
     assert np.allclose(
         selector.prototypes[1].sum().item(),
         protos[name2][ln].sum().item(),

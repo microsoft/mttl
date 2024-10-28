@@ -1,8 +1,18 @@
 import pytest
 
 from mttl.models.containers.selectors.poly_selector import PolySelectorConfig
-from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
+from mttl.models.expert_model import (
+    ExpertModel,
+    MultiExpertModel,
+    MultiExpertModelConfig,
+)
 from mttl.models.modifiers.lora import LoRAConfig
+
+
+def test_load_peft_expert(tmp_path):
+    model = ExpertModel.from_pretrained_peft("edbeeching/gpt-neo-125M-imdb-lora")
+    model = MultiExpertModel.from_pretrained_peft("edbeeching/gpt-neo-125M-imdb-lora")
+    assert "edbeeching_gpt-neo-125M-imdb-lora" in model.experts_names
 
 
 def test_load_expert_from_checkpoint(tmp_path):

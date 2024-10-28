@@ -221,7 +221,8 @@ class ExpertLibrary:
             logger.info(f"Metadata for {metadata.expert_name} uploaded successfully.")
 
     def keys(self):
-        return self.data.keys()
+        # always returns elements in sorted order by name
+        return sorted(self.data.keys())
 
     def items(self):
         for k in list(self.keys()):
@@ -639,6 +640,7 @@ class ExpertLibrary:
         self, ckpt_path: str, expert_name: str = None, force: bool = False
     ):
         expert_dump = load_expert(ckpt_path, expert_name=expert_name)
+
         if expert_dump.name is None:
             raise ValueError(
                 "Expert name not found in checkpoint. Need to explicitly provide one as argument."
