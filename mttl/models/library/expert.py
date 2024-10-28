@@ -275,14 +275,9 @@ def load_expert_from_hf_checkpoint(
 
     # gather mttl training arguments from the checkpoint if available
     mttl_args_file = os.path.join(expert_path, MTTL_ARGS_NAME)
-    if os.path.isfile(mttl_args_file):
-        from mttl.arguments import AutoArgs
 
-        try:
-            training_config = torch.load(mttl_args_file, weights_only=False)
-            training_config = AutoArgs.fromdict(training_config)
-        except:
-            training_config = None
+    if os.path.isfile(mttl_args_file):
+        training_config = torch.load(mttl_args_file, weights_only=False)
     else:
         training_config = None
 
