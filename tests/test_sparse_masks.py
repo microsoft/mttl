@@ -9,19 +9,12 @@ from pytorch_lightning import seed_everything
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.sparse_mask import (
     MaskedLinear,
-    MaskedLinearSparseAdapter,
     MLSConfig,
     ScatteredConfig,
     ScatteredSparseAdapter,
     ScatteredSparseLinearModule,
-    SNIPMaskUpdater,
-    SparseMaskAdapter,
-    SparseMaskConfig,
 )
-from mttl.models.modifiers.sparse_utils.sparse_linear import (
-    ScatteredSparseLinearModule,
-    SparseLinearModule,
-)
+from mttl.models.modifiers.sparse_utils.sparse_linear import ScatteredSparseLinearModule
 
 
 def test_sm_adapter():
