@@ -56,6 +56,16 @@ class KnowledgeExtractorSelector(Selector):
                 raise ValueError(
                     "Some, *but not all*, tasks are not in the expert names!"
                 )
+            mode = "mixed"
+            # To keep a consistent (batchable structure), we will add twice the KE expert
+            # whenever no KM exists.
+            expert_names, missing_km_idx = [], []
+            for i, task_name in enumerate(task_names):
+                if task_name in self.expert_names:
+                    expert_names.append([ke_expert_name, task_name])
+                else:
+                    expert_names.append([ke_expert_name, ke_expert_name])
+                    missing_km_idx.append(i)
         else:
             mode = "KE"  # no knowledge modules
             expert_names = [[ke_expert_name]] * len(task_names)
@@ -64,10 +74,13 @@ class KnowledgeExtractorSelector(Selector):
         if KnowledgeExtractorSelector.MODE is None:
             KnowledgeExtractorSelector.MODE = mode
         elif KnowledgeExtractorSelector.MODE != mode:
-            raise ValueError(
-                f"Different modes for KE selector: {KnowledgeExtractorSelector.MODE} != {mode}"
-            )
+            msg = f"Different modes for KE selector: {KnowledgeExtractorSelector.MODE} != {mode}"
+            if not self.config.allow_missing_kms:
+                raise ValueError(msg)
+            warn_once(msg)
 
+        # build weight vector
         weights = input.new(size=(len(expert_names), len(expert_names[0]))).fill_(1.0)
-
+        if mode == "mixed":
+            weights[missing_km_idx] = 0.5
         return BatchExpertsAndWeightsSelectorOutput(expert_names, weights)
