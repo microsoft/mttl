@@ -136,13 +136,14 @@ def fetch_prototypes(args: EvaluationConfig, library: ExpertLibrary) -> str:
 
 def run_eval(args: EvaluationConfig):
     seed_everything(args.seed, workers=True)
+    from mttl.models.lightning.expert_module import ExpertModule
 
     # get directory of the current file
     setup_logging(args.output_dir)
 
     logger.info("Args: {}".format(args.to_json()))
+    
 
-    remote_login(args.remote_token)
 
     # exclude_phi_tasks = [
     #     "hellaswag_1_1_0",
@@ -175,6 +176,16 @@ def run_eval(args: EvaluationConfig):
     # ]:
     #     value = getattr(args, arg_name, None)
     #     setattr(train_cfg, arg_name, value)
+    module = ExpertModule(**vars(args))
+
+    if wandb.run is None and os.environ.get("WANDB_API_KEY"):
+        wandb.init(
+            project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
+            config=dict(module.hparams),
+            name=os.environ.get("AMLT_JOB_NAME", None),
+        )
+        # update config
+        wandb.config.update({f"cmd_args_{k}": v for k, v in vars(args).items()})
 
     ## if the base model
     if args.merge_or_route == "base":
@@ -182,8 +193,12 @@ def run_eval(args: EvaluationConfig):
             model=args.model,
             dataset="sordonia/flan-10k-flat",
             eval_metric="rougeL",
+            subsample_test=args.subsample_test,
         )
-        module = MultiExpertModule(model=train_cfg.model)
+
+        if args.checkpoint:
+            checkpoint = torch.load(args.checkpoint, weights_only=False)["state_dict"]
+            module.load_state_dict(checkpoint)
         tasks = args.finetune_task_name.split(",")
         scores = eval_in_distribution(module.model, train_cfg, tasks)
     elif args.pipeline_eval_tasks in [
