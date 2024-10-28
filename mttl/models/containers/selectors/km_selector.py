@@ -16,6 +16,8 @@ from mttl.models.containers.selectors.selector_output import (
 class KnowledgeExtractorSelectorConfig(SelectorConfig):
     field_name: str = "task_names"
     ke_expert_name: str = "KE"
+    # argument that allows heterogenous batches, with some having a KM and some not
+    allow_missing_kms: bool = False
 
 
 @Selector.register("ke_selector", KnowledgeExtractorSelectorConfig)
@@ -50,7 +52,10 @@ class KnowledgeExtractorSelector(Selector):
             expert_names = [[ke_expert_name, task_name] for task_name in task_names]
             warn_once(f"Knowledge Extractor Mode : {mode}")
         elif any(task in self.expert_names for task in task_names):
-            raise ValueError("Some, *but not all*, tasks are not in the expert names!")
+            if not self.config.allow_missing_kms:
+                raise ValueError(
+                    "Some, *but not all*, tasks are not in the expert names!"
+                )
         else:
             mode = "KE"  # no knowledge modules
             expert_names = [[ke_expert_name]] * len(task_names)
