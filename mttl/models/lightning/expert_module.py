@@ -147,11 +147,15 @@ class ExpertModule(LightningTrainingMixin, LightningEfficientCheckpoint):
         ckpt["expert_info"] = self.model.as_expert(
             self.training_config
         ).expert_info.asdict()
+    
+    def as_expert(self):
+        return self.model.as_expert()
 
 
 class SPLITExpertModule(ExpertModule):
     """
-    Expert module used to train sparse mask with SPLIT mask updater.
+    Expert module used to train sparse mask with SPLIT mask updater.    
+    SPLIT periodically re-calculates the sparse mask indices a la SNIP (https://arxiv.org/pdf/1810.02340).
     """
 
     def __init__(self, model_object=None, **kwargs):

@@ -87,7 +87,7 @@ class OFTConfig(ModifierConfig):
 @Modifier.register("oft", config_cls=OFTConfig)
 class OFTLayer(Modifier, ModifyMixin):
     """
-    Implements the OFT layer.
+    Implements the OFT layer from https://arxiv.org/pdf/2306.07280.
     """
 
     # All names of layers that may contain adapter weights

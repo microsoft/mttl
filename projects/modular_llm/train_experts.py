@@ -203,7 +203,7 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
                             expert = module.get_expert_instance(expert_name)
                             expert_library.add_expert(expert, expert_name)
                 elif isinstance(module, ExpertModule):
-                    expert = module.model.as_expert()
+                    expert = module.as_expert()
                     expert_name = (
                         args.expert_name
                         or args.finetune_task_name
