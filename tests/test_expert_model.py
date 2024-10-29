@@ -3,7 +3,7 @@ import pytest
 from pytorch_lightning import seed_everything
 from transformers import AutoModelForCausalLM
 
-from mttl.models.containers import get_modifiable_modules
+from mttl.models.containers.lora_containers import LoRAExpertContainer
 from mttl.models.containers.selectors.arrow_selector import (
     ArrowSelector,
     ArrowSelectorConfig,
@@ -17,6 +17,7 @@ from mttl.models.containers.selectors.poly_selector import (
     PolySelector,
     PolySelectorConfig,
 )
+from mttl.models.containers.utils import get_modifiable_modules
 from mttl.models.expert_model import (
     ExpertModel,
     ExpertModelConfig,
@@ -25,14 +26,12 @@ from mttl.models.expert_model import (
 )
 from mttl.models.library.expert import Expert
 from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
-from mttl.models.modifiers.lora import LoRAConfig
+from mttl.models.modifiers.lora import LoRAConfig, SkilledLoRAConfig
 
 
 def test_expert_model(monkeypatch):
     seed_everything(0)
 
-    monkeypatch.setenv("COALESCED_LORA_CONTAINER", "0")
-
     model = MultiExpertModel(MultiExpertModelConfig("EleutherAI/gpt-neo-125m"))
     model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
     assert model.experts_containers[0].default_expert_name is None
@@ -60,36 +59,81 @@ def test_expert_model(monkeypatch):
     assert isinstance(model.selectors["lora"][0], TaskNameSelector)
 
 
-def test_expert_model_coalesced(monkeypatch):
+def test_disable_enable_adapters(monkeypatch, mocker, dummy_batch):
+    from mttl.models.expert_model import disable_adapters
+
     seed_everything(0)
-    monkeypatch.setenv("COALESCED_LORA_CONTAINER", "1")
 
     model = MultiExpertModel(MultiExpertModelConfig("EleutherAI/gpt-neo-125m"))
-    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
+    model.add_empty_expert(
+        "a", LoRAConfig(modify_layers=".*out_proj.*"), is_default=True
+    )
+    assert model.experts_containers[0].default_expert_name == "a"
+    container: LoRAExpertContainer = model.experts_containers[0]
+    mock = mocker.spy(container, "container_forward")
+
+    assert container._enabled
+
+    with disable_adapters(model):
+        assert not container._enabled
+        model(**dummy_batch)
+        assert mock.call_count == 0
+
+    assert container._enabled
+    model(**dummy_batch)
+    assert mock.call_count == 1
+
+    model = ExpertModel(
+        ExpertModelConfig(
+            "EleutherAI/gpt-neo-125m",
+            modifier_config=LoRAConfig(modify_layers=".*out_proj.*"),
+        )
+    )
+
+    assert model.modifiers[0]._enabled
+    mock = mocker.spy(model.modifiers[0], "dropout_layer")
+
+    with disable_adapters(model):
+        assert not model.modifiers[0]._enabled
+        model(**dummy_batch)
+        assert mock.call_count == 0
+
+    assert container._enabled
+    model(**dummy_batch)
+    assert mock.call_count == 1
+
+
+def test_expert_model_skilled(monkeypatch):
+    seed_everything(0)
+
+    model = MultiExpertModel(MultiExpertModelConfig("EleutherAI/gpt-neo-125m"))
+    model.add_empty_expert("a", SkilledLoRAConfig(modify_layers=".*out_proj.*"))
     assert model.experts_containers[0].default_expert_name is None
 
     model.add_empty_expert(
-        "b", LoRAConfig(modify_layers=".*out_proj.*"), is_default=True
+        "b", SkilledLoRAConfig(modify_layers=".*out_proj.*"), is_default=True
     )
     assert len(model.selectors["lora"]) == 0
     assert model.experts_containers[0].default_expert_name == "b"
 
     # plug a poly selector
-    model.set_selector("lora", PolySelectorConfig(task_names=["t1", "t2", "t3"]))
-    # model.set_selector("skilled_lora", PolySelectorConfig(task_names=["t1", "t2", "t3"]))
-    assert len(model.selectors["lora"]) == 12
-    selector = model.selectors["lora"][0]
+    model.set_selector(
+        "skilled_lora", PolySelectorConfig(task_names=["t1", "t2", "t3"])
+    )
+
+    assert len(model.selectors["skilled_lora"]) == 12
+    selector = model.selectors["skilled_lora"][0]
     assert isinstance(selector, PolySelector)
 
     expert_a: Expert = model.get_expert_instance("a")
     assert len(expert_a.expert_weights) == 24
     assert expert_a.expert_config.modify_layers == ".*out_proj.*"
 
-    # switch selector for lora to task name
-    model.set_selector("lora", TaskNameSelectorConfig())
+    # switch selector for skilled lora to task name
+    model.set_selector("skilled_lora", TaskNameSelectorConfig())
 
-    assert len(model.selectors["lora"]) == 12
-    assert isinstance(model.selectors["lora"][0], TaskNameSelector)
+    assert len(model.selectors["skilled_lora"]) == 12
+    assert isinstance(model.selectors["skilled_lora"][0], TaskNameSelector)
 
 
 def test_from_pretrained(tmp_path):
@@ -154,7 +198,6 @@ def test_from_pretrained_with_arrow(tmp_path):
 
 
 def test_get_modifiable_modules(monkeypatch):
-    monkeypatch.setenv("COALESCED_LORA_CONTAINER", "0")
     model_name = "EleutherAI/gpt-neo-125m"
     transformer = AutoModelForCausalLM.from_pretrained(model_name)
 
@@ -167,6 +210,7 @@ def test_get_modifiable_modules(monkeypatch):
     multi_expert_model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
     one_expert_modules = dict(get_modifiable_modules(multi_expert_model.model))
     one_expert_all_modules = dict(multi_expert_model.model.named_modules())
+    one_expert_all_params = dict(multi_expert_model.model.named_parameters())
     assert len(one_expert_all_modules.keys()) == 248
     assert one_expert_modules.keys() == transformer_modules.keys()
     assert len(one_expert_all_modules) > len(transformer_modules)
@@ -175,12 +219,13 @@ def test_get_modifiable_modules(monkeypatch):
     multi_expert_model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"))
     two_expert_modules = dict(get_modifiable_modules(multi_expert_model.model))
     two_expert_all_modules = dict(multi_expert_model.model.named_modules())
+    two_expert_all_params = dict(multi_expert_model.model.named_parameters())
     assert two_expert_modules.keys() == transformer_modules.keys()
-    assert len(two_expert_all_modules) > len(one_expert_all_modules)
+    assert len(two_expert_all_modules) == len(one_expert_all_modules)
+    assert len(two_expert_all_params) > len(one_expert_all_params)
 
 
-def test_get_modifiable_modules_coalesced(monkeypatch):
-    monkeypatch.setenv("COALESCED_LORA_CONTAINER", "1")
+def test_get_modifiable_modules_skilled(monkeypatch):
     model_name = "EleutherAI/gpt-neo-125m"
 
     transformer = AutoModelForCausalLM.from_pretrained(model_name)
@@ -190,15 +235,20 @@ def test_get_modifiable_modules_coalesced(monkeypatch):
     assert clean_multi_expert_modules.keys() == transformer_modules.keys()
 
     # add an expert
-    multi_expert_model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj"))
+    multi_expert_model.add_empty_expert(
+        "a", SkilledLoRAConfig(modify_layers=".*out_proj")
+    )
     one_expert_modules = dict(get_modifiable_modules(multi_expert_model.model))
     one_expert_all_modules = dict(multi_expert_model.model.named_modules())
-    assert len(one_expert_all_modules.keys()) == 236
+
+    assert len(one_expert_all_modules.keys()) == 260
     assert one_expert_modules.keys() == transformer_modules.keys()
     assert len(one_expert_all_modules) > len(transformer_modules)
 
     # add another expert
-    multi_expert_model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj"))
+    multi_expert_model.add_empty_expert(
+        "b", SkilledLoRAConfig(modify_layers=".*out_proj")
+    )
     two_expert_modules = dict(get_modifiable_modules(multi_expert_model.model))
     two_expert_all_modules = dict(multi_expert_model.model.named_modules())
     assert two_expert_modules.keys() == transformer_modules.keys()

@@ -3,7 +3,7 @@ from pyparsing import Union
 from torch import Tensor, nn
 
 from mttl.logging import warn_once
-from mttl.models.containers.base import ExpertContainer
+from mttl.models.containers.base import ExpertContainer, MergeableContainer
 from mttl.models.containers.selectors.selector_output import (
     BatchExpertsAndWeightsSelectorOutput,
     BatchExpertsSelectorOutput,
@@ -12,11 +12,17 @@ from mttl.models.containers.selectors.selector_output import (
     SelectorOutput,
 )
 from mttl.models.library.expert import Expert
-from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
+from mttl.models.modifiers.lora import (
+    LoRA,
+    LoRAConfig,
+    LoRAView,
+    SkilledLoRA,
+    SkilledLoRAConfig,
+)
 from mttl.models.modifiers.modify_model import get_modifier_name
 
 
-class LoRAExpertContainer(ExpertContainer):
+class LoRAExpertContainer(ExpertContainer, MergeableContainer):
     __supports_configs__ = [LoRAConfig]
 
     def __init__(
@@ -38,15 +44,30 @@ class LoRAExpertContainer(ExpertContainer):
             )
 
         self.merged_expert_names = []
-        self.experts = nn.ModuleDict({})
+        self.config = config
+
+        # store lora A, B as name->tensor dictionaries
+        self.lora_a = nn.ParameterDict({})
+        self.lora_b = nn.ParameterDict({})
+
+    def merge_expert(self, expert_name):
+        if expert_name not in self.expert_infos:
+            raise ValueError(
+                "Expert {} not found in the list of experts".format(expert_name)
+            )
+
+        self.get(expert_name).merge_with_layer()
+        self.expert_infos.pop(expert_name)
+        self.lora_a.pop(expert_name)
+        self.lora_b.pop(expert_name)
+        self.merged_expert_names.append(expert_name)
 
     def on_add_expert(
         self,
         expert: Expert,
-        action="route",
         is_default=False,
     ) -> None:
-        from mttl.models.containers import filter_expert_weights
+        from mttl.models.containers.utils import filter_expert_weights
 
         # back-compatibility, in previous versions, the expert config was a training config
         self._check_config(expert.expert_config)
@@ -56,33 +77,27 @@ class LoRAExpertContainer(ExpertContainer):
             get_modifier_name(expert.expert_config)
         ]
 
-        modifier_module = LoRA_cls(
-            expert.expert_config, self.layer, layer_name=self.__layer_name__
-        )
-
         if expert.expert_weights:
             expert_weights = filter_expert_weights(
                 self.__layer_name__, expert.expert_weights
             )
-            modifier_module.load_lora_weights(expert_weights)
-
-        if action == "merge":
-            # weight is merged with layer so we can discard it now
-            modifier_module.merge_with_layer()
-            self.merged_expert_names.append(expert.name)
         else:
-            self.experts[expert.name] = modifier_module
+            # create a new modifier module to initialize the weights
+            modifier = LoRA_cls(
+                expert.expert_config, self.layer, layer_name=self.__layer_name__
+            )
+            expert_weights = modifier.state_dict()
+
+        self.lora_a[expert.name] = expert_weights["lora_a"].to(self.layer.weight.device)
+        self.lora_b[expert.name] = expert_weights["lora_b"].to(self.layer.weight.device)
 
     def merge_with_layer(self):
-        if not len(self.experts):
+        """Merge all experts with the layer."""
+        if not len(self):
             return
 
-        for expert_name, expert_module in self.experts.items():
-            expert_module.merge_with_layer()
-
-        self.merged_expert_names.extend(self.experts)
-        self.expert_infos.clear()
-        self.experts.clear()
+        for expert_name in list(self.expert_infos.keys()):
+            self.merge_expert(expert_name)
 
     def _convert_expert_names_to_indices(
         self, expert_names, use_default_expert=True
@@ -188,11 +203,7 @@ class LoRAExpertContainer(ExpertContainer):
                 )
             else:
                 # we have no indices, so we assume that we have weights for all the experts
-                assert selection.weights.shape[-1] == len(self.experts)
-
-                warn_once(
-                    "Creating skilled loras for all experts, you might want to use CoalescedLoRAContainer instead, set USE_COALESCED_LORA=True in your environment variables."
-                )
+                assert selection.weights.shape[-1] == len(self)
 
                 # store skilled lora view for reuse locally
                 skilled_loras = [
@@ -214,22 +225,24 @@ class LoRAExpertContainer(ExpertContainer):
                 )
             return module_output.view(input.shape[0], input.shape[1], -1)
 
-    def forward(self, input, **kwargs):
-        if len(self.experts) > 0:
-            selection = self.selector(input, container=self, **kwargs)
-            return self.route(input, selection, **kwargs)
-        return self.layer(input)
+    def container_forward(self, input, **kwargs):
+        selection = self.selector(input, container=self, **kwargs)
+        return self.route(input, selection, **kwargs)
 
-    def __getitem__(self, name):
-        return self.experts[name]
+    def __getitem__(self, name) -> LoRA:
+        """Returns a LoRA module."""
+        return LoRAView(self.config, self.layer, self.lora_a[name], self.lora_b[name])
 
 
-class CoalescedLoRAExpertContainer(LoRAExpertContainer):
-    """A coalesced version of the LoRA expert container, where the experts are kept
-    in memory in a single parameter.
+class SkilledLoRAExpertContainer(LoRAExpertContainer):
+    """Skilled LoRA container. In this case, we are not using a LoRA module, but a SkilledLoRA module.
+
+    Adding experts is slow for this container, given that at each time we are concatenating
+    the expert weights to the existing expert weights. This is not a problem for a small number
+    of experts, but it can be slow for a large number of experts.
     """
 
-    __supports_configs__ = [LoRAConfig, SkilledLoRAConfig]
+    __supports_configs__ = [SkilledLoRAConfig]
 
     def __init__(
         self,
@@ -285,13 +298,8 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         else:
             raise ValueError("Unknown modifier type, expected LoRA or SkilledLoRA.")
 
-    def on_add_expert(self, expert: Expert, action="route", is_default=False) -> None:
-        from mttl.models.containers import filter_expert_weights
-
-        if action == "merge":
-            raise ValueError(
-                "Merging is not supported for `CoalescedLoRAExpertContainer`."
-            )
+    def on_add_expert(self, expert: Expert, is_default=False) -> None:
+        from mttl.models.containers.utils import filter_expert_weights
 
         # back-compatibility, in previous versions, the expert config was a training config
         self._check_config(expert.expert_config)
@@ -382,9 +390,6 @@ class CoalescedLoRAExpertContainer(LoRAExpertContainer):
         else:
             raise ValueError("Unknown selection type.")
 
-    def forward(self, input, **kwargs):
-        if len(self.experts) > 0:
-            selection = self.selector(input, container=self, **kwargs)
-            return self.route(input, selection, **kwargs)
-        else:
-            return self.layer(input)
+    def container_forward(self, input, **kwargs):
+        selection = self.selector(input, container=self, **kwargs)
+        return self.route(input, selection, **kwargs)

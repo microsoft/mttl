@@ -10,7 +10,7 @@ from torch import nn
 from triton.ops.blocksparse.matmul import dsd_lut, sdd_lut
 
 from mttl.logging import logger
-from mttl.models.modifiers.base import Modifier, ModifyMixin
+from mttl.models.modifiers.base import Modifier, ModifierConfig
 from mttl.models.modifiers.sm_config import SparseMaskConfig
 from mttl.models.modifiers.sm_updater import MaskUpdater
 from mttl.models.modifiers.sparse_utils.sparse_linear import (
@@ -27,7 +27,7 @@ from mttl.models.modifiers.sparse_utils.utils import (
 )
 
 
-class SparseMaskAdapter(Modifier, ModifyMixin):
+class SparseMaskAdapter(Modifier):
     def __init__(
         self,
         config: SparseMaskConfig,

@@ -468,7 +468,9 @@ class TrainingArgs(DataArgs):
         from transformers import TrainingArguments
 
         return TrainingArguments(
-            run_name=self.wandb_run_name or self.expert_name or self.finetune_task_name,
+            run_name=self.wandb_run_name
+            or self.expert_name
+            or str(self.finetune_task_name),
             use_cpu=self.compute_strategy == "cpu",
             overwrite_output_dir=True,
             output_dir=self.output_dir,
@@ -485,6 +487,7 @@ class TrainingArgs(DataArgs):
             warmup_ratio=self.warmup_proportion if self.warmup_proportion > 0 else 0,
             num_train_epochs=self.num_train_epochs,
             max_steps=self.total_steps,
+            save_total_limit=1,
             remove_unused_columns=False,
             save_strategy="epoch" if not self.save_every else "steps",
             eval_strategy="epoch" if not self.eval_every else "steps",

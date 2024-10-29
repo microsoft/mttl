@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from mttl.models.modifiers.base import Modifier, ModifierConfig, ModifyMixin
+from mttl.models.modifiers.base import Modifier, ModifierConfig
 
 
 class MultiplicativeDropoutLayer(nn.Module):
@@ -85,7 +85,7 @@ class OFTConfig(ModifierConfig):
 
 
 @Modifier.register("oft", config_cls=OFTConfig)
-class OFTLayer(Modifier, ModifyMixin):
+class OFTLayer(Modifier):
     """
     Implements the OFT layer from https://arxiv.org/pdf/2306.07280.
     """
