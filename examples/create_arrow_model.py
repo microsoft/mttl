@@ -39,7 +39,6 @@ def make_arrow(experts, push_to_hub):
         top_k=2, selector_data_id=arrow_config.save_name
     )
 
-    breakpoint()
     expert_model = MultiExpertModel.from_pretrained_library(
         library, selector_config=arrow_selector
     )
