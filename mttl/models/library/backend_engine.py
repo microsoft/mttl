@@ -526,3 +526,40 @@ class LocalFSEngine(BackendEngine):
         import glob
 
         return list(glob.glob(os.path.join(repo_id, "*")))
+
+
+class VirtualFSEngine(LocalFSEngine):
+    repos = {}
+
+    def snapshot_download(self, repo_id, allow_patterns=None):
+        return repo_id
+
+    def create_repo(self, repo_id, repo_type, exist_ok, private=True):
+        if repo_id in VirtualFSEngine.repos and not exist_ok:
+            raise ValueError(f"Repository {repo_id} already exists.")
+
+        VirtualFSEngine.repos[repo_id] = {}
+
+    def delete_repo(self, repo_id, repo_type=None):
+        VirtualFSEngine.repos.pop(repo_id)
+
+    def list_repo_files(self, repo_id):
+        return list(VirtualFSEngine.repos[repo_id].keys())
+
+    def create_commit(self, repo_id, operations, commit_message):
+        for op in operations:
+            if type(op) == CommitOperationAdd:
+                VirtualFSEngine.repos[repo_id][
+                    op.path_in_repo
+                ] = op.path_or_fileobj.read()
+            elif type(op) == CommitOperationCopy:
+                raise NotImplementedError(
+                    "Copy operation not supported for virtual FS."
+                )
+            elif type(op) == CommitOperationDelete:
+                VirtualFSEngine.repos[repo_id].pop(op.path_in_repo)
+
+    def hf_hub_download(self, repo_id, filename):
+        import io
+
+        return io.BytesIO(VirtualFSEngine.repos[repo_id][filename])

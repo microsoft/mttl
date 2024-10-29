@@ -2,6 +2,7 @@ import glob
 import io
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from functools import total_ordering
@@ -21,6 +22,7 @@ from mttl.models.library.backend_engine import (
     BlobStorageEngine,
     HuggingfaceHubEngine,
     LocalFSEngine,
+    VirtualFSEngine,
 )
 from mttl.models.library.expert import Expert, ExpertInfo, load_expert
 
@@ -130,20 +132,40 @@ class ExpertLibrary:
         self.data = {}
 
         try:
-            metadata_dir = self.snapshot_download(
-                self.repo_id, allow_patterns=["**/*.meta", "*.meta"]
-            )
+            # Get the list of files in the repository
+            repo_files = self.list_repo_files(self.repo_id)
+            # Filter out the .meta files
+            meta_files = [file for file in repo_files if file.endswith(".meta")]
         except Exception as e:
             if isinstance(e, RepositoryNotFoundError):
                 logger.error("Repository not found: %s", self.repo_id)
             raise e
 
-        metadata = [
-            MetadataEntry.fromdict(
-                torch.load(file, map_location="cpu", weights_only=False)
+        # Function to download and process a single .meta file
+        def download_and_process_meta_file(file):
+            path_or_bytes = self.hf_hub_download(self.repo_id, file)
+
+            metadata_entry = MetadataEntry.fromdict(
+                torch.load(path_or_bytes, map_location="cpu", weights_only=False)
             )
-            for file in glob.glob(f"{metadata_dir}/**/*.meta", recursive=True)
-        ]
+            return metadata_entry
+
+        # Use ThreadPoolExecutor for multithreading
+        with ThreadPoolExecutor() as executor:
+            # Submit tasks to the executor
+            future_to_file = {
+                executor.submit(download_and_process_meta_file, file): file
+                for file in meta_files
+            }
+
+            metadata = []
+            for future in as_completed(future_to_file):
+                file = future_to_file[future]
+                try:
+                    data = future.result()
+                    metadata.append(data)
+                except Exception as exc:
+                    logger.error("%r generated an exception: %s" % (file, exc))
 
         for metadatum in metadata:
             if self.model_name is not None and metadatum.model != self.model_name:
@@ -330,32 +352,45 @@ class ExpertLibrary:
             List[Any]: _description_
         """
         # all auxiliary data should have "bin" extension
-        path = self.snapshot_download(self.repo_id, allow_patterns=f"*.{data_type}.bin")
+        files = [
+            f for f in self.list_repo_files(self.repo_id) if f"{data_type}.bin" in f
+        ]
 
-        if expert_name:
-            filename = os.path.join(path, f"{expert_name}.{data_type}.bin")
-            if not os.path.isfile(filename):
-                raise ValueError(
-                    f"Data of type {data_type} for expert {expert_name} not found in repository. Did you compute it?"
-                )
-            payload = torch.load(filename, weights_only=False)
-            if return_config and "config" in payload:
-                return payload["config"], payload["data"]
-            if "data" in payload:
-                return payload["data"]
-            return payload
-        else:
+        def download_auxiliary(key):
+            path_or_bytes = self.hf_hub_download(
+                self.repo_id, filename=f"{key}.{data_type}.bin"
+            )
+            return torch.load(path_or_bytes, map_location="cpu", weights_only=False)
+
+        expert_names = [expert_name] if expert_name else self.keys()
+        expert_names_to_process = [
+            name for name in expert_names if f"{name}.{data_type}.bin" in files
+        ]
+
+        # Use ThreadPoolExecutor for multithreading
+        with ThreadPoolExecutor() as executor:
+            # Submit tasks to the executor
+            future_to_name = {
+                executor.submit(download_auxiliary, name): name
+                for name in expert_names_to_process
+            }
+
             auxiliary_data = {}
-            for key in self.keys():
-                filename = os.path.join(path, f"{key}.{data_type}.bin")
-                if os.path.isfile(filename):
-                    payload = torch.load(filename, weights_only=False)
+            for future in as_completed(future_to_name):
+                name = future_to_name[future]
+                try:
+                    payload = future.result()
                     if return_config and "config" in payload:
-                        auxiliary_data[f"{key}"] = payload["config"], payload["data"]
+                        auxiliary_data[name] = (
+                            payload["config"],
+                            payload["data"],
+                        )
                     elif "data" in payload:
-                        auxiliary_data[f"{key}"] = payload["data"]
+                        auxiliary_data[name] = payload["data"]
                     else:
-                        auxiliary_data[f"{key}"] = payload
+                        auxiliary_data[name] = payload
+                except Exception as exc:
+                    logger.error("%r generated an exception: %s" % (key, exc))
         return auxiliary_data
 
     def remove_auxiliary_data(
@@ -912,23 +947,11 @@ class HFExpertLibrary(ExpertLibrary, HuggingfaceHubEngine):
     pass
 
 
-class VirtualLocalLibrary(ExpertLibrary, LocalFSEngine):
+class VirtualLocalLibrary(ExpertLibrary, VirtualFSEngine):
     """
     A virtual library is not stored on disk, but only in memory.
     Useful for temporary library objects used during runtime.
     """
-
-    def create_repo(self, repo_id, repo_type, exist_ok, private=True):
-        pass
-
-    def delete_repo(self, repo_id, repo_type=None):
-        pass
-
-    def _upload_metadata(self, metadata):
-        pass
-
-    def _upload_weights(self, expert_name, expert_dump):
-        pass
 
     def _update_readme(self):
         pass
