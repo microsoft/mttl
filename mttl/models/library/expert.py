@@ -177,7 +177,6 @@ def load_expert(
 
     if "adapter_config.json" in files:
         # PEFT expert!
-        breakpoint()
         return load_expert_from_peft_checkpoint(expert_path, expert_name)
     elif WEIGHTS_NAME in files:
         # MTTL expert trained with HFTrainer
