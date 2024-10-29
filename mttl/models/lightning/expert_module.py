@@ -21,6 +21,7 @@ from mttl.models.lightning.base_module import LightningEfficientCheckpoint
 from mttl.models.utils import compute_loglike_loss
 
 torch.set_float32_matmul_precision("high")
+from mttl.models.modifiers.sparse_mask import SparseMaskAdapter
 
 
 class LightningTrainingMixin:
@@ -136,12 +137,64 @@ class ExpertModule(LightningTrainingMixin, LightningEfficientCheckpoint):
             load_in_8bit=getattr(self.hparams, "load_in_8bit", False),
         )
 
+    @property
+    def generation_config(self):
+        return self.model.generation_config
+
     def on_save_checkpoint(self, ckpt):
         super().on_save_checkpoint(ckpt)
 
         ckpt["expert_info"] = self.model.as_expert(
             self.training_config
         ).expert_info.asdict()
+
+    def as_expert(self):
+        return self.model.as_expert()
+
+
+class SPLITExpertModule(ExpertModule):
+    """
+    Expert module used to train sparse mask with SPLIT mask updater.
+    SPLIT periodically re-calculates the sparse mask indices a la SNIP (https://arxiv.org/pdf/1810.02340).
+    """
+
+    def __init__(self, model_object=None, **kwargs):
+        super().__init__(model_object, **kwargs)
+        self.mask_modif_interval = (
+            self.training_config.modifier_config.mask_reselection_interval
+        )
+        self.steps_in_mask_selection: int = (
+            self.training_config.modifier_config.steps_in_mask_selection
+        )
+        if self.steps_in_mask_selection > 1:
+            raise NotImplementedError(
+                "SPLIT mask updater does not support steps_in_mask_selection > 1"
+            )
+        self.update_counter = 0
+
+    def update_mask(self, batch):
+        for m in self.modules():
+            if isinstance(m, SparseMaskAdapter):
+                m.prepare_for_mask_update()
+
+        loss = self.forward(**batch).loss
+        loss.backward()
+        self.zero_grad()
+        for m in self.modules():
+            if isinstance(m, SparseMaskAdapter):
+                m.prepare_for_weights_update()
+
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        """
+        Updates mask on batch end.
+        This batch has already been used for weights update and we reuse it for mask update.
+        """
+        if self.current_epoch == 0:
+            self.update_counter += 1
+            if self.update_counter % self.mask_modif_interval == 0:
+                # Update mask
+                self.update_mask(batch)
+                self.update_counter = 0  # Reset counter for next interval
 
 
 class MultiExpertModule(LightningTrainingMixin, LightningEfficientCheckpoint):

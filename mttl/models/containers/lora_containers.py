@@ -225,11 +225,9 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
                 )
             return module_output.view(input.shape[0], input.shape[1], -1)
 
-    def forward(self, input, **kwargs):
-        if len(self) > 0 and self._enabled:
-            selection = self.selector(input, container=self, **kwargs)
-            return self.route(input, selection, **kwargs)
-        return self.layer(input)
+    def container_forward(self, input, **kwargs):
+        selection = self.selector(input, container=self, **kwargs)
+        return self.route(input, selection, **kwargs)
 
     def __getitem__(self, name) -> LoRA:
         """Returns a LoRA module."""
@@ -392,8 +390,6 @@ class SkilledLoRAExpertContainer(LoRAExpertContainer):
         else:
             raise ValueError("Unknown selection type.")
 
-    def forward(self, input, **kwargs):
-        if len(self) > 0 and self._enabled:
-            selection = self.selector(input, container=self, **kwargs)
-            return self.route(input, selection, **kwargs)
-        return self.layer(input)
+    def container_forward(self, input, **kwargs):
+        selection = self.selector(input, container=self, **kwargs)
+        return self.route(input, selection, **kwargs)

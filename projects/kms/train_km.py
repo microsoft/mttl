@@ -36,16 +36,15 @@ class DCDTrainer(ExpertModelTrainer):
 
     def get_reference_model(self, model):
         model = get_original_model(model)
-        model.disable_adapter()
+        model.disable_modifiers()
         return model
 
     def get_student_model(self, model):
         model = get_original_model(model)
-        model.enable_adapter()
+        model.enable_modifiers()
         return model
 
     def compute_loss(self, model, inputs, return_outputs=False):
-
         # document + small task prompt + task output (e.g. summary, or question and answer)
         input_ids = inputs["input_ids"]
         labels = inputs["labels"]

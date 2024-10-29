@@ -1,0 +1,30 @@
+
+{
+    "num_train_epochs": 5,
+    "model": "microsoft/Phi-3-mini-4k-instruct",
+    "learning_rate": 1e-4,
+    "weight_decay": 0.0,
+    "n_skills": 1,
+    "lora_rank": 4,
+    "lora_dropout": 0.05,
+    "micro_batch_size": 1,
+    "train_batch_size": 16,
+    "predict_batch_size": 4,
+    "precision": "bf16",
+    "dataset": "sordonia/flan-10k-flat",
+    "model_family": "gpt",
+    "load_in_8bit": false,
+    "optimizer": "adamw",
+    "warmup_proportion": 0.06,
+    "max_input_length": 2048,
+    "max_output_length": 64,
+    "truncation_side": "left",
+    "eval_before_training": true,
+    "eval_rouge_flag": true,
+    "pipeline_eval_tasks": false,
+    "model_modifier": "lora",
+    "modify_modules": ".*",
+    "modify_layers": ".*dense|.*q_proj|.*v_proj|.*k_proj",
+    "trainable_param_names": ".*lora_[ab].*"
+
+}
