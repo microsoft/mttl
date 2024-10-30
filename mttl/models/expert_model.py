@@ -264,7 +264,7 @@ class MultiExpertMixin:
 
         elements = list(library.keys())
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
             # Use executor.map to keep the order
             future_results = executor.map(add_module, elements)
 
