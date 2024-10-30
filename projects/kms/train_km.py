@@ -201,7 +201,7 @@ def train_km(training_args):
         upload_library(
             expert_library,
             best_model_path or model,
-            expert_name=args.finetune_task_name,
+            expert_name=model_config.expert_name,
         )
 
 
