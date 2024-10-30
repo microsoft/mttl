@@ -128,6 +128,13 @@ class KMArguments(ExpertConfig):
 def train_km(training_args):
     seed_everything(training_args.seed, workers=True)
 
+    if args.library_id:
+        expert_library = create_library(args)
+        if args.finetune_task_name in expert_library:
+            raise ValueError(
+                f"Expert {args.finetune_task_name} already exists in library"
+            )
+
     # get directory of the current file
     setup_logging(training_args.output_dir)
     logger.info("Args: %s", training_args.to_json())
@@ -189,7 +196,6 @@ def train_km(training_args):
 
     # Maybe save to Expert Library
     if args.library_id:
-        expert_library = create_library(args)
         upload_library(
             expert_library,
             best_model_path or model,
