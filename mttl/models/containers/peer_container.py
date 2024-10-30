@@ -80,7 +80,7 @@ class PEERMLPContainer(ExpertContainer):
             dtype=self.dtype,
         )
 
-    def forward(self, input, **kwargs):
+    def container_forward(self, input, **kwargs):
         routing: MultiheadBatchSequenceExpertsAndWeightsSelectorOutput = self.selector(
             input
         )
@@ -111,3 +111,6 @@ class PEERMLPContainer(ExpertContainer):
 
     def __getitem__(self, key):
         pass
+
+    def __len__(self):
+        return self.num_experts

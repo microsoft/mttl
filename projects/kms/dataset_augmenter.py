@@ -93,7 +93,7 @@ def chunk_text(
     )
     chunks = text_splitter.split_text(text)
     for chunk in chunks:
-        yield tokenizer.encode(chunk), chunk
+        yield chunk
 
 
 class GenerationTask(Registrable):
@@ -148,6 +148,7 @@ class DatasetAugmenter:
         max_continuation_length,
         num_generations,
         generation_top_p,
+        model_type="oai",
     ):
         self.tasks = []
         self.model = model
@@ -156,7 +157,7 @@ class DatasetAugmenter:
         self.num_generations = num_generations
         self.generation_top_p = generation_top_p
 
-        self.oai = "gpt" in model
+        self.oai = model_type in ["oai", "azure_oai"]
         if not self.oai:
             self.tokenizer = AutoTokenizer.from_pretrained(model)
             self.sampling_params = SamplingParams(
@@ -177,15 +178,21 @@ class DatasetAugmenter:
                 f"DatasetAugmenter: Setting max_model_len to {self.tokenizer.model_max_length}."
             )
         else:
-            from openai import AsyncAzureOpenAI
+            from openai import AsyncAzureOpenAI, AsyncOpenAI, OpenAI
 
             global client
 
-            client = AsyncAzureOpenAI(
-                api_key=os.environ.get("OPENAI_API_KEY"),
-                azure_endpoint=os.environ.get("OPENAI_BASE_URL"),
-                api_version=os.environ.get("OPENAI_API_VERSION"),
-            )
+            if model_type == "oai":
+                client = AsyncOpenAI(
+                    api_key=os.environ.get("OPENAI_API_KEY"),
+                    base_url=os.environ.get("OPENAI_BASE_URL"),
+                )
+            else:
+                client = AsyncAzureOpenAI(
+                    api_key=os.environ.get("OPENAI_API_KEY"),
+                    azure_endpoint=os.environ.get("OPENAI_BASE_URL"),
+                    api_version=os.environ.get("OPENAI_API_VERSION"),
+                )
 
             self.tokenizer = AutoTokenizer.from_pretrained(
                 "microsoft/Phi-3-medium-4k-instruct"
@@ -202,14 +209,15 @@ class DatasetAugmenter:
         dataset: Dataset,
         carry_columns: str = "all",
     ) -> Dataset:
+        import tqdm
 
         prompts, chunks, types, output_dataset, rests = [], [], [], [], []
 
-        for doc_idx in range(len(dataset)):
+        for doc_idx in tqdm.tqdm(range(len(dataset))):
             text = dataset[doc_idx]["text"]
             chunks_iterator = chunk_text(text, self.tokenizer, self.block_size)
 
-            for tokens, chunk in chunks_iterator:
+            for chunk in chunks_iterator:
                 for task in self.tasks:
                     chunks.append(chunk)
                     types.append(task.registered_name)

@@ -141,12 +141,10 @@ class HardPromptExpertContainer(ExpertContainer):
     def __len__(self):
         return len(self.experts)
 
-    def forward(self, input_ids, attention_mask=None, labels=None, **kwargs):
-        if len(self.experts) > 0:
-            selection = self.selector(
-                input_ids, attention_mask=attention_mask, labels=labels
-            )
-            return self.route(
-                input_ids, selection, attention_mask=attention_mask, labels=labels
-            )
-        return input_ids, attention_mask, labels
+    def container_forward(self, input_ids, attention_mask=None, labels=None, **kwargs):
+        selection = self.selector(
+            input_ids, attention_mask=attention_mask, labels=labels
+        )
+        return self.route(
+            input_ids, selection, attention_mask=attention_mask, labels=labels
+        )
