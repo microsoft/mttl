@@ -3,6 +3,7 @@
 # Assign command-line arguments to variables
 WORKER_ID=$1
 NUM_WORKERS=$2
+MODEL_TYPE=$3
 
 # Validate that WORKER_ID and NUM_WORKERS are integers
 if ! [[ $WORKER_ID =~ ^[0-9]+$ ]] ; then
@@ -21,11 +22,20 @@ if [ $WORKER_ID -ge $NUM_WORKERS ]; then
     exit 1
 fi
 
+# Flatten the input json file
+jq -r '.[] | .[]' "nqa_splits/nqa_full.json" > input.txt
+
 # Extract IDs assigned to this worker
 DOCUMENT_IDS=$(awk -v wid=$WORKER_ID -v nworkers=$NUM_WORKERS '{
     if ((NR - 1) % nworkers == wid) print $0
-}' "nqa_ids.txt" | paste -sd, -)
-
+}' "input.txt" | paste -sd, -)
 
 echo $DOCUMENT_IDS
-CUDA_VISIBLE_DEVICES=0 python generate_for_dataset.py --dataset sordonia/narrativeqa_sanitized --model microsoft/Phi-3-mini-4k-instruct --dataset_type narrativeqa --dataset_task $DOCUMENT_IDS --use_prompts summary,qa --output_path $AMLT_OUTPUT_DIR
+CUDA_VISIBLE_DEVICES=0 python \
+    generate_for_dataset.py \
+    -k model=$MODEL_TYPE \
+    -k model_type=local \
+    -k dataset_type=narrativeqa \
+    -k dataset_task=$DOCUMENT_IDS \
+    -k use_prompts=summary,qa \
+    -k output_path=/mnt/output/kms-datagen/$WORKER_ID

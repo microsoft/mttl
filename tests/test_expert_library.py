@@ -123,6 +123,30 @@ def test_add_auxiliary_data(mocker, tmp_path):
     )
 
 
+def test_virtual_add_auxiliary_data(mocker, tmp_path):
+    from mttl.models.library.expert_library import VirtualLocalLibrary
+
+    library = VirtualLocalLibrary.from_expert_library(
+        HFExpertLibrary("sordonia/new-test-library"), "virtual://test_library"
+    )
+
+    library.add_auxiliary_data(
+        data_type="test",
+        expert_name="abstract_algebra",
+        config={"name": "test_expert"},
+        data={"test": 1},
+    )
+    assert (
+        library.get_auxiliary_data("test", expert_name="abstract_algebra")["test"] == 1
+    )
+    assert (
+        library.get_auxiliary_data(
+            "test", expert_name="abstract_algebra", return_config=True
+        )[0]["name"]
+        == "test_expert"
+    )
+
+
 token = os.getenv("BLOB_SAS_TOKEN")
 
 

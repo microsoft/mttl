@@ -22,11 +22,7 @@ def make_arrow(experts, push_to_hub):
     if not repos:
         raise ValueError("Nothing to be done! Please provide paths to experts.")
 
-    # Temporary library id
-    import shutil
-
-    shutil.rmtree("/tmp/library", ignore_errors=True)
-    temporary_id = "local:///tmp/library"
+    temporary_id = "virtual://library"
 
     # create a temporary library
     library = ExpertLibrary.get_expert_library(temporary_id, create=True)
@@ -42,8 +38,9 @@ def make_arrow(experts, push_to_hub):
     arrow_selector = ArrowSelectorConfig(
         top_k=2, selector_data_id=arrow_config.save_name
     )
+
     expert_model = MultiExpertModel.from_pretrained_library(
-        temporary_id, selector_config=arrow_selector
+        library, selector_config=arrow_selector
     )
     expert_model.push_to_hub(push_to_hub)
 
