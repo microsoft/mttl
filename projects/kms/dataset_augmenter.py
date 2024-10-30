@@ -170,9 +170,10 @@ class DatasetAugmenter:
                 model=model,
                 trust_remote_code=True,
                 gpu_memory_utilization=0.9,
+                dtype="bfloat16",
                 tensor_parallel_size=torch.cuda.device_count(),
                 max_num_seqs=64,
-                max_model_len=self.tokenizer.model_max_length,
+                max_model_len=min(4096, self.tokenizer.model_max_length),
             )
             logger.warning(
                 f"DatasetAugmenter: Setting max_model_len to {self.tokenizer.model_max_length}."
