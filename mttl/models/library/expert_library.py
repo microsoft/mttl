@@ -320,6 +320,7 @@ class ExpertLibrary:
                 _, data_type, _ = os.path.basename(file).split(".")
             except:
                 continue
+
             if data_type in auxiliary_data:
                 auxiliary_data[data_type][0] += 1
             else:
@@ -352,19 +353,24 @@ class ExpertLibrary:
             List[Any]: _description_
         """
         # all auxiliary data should have "bin" extension
-        files = [
-            f for f in self.list_repo_files(self.repo_id) if f"{data_type}.bin" in f
-        ]
+        has_auxiliary_data = []
+        for file in self.list_repo_files(self.repo_id):
+            if f"{data_type}.bin" in file:
+                try:
+                    expert_name, data_type, _ = os.path.basename(file).split(".")
+                except:
+                    continue
+                has_auxiliary_data.append(expert_name)
 
-        def download_auxiliary(key):
+        def download_auxiliary(name):
             path_or_bytes = self.hf_hub_download(
-                self.repo_id, filename=f"{key}.{data_type}.bin"
+                self.repo_id, filename=f"{name}.{data_type}.bin"
             )
             return torch.load(path_or_bytes, map_location="cpu", weights_only=False)
 
-        expert_names = [expert_name] if expert_name else self.keys()
+        expert_names = [expert_name] if expert_name is not None else self.keys()
         expert_names_to_process = [
-            name for name in expert_names if f"{name}.{data_type}.bin" in files
+            name for name in expert_names if name in has_auxiliary_data
         ]
 
         # Use ThreadPoolExecutor for multithreading
@@ -390,7 +396,11 @@ class ExpertLibrary:
                     else:
                         auxiliary_data[name] = payload
                 except Exception as exc:
-                    logger.error("%r generated an exception: %s" % (key, exc))
+                    logger.error("%r generated an exception: %s" % (name, exc))
+
+        if expert_name is not None:
+            return auxiliary_data[expert_name]
+
         return auxiliary_data
 
     def remove_auxiliary_data(
@@ -786,7 +796,6 @@ class ExpertLibrary:
                         logger.error(e)
                         continue
 
-            # TODO: upload the embeddings
             embeddings = expert_lib.get_auxiliary_data(data_type="embeddings")
             for expert_name, expert_embeddings in embeddings.items():
                 for embedding in expert_embeddings.values():
