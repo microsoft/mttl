@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 from mttl.datamodule.base import DataModule, DatasetConfig, DefaultCollator
-from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
+from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task, split_on_split_column
 from mttl.logging import logger
 from mttl.models.library.dataset_library import DatasetLibrary
 
@@ -27,6 +27,8 @@ class KMDatasetConfig(DatasetConfig):
     task_name_field: str = "subject"
     # field in the dataset that contains the task source
     task_source_field: str = "subject"
+    # for train / dev split, split by document chunk, or split the list of summary / q/a's ?
+    split_train_dev_on: str = "document_chunk"
 
 
 class KMDataCollator(DefaultCollator):
@@ -51,6 +53,11 @@ class KMDataCollator(DefaultCollator):
 @DataModule.register("dcd_km", config_cls=KMDatasetConfig)
 class KMDatasetModule(DataModule):
     collate_class = KMDataCollator
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        assert self.config.split_train_dev_on in ["document_chunk", "output"]
 
     def setup_dataset(self):
         dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
@@ -80,12 +87,7 @@ class KMDatasetModule(DataModule):
             )
 
         def expand_targets_and_chat(example):
-            return_dict = {
-                "source": [],
-                "target": [],
-                "prompt": [],
-                self.config.task_name_field: [],
-            }
+            return_dict = defaultdict(list)
 
             for i in range(len(example["input"])):
                 input = example["input"][i]
@@ -115,11 +117,18 @@ class KMDatasetModule(DataModule):
                     add_generation_prompt=True,
                 )
 
-                for output in outputs:
+                for i, output in enumerate(outputs):
                     return_dict["source"].append(source)
                     return_dict["target"].append(output)
                     return_dict["prompt"].append(prompt)
+                    if self.config.split_train_dev_on == "output":
+                        # ensure that 95% or at least 1 point goes to dev
+                        if i < max(int(len(outputs) * 0.05), 1):
+                            return_dict["split"].append("dev")
+                        else:
+                            return_dict["split"].append("train")
                     return_dict[self.config.task_name_field].append(subject)
+
             return return_dict
 
         (
@@ -143,9 +152,16 @@ class KMDatasetModule(DataModule):
             remove_columns=train_dataset.column_names,
         )
 
-        self.train_dataset, self.dev_dataset = self.create_train_valid_split(
-            train_dataset
-        )
+        if self.config.split_train_dev_on == "document_chunk":
+            self.train_dataset, self.dev_dataset = self.create_train_valid_split(
+                train_dataset
+            )
+        else:
+            # split on `split` column
+            self.train_dataset, self.dev_dataset, _ = split_on_split_column(
+                train_dataset
+            )
+
         self.test_dataset = self.dev_dataset
 
 
