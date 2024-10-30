@@ -532,7 +532,7 @@ class VirtualFSEngine(LocalFSEngine):
     repos = {}
 
     def snapshot_download(self, repo_id, allow_patterns=None):
-        return repo_id
+        raise NotImplementedError(f"`snapshot_download` not supported for virtual FS.")
 
     def create_repo(self, repo_id, repo_type, exist_ok, private=True):
         if repo_id in VirtualFSEngine.repos and not exist_ok:
