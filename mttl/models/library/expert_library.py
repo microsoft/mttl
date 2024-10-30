@@ -357,10 +357,10 @@ class ExpertLibrary:
         for file in self.list_repo_files(self.repo_id):
             if f"{data_type}.bin" in file:
                 try:
-                    expert_name, data_type, _ = os.path.basename(file).split(".")
+                    name, data_type, _ = os.path.basename(file).split(".")
                 except:
                     continue
-                has_auxiliary_data.append(expert_name)
+                has_auxiliary_data.append(name)
 
         def download_auxiliary(name):
             path_or_bytes = self.hf_hub_download(
