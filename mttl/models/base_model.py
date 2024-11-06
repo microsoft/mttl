@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional, Union
 import torch
 from huggingface_hub import hf_hub_download
 from transformers.modeling_outputs import CausalLMOutput
+from transformers.utils import PushToHubMixin
 
 from mttl.logging import logger
 from mttl.models.expert_config import AutoModelConfig, BaseExpertModelConfig
@@ -24,7 +25,7 @@ def filter_kwargs(func, kwargs):
     return {k: v for k, v in kwargs.items() if k in inspect.signature(func).parameters}
 
 
-class BaseExpertModel(torch.nn.Module, Registrable):
+class BaseExpertModel(torch.nn.Module, Registrable, PushToHubMixin):
     def __init__(
         self, config: BaseExpertModelConfig, model_object=None, **loading_kwargs
     ):
@@ -173,6 +174,10 @@ class BaseExpertModel(torch.nn.Module, Registrable):
         return outputs
 
     @property
+    def device(self):
+        return self.model.device
+
+    @property
     def generation_config(self):
         return self.model.generation_config
 
@@ -193,3 +198,28 @@ class BaseExpertModel(torch.nn.Module, Registrable):
             **kwargs,
         )
         return generations
+
+
+class AutoExpertModel(BaseExpertModel):
+    @classmethod
+    def from_pretrained(cls, model_id: Union[str, os.PathLike], **model_kwargs: Any):
+        # check whether there is a mttl_config.json file, if yes, infer the model class from it
+        # otherwise assume that it is a MultiExpertModel with the base model being the model_id
+        from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
+
+        try:
+            model_config: BaseExpertModelConfig = AutoModelConfig.from_pretrained(
+                model_id
+            )
+            model_class = BaseExpertModel.get_class_by_config_class(
+                model_config.__class__
+            )
+            return model_class.from_pretrained(model_id, **model_kwargs)
+
+        except Exception as e:
+            print(e)
+            logger.warning(
+                f"Failed to load model config from {model_id}. Assuming it is a MultiExpertModel with the base model being the model_id. Exception: {e}"
+            )
+            model_config = MultiExpertModelConfig(base_model=model_id)
+            return MultiExpertModel(model_config, **model_kwargs)

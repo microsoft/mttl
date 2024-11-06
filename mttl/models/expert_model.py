@@ -1,3 +1,4 @@
+import contextlib
 import re
 import threading
 from dataclasses import dataclass
@@ -8,8 +9,12 @@ import torch
 
 from mttl.logging import logger
 from mttl.models.base_model import BaseExpertModel
-from mttl.models.containers import add_expert_to_transformer
-from mttl.models.containers.base import ContainerFullException, ExpertContainer
+from mttl.models.containers.base import (
+    ContainerFullException,
+    ExpertContainer,
+    MergeableContainer,
+    containers_iterator,
+)
 from mttl.models.containers.selectors.base import (
     AutoSelectorConfig,
     LoadableSelectorConfig,
@@ -21,8 +26,26 @@ from mttl.models.containers.selectors.base import (
 from mttl.models.expert_config import BaseExpertModelConfig
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.library.expert_library import ExpertLibrary
-from mttl.models.modifiers.base import AutoModifierConfig
+from mttl.models.modifiers.base import (
+    AutoModifierConfig,
+    MergeableModifierMixin,
+    Modifier,
+)
 from mttl.models.modifiers.modify_model import modify_transformer
+
+
+@contextlib.contextmanager
+def disable_adapters(model):
+    """Context manager to disable all adapters in a model.
+
+    Args:
+        model (BaseExpertModel): The model to disable adapters in.
+    """
+    model.disable_adapters()
+
+    yield
+
+    model.enable_adapters()
 
 
 @dataclass
@@ -44,6 +67,78 @@ class ExpertModel(BaseExpertModel):
 
         if config.modifier_config is not None:
             modify_transformer(self.model, config.modifier_config)
+
+    def enable_adapters(self):
+        for module in self.modifiers:
+            module.enable()
+
+    def disable_adapters(self):
+        for module in self.modifiers:
+            module.disable()
+
+    @property
+    def modifiers(self):
+        modifiers = []
+        for name, module in self.model.named_modules():
+            if isinstance(module, Modifier):
+                modifiers.append(module)
+        return modifiers
+
+    def merge_and_save_base_model(self, output_dir, device="cpu"):
+        """
+        Merge loaded adapters and save the base model in the huggingface format
+        to the output directory. Moves the model to the specified device before merging.
+        """
+        import copy
+
+        from transformers import AutoTokenizer
+
+        # move model to cpu to avoid memory issues
+        self.model.to(device)
+
+        merged = []
+        model_copy = copy.deepcopy(self.model)
+
+        for name, module in model_copy.named_modules():
+            for c_name, child in module.named_children():
+                if isinstance(child, Modifier):
+                    if isinstance(child, MergeableModifierMixin):
+                        # merge the adapter with the layer
+                        child.merge_with_layer()
+                        # remove the modifier and set the layer
+                        setattr(
+                            module,
+                            c_name,
+                            child.layer,
+                        )
+                        merged.append(name)
+                    else:
+                        raise ValueError(
+                            "Modifier {} is not mergeable!".format(child.__class__)
+                        )
+
+        logger.info("Merged layers: %s" % ", ".join(merged))
+        logger.info("Saving merged model to: %s" % output_dir)
+
+        model_copy.save_pretrained(output_dir)
+        tokenizer = AutoTokenizer.from_pretrained(
+            self.config.base_model
+        ).save_pretrained(output_dir)
+
+    @classmethod
+    def from_pretrained_peft(cls, path_in_repo: str, **kwargs):
+        """Instantiate an expert model from a pretrained PEFT adapter."""
+        from mttl.models.library.peft import load_expert_from_peft_checkpoint
+
+        expert = load_expert_from_peft_checkpoint(path_in_repo)
+        config = ExpertModelConfig(
+            base_model=expert.expert_info.expert_model,
+            expert_name=expert.expert_info.expert_name,
+            modifier_config=expert.expert_info.expert_config,
+        )
+        self = cls(config, **kwargs)
+        self.model.load_state_dict(expert.expert_weights, strict=False)
+        return self
 
     def as_expert(self, training_config=None):
         state_dict = self.state_dict()
@@ -91,9 +186,22 @@ class MultiExpertMixin:
     def selector_config(self, value: AutoSelectorConfig):
         self._selector_config = value
 
+    def enable_adapters(self):
+        for module in self.experts_containers:
+            module.enable()
+
+    def disable_adapters(self):
+        for module in self.experts_containers:
+            module.disable()
+
     @property
     def experts_names(self):
         return list(self.experts_infos.keys())
+
+    def unset_default_expert(self):
+        """Propagate default expert to all containers that contain it."""
+        for container in self.experts_containers:
+            container.default_expert_name = None
 
     def set_default_expert(self, expert_name):
         """Propagate default expert to all containers that contain it."""
@@ -103,54 +211,8 @@ class MultiExpertMixin:
         for container in self.experts_containers:
             if expert_name in container.expert_infos:
                 container.default_expert_name = expert_name
-
-    @classmethod
-    def from_pretrained_library(
-        cls,
-        library_id: Union[str, ExpertLibrary],
-        selector_config: Union[SelectorConfig, Dict[str, SelectorConfig]] = None,
-        remote_token: str = None,
-        default_expert_name: str = None,
-        **loading_kwargs,
-    ):
-
-        if not isinstance(library_id, ExpertLibrary):
-            library = ExpertLibrary.get_expert_library(
-                repo_id=library_id,
-                token=remote_token,
-            )
-            repo_id = library_id
-        else:
-            library = library_id
-            repo_id = library_id.uri
-
-        # get a config file from the library, and initialize the expert model
-        an_expert = library[next(iter(library.keys()))]
-
-        # set selector for the added experts
-        if selector_config is not None:
-            if isinstance(selector_config, LoadableSelectorConfig):
-                selector_config.library_id = repo_id
-
-            elif isinstance(selector_config, dict):
-                for modifier_name, cfg in selector_config.items():
-                    # inject the library id if it is None
-                    if (
-                        isinstance(cfg, LoadableSelectorConfig)
-                        and cfg.library_id is None
-                    ):
-                        cfg.library_id = repo_id
-        else:
-            logger.info("No selector config provided, assuming expert name selector!")
-
-        config = MultiExpertModelConfig(
-            an_expert.expert_info.model,
-            default_expert_name=default_expert_name,
-            selector_config=selector_config,
-        )
-        model = cls(config, **loading_kwargs)
-        model.add_experts_from_library(library)
-        return model
+            else:
+                raise ValueError(f"Expert {expert_name} not found in the container.")
 
     @property
     def lock(self):
@@ -163,7 +225,7 @@ class MultiExpertMixin:
         containers = []
         for _, module in self.model.named_modules():
             for _, child in dict(module.named_children()).items():
-                if isinstance(child, ExpertContainer) and len(child.experts) > 0:
+                if isinstance(child, ExpertContainer):
                     containers.append(child)
         return containers
 
@@ -180,7 +242,7 @@ class MultiExpertMixin:
         """
         for _, module in self.model.named_modules():
             for c_name, child in dict(module.named_children()).items():
-                if isinstance(child, ExpertContainer) and len(child.experts) > 0:
+                if isinstance(child, ExpertContainer):
                     setattr(module, c_name, child.layer)
 
         self.selector_cache.clear()
@@ -190,6 +252,11 @@ class MultiExpertMixin:
         import concurrent.futures
 
         import tqdm
+
+        if type(library) == str:
+            from mttl.models.library.expert_library import ExpertLibrary
+
+            library = ExpertLibrary.get_expert_library(library)
 
         def add_module(self, module_name):
             expert_dump = library[module_name]
@@ -234,27 +301,39 @@ class MultiExpertMixin:
         logger.info("Added empty expert: {}".format(expert_name))
         return new_expert
 
+    def add_expert(
+        self,
+        expert_path: str,
+        expert_name: str = None,
+        action: str = "route",
+        is_default: bool = False,
+    ):
+        return self.load_expert(
+            expert_path,
+            expert_name=expert_name,
+            action=action,
+            is_default=is_default,
+        )
+
     def load_expert(
         self,
         expert_path: str,
         expert_name: str = None,
-        action: str = "merge",
+        action: str = "route",
         is_default: bool = False,
-        expert_library: ExpertLibrary = None,
     ):
-        from mttl.models.library.expert import load_expert
+        from mttl.models.library.expert import Expert, load_expert
 
-        expert = load_expert(
+        expert: Expert = load_expert(
             expert_path,
             expert_name=expert_name,
-            expert_library=expert_library,
         )
 
-        if self.hparams.model != expert.training_config.model:
+        if self.hparams.model != expert.expert_info.expert_model:
             raise ValueError(
                 "The expert has been trained on top of a different model!"
                 " Detected: {} - Expected: {}".format(
-                    expert.training_config.model, self.hparams.model
+                    expert.expert_info.expert_model, self.hparams.model
                 )
             )
 
@@ -281,6 +360,8 @@ class MultiExpertMixin:
         """
         If action is merge, then the expert is merged with the existing model, and we return None.
         """
+        from mttl.models.containers import get_default_container_class
+
         if expert_name is not None:
             # we want to load expert instance with a given name (might be different from the one in the expert instance)
             # we dont want to change expert instance though!
@@ -292,7 +373,7 @@ class MultiExpertMixin:
             modifier_name = expert_instance.expert_config.modifier_name
             selector_config = self._get_selector_config(modifier_name)
 
-            add_expert_to_transformer(
+            get_default_container_class(modifier_name).modify_transformer(
                 self.model,
                 expert_instance,
                 action=action,
@@ -305,7 +386,7 @@ class MultiExpertMixin:
                 self.experts_infos[expert_instance.name] = expert_instance.expert_info
                 # reload the expert instance to fill the weights properly if this was an empty expert
                 expert_instance = self.get_expert_instance(expert_instance.name)
-            return expert_instance
+                return expert_instance
 
     def set_selector(
         self,
@@ -410,10 +491,9 @@ class MultiExpertMixin:
 
     def clear_experts(self):
         """Removes all experts and containers from the huggingface model."""
-        for mn, m in self.model.named_modules():
-            for cn, c in m.named_children():
-                if isinstance(c, ExpertContainer):
-                    setattr(m, cn, c.layer)
+        from mttl.models.containers.base import clear_containers
+
+        clear_containers(self.model)
 
         self.experts_infos.clear()
         self.selector_cache.clear()
@@ -448,6 +528,68 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
 
         return MultiExpertModel(config, model_object=model)
 
+    @classmethod
+    def from_pretrained_peft(
+        cls, path_in_repo: str, set_as_default: bool = True, **kwargs
+    ):
+        """Instantiate an expert model from a pretrained PEFT adapter."""
+        from mttl.models.library.peft import load_expert_from_peft_checkpoint
+
+        expert = load_expert_from_peft_checkpoint(path_in_repo)
+        config = MultiExpertModelConfig(
+            base_model=expert.expert_info.expert_model,
+        )
+        self = cls(config, **kwargs)
+        self.add_expert_instance(expert, is_default=set_as_default)
+        return self
+
+    @classmethod
+    def from_pretrained_library(
+        cls,
+        library_id: Union[str, ExpertLibrary],
+        selector_config: Union[SelectorConfig, Dict[str, SelectorConfig]] = None,
+        remote_token: str = None,
+        default_expert_name: str = None,
+        **loading_kwargs,
+    ):
+        if not isinstance(library_id, ExpertLibrary):
+            library = ExpertLibrary.get_expert_library(
+                repo_id=library_id,
+                token=remote_token,
+            )
+            repo_id = library_id
+        else:
+            library = library_id
+            repo_id = library_id.uri
+
+        # get a config file from the library, and initialize the expert model
+        an_expert = library[next(iter(library.keys()))]
+
+        # set selector for the added experts
+        if selector_config is not None:
+            if isinstance(selector_config, LoadableSelectorConfig):
+                selector_config.library_id = repo_id
+
+            elif isinstance(selector_config, dict):
+                for modifier_name, cfg in selector_config.items():
+                    # inject the library id if it is None
+                    if (
+                        isinstance(cfg, LoadableSelectorConfig)
+                        and cfg.library_id is None
+                    ):
+                        cfg.library_id = repo_id
+        else:
+            logger.info("No selector config provided, assuming expert name selector!")
+
+        config = MultiExpertModelConfig(
+            an_expert.expert_info.model,
+            default_expert_name=default_expert_name,
+            selector_config=selector_config,
+        )
+        model = cls(config, **loading_kwargs)
+        model.add_experts_from_library(library)
+        return model
+
     def _clear_library_id_from_selector_config(self) -> SelectorConfig:
         import copy
 
@@ -462,6 +604,50 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
                 selector_config.library_id = None
 
         return selector_config
+
+    def merge_and_save_base_model(self, output_dir, expert_name, device="cpu"):
+        """
+        Merge the specific expert and save the base model in the huggingface format
+        to the output directory. Moves the model to the specified device before merging.
+        """
+        import copy
+
+        from transformers import AutoTokenizer
+
+        from mttl.models.containers.base import clear_containers
+
+        if expert_name not in self.experts_infos:
+            raise ValueError(f"Expert {expert_name} not found in the model.")
+
+        # move model to cpu to avoid memory issues
+        self.model.to(device)
+
+        merged = []
+        model_copy = copy.deepcopy(self.model)
+
+        # get the modifier type of the expert name
+        modifier_name = self.experts_infos[expert_name].expert_config.modifier_name
+
+        for container in containers_iterator(model_copy):
+            if expert_name in container.expert_infos:
+                if not isinstance(container, MergeableContainer):
+                    raise ValueError(
+                        "Cannot merge expert loaded in a non-mergeable container. Either change container type or expert type."
+                    )
+
+                container.merge_expert(expert_name)
+                merged.append(container.layer_name)
+
+        # now clear all containers and save the model
+        clear_containers(model_copy)
+
+        logger.info("Merged layers: %s" % ", ".join(merged))
+        logger.info("Saving merged model to: %s" % output_dir)
+
+        model_copy.save_pretrained(output_dir)
+        tokenizer = AutoTokenizer.from_pretrained(
+            self.config.base_model
+        ).save_pretrained(output_dir)
 
     def save_pretrained(self, save_directory, **kwargs):
         # need to make sure that config is in sync with the model before saving
@@ -510,8 +696,9 @@ class MoEModel(BaseExpertModel, MultiExpertMixin):
             self.moe_num_experts = self.config.moe_num_experts
         else:
             expert_library = ExpertLibrary.get_expert_library(self.config.library_id)
+            assert len(expert_library) > 0, "No experts found in the library."
             for i, expert in enumerate(sorted(list(expert_library.keys()))):
-                self.add_expert_instance(expert_library[expert], expert_name=f"e{i}")
+                self.add_expert_instance(expert_library[expert], expert_name=expert)
 
             self.moe_num_experts = i + 1
 

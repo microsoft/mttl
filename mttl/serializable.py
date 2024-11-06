@@ -58,6 +58,22 @@ class Serializable:
                 data_[field.name] = value
         return cls(**data_)
 
+    def to_json_string(self) -> str:
+        import json
+
+        return json.dumps(self.asdict())
+
+    def from_json_string(self, str) -> str:
+        import json
+
+        return self.from_dict(json.loads(str))
+
+    def from_json(self, str) -> str:
+        return self.from_json_string(str)
+
+    def to_json(self) -> str:
+        return self.to_json_string()
+
     @classmethod
     def from_dict(cls, data) -> "Serializable":
         return cls.fromdict(data)

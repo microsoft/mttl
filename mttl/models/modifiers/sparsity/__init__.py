@@ -1,1 +1,1 @@
-from mttl.models.modifiers.sparsity.sparse_mask import *
+from mttl.models.modifiers.sparse_mask import *

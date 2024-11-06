@@ -459,21 +459,6 @@ class HiddenStateComputer(LibraryTransform):
             value = getattr(default_args, arg_name, None)
             setattr(args, arg_name, value)
 
-    def _get_parent_from_name(self, model, name):
-        parts = name.split(".")
-        for part in parts:
-            if part.isdigit():
-                new_model = model[int(part)]
-            else:
-                new_model = getattr(model, part, None)
-
-            if new_model is None:
-                return model
-
-            model = new_model
-
-        return model
-
     def _track_hidden_states(self, model, keys=None, device="cpu"):
         model.container = {}
 
@@ -494,9 +479,8 @@ class HiddenStateComputer(LibraryTransform):
 
                 return retrieve_input
 
-            for key in keys:
-                module = self._get_parent_from_name(model.model, key)
-                module.register_forward_hook(build_hook(key))
+            for container in model.experts_containers:
+                container.register_forward_hook(build_hook(container.layer_name))
         else:
             raise NotImplementedError()
 
@@ -533,6 +517,7 @@ class HiddenStateComputer(LibraryTransform):
         default_args=None,
         device="cpu",
     ) -> Expert:
+        from mttl.arguments import ExpertConfig
         from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
 
         if isinstance(library, str):
@@ -551,7 +536,7 @@ class HiddenStateComputer(LibraryTransform):
         output = {}
 
         for _, (expert_name, expert) in enumerate(library.items()):
-            training_config = expert.training_config
+            training_config = ExpertConfig.from_dict(expert.training_config)
 
             if default_args is not None:
                 self._update_args(training_config, default_args)
@@ -568,9 +553,7 @@ class HiddenStateComputer(LibraryTransform):
             if not self.config.use_base_model_only:
                 model.add_expert_instance(expert, is_default=True)
 
-            self._track_hidden_states(
-                model, keys=expert.expert_weights.keys(), device=device
-            )
+            self._track_hidden_states(model, device=device)
 
             training_config.dataset = expert.expert_info.dataset
             training_config.subsample_train = self.config.max_samples_per_task
@@ -712,7 +695,9 @@ class PhatgooseTransform(HiddenStateComputer):
                 outputs[expert_name] = loaded_output[expert_name]
                 continue
 
-            training_config: ExpertConfig = expert.training_config
+            training_config: ExpertConfig = ExpertConfig.from_dict(
+                expert.training_config
+            )
 
             if default_args is not None:
                 self._update_args(training_config, default_args)
@@ -979,6 +964,7 @@ class ArrowTransform(LibraryTransform):
 
         vectors, eigvals = self.fetch(library, scale=False)
         already_computed = []
+
         for expert_name, expert in library.items():
             if expert_name in vectors and not recompute:
                 logger.info(

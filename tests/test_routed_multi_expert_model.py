@@ -7,8 +7,8 @@ from pytorch_lightning import seed_everything
 
 from mttl.arguments import MoEExpertConfig, MultiExpertConfig
 from mttl.models.containers.lora_containers import (
-    CoalescedLoRAExpertContainer,
     LoRAExpertContainer,
+    SkilledLoRAExpertContainer,
 )
 from mttl.models.containers.selectors.moe_selector import MOERKHSSelector
 from mttl.models.containers.selectors.per_token_selector import PerTokenSelector
@@ -88,8 +88,6 @@ def create_expert_model_from_args(config: Union[MultiExpertConfig, MoEExpertConf
 
 
 def test_add_expert_with_action_merge(tmp_multi_exp_config, monkeypatch):
-    monkeypatch.setenv("COALESCED_LORA_CONTAINER", "0")
-
     seed_everything(0)
     config: MultiExpertConfig = tmp_multi_exp_config
 
@@ -120,30 +118,37 @@ def test_add_expert_with_action_merge(tmp_multi_exp_config, monkeypatch):
 
     # Test Base Llama model
     output = module(**batch)
-    assert np.allclose(output.loss.item(), 15.2, atol=0.1)
+    assert np.allclose(output.loss.item(), 11.31, atol=0.1)
 
 
 def nonzero_B_init(model):
     gen = torch.Generator()
     gen.manual_seed(0)
+
     for mod in model.modules():
-        if isinstance(mod, LoRA):
-            # Also re-initing lora_a so that we have the exact same values
-            # for both the Poly and MHR test
-            mod.lora_a.data = torch.rand(mod.lora_a.shape, generator=gen) * 0.5
-            mod.lora_b.data = torch.rand(mod.lora_b.shape, generator=gen) * 0.5
+        if type(mod) == LoRAExpertContainer:
+            for name, param in mod.lora_a.items():
+                param.data = torch.rand(param.shape, generator=gen) * 0.5
+            for name, param in mod.lora_b.items():
+                param.data = torch.rand(param.shape, generator=gen) * 0.5
+        elif type(mod) == SkilledLoRAExpertContainer:
+            mod.experts.lora_a.data = (
+                torch.rand(mod.experts.lora_a.shape, generator=gen) * 0.5
+            )
+            mod.experts.lora_b.data = (
+                torch.rand(mod.experts.lora_b.shape, generator=gen) * 0.5
+            )
 
 
-@pytest.mark.parametrize("is_coalesced", [0, 1])
+@pytest.mark.parametrize("is_skilled", [0, 1])
 def test_expert_selector_with_poly_task_routing(
-    tmp_multi_exp_config, monkeypatch, is_coalesced
-):  # this fails, why?
-    monkeypatch.setenv("COALESCED_LORA_CONTAINER", str(is_coalesced))
-
+    tmp_multi_exp_config, monkeypatch, is_skilled
+):
     seed_everything(0)
 
     config: MultiExpertConfig = tmp_multi_exp_config
     config.router_selector = "poly_router"
+    config.model_modifier = "skilled_lora" if is_skilled else "lora"
 
     # Tasks need to be specified to the selector to perform routing
     config.task_names = ["task_1", "task_2", "task_3"]
@@ -172,48 +177,49 @@ def test_expert_selector_with_poly_task_routing(
 
     # BASE MODEL FWD BASS (because all Bs are == 0, so functially same as backbone)
     output = module(**batch)
-    assert np.allclose(output.loss.item(), 13.625 if is_coalesced else 15.6, atol=0.1)
+    assert np.allclose(output.loss.item(), 13.625 if is_skilled else 12.93, atol=0.1)
 
     # Now let's change the adapter params, and also the function parameterized by the model
     nonzero_B_init(module)
     output = module(**batch)
-    assert np.allclose(output.loss.item(), 19.0 if is_coalesced else 18.4, atol=0.1)
+    assert np.allclose(output.loss.item(), 19.0 if is_skilled else 20.5, atol=0.1)
 
     """ Multi-Head Routing Test """
     # NOTE: We need to add SkilledLoRAs instead of standard LoRAs
     # We follow the procedure as in MoETrainer constructor :
     # init SkilledLoras n_skills=1, for `n_experts` amount of times
-    config.n_splits = 4
-    config.n_skills = 1
-    config.model_modifier = "skilled_lora"
+    if is_skilled:
+        config.n_splits = 4
+        config.n_skills = 1
+        config.model_modifier = "skilled_lora"
 
-    # Need to recreate experts so that they have the right amt of splits
-    exp1 = create_dummy_expert(config, "task_1")
-    exp2 = create_dummy_expert(config, "task_2")
+        # Need to recreate experts so that they have the right amt of splits
+        exp1 = create_dummy_expert(config, "task_1")
+        exp2 = create_dummy_expert(config, "task_2")
 
-    module_dict = {"mod1": exp1, "mod2": exp2}
-    module = create_expert_model_from_args(config)
-    module.add_experts_from_dict(module_dict, action="route")
+        module_dict = {"mod1": exp1, "mod2": exp2}
+        module = create_expert_model_from_args(config)
+        module.add_experts_from_dict(module_dict, action="route")
 
-    nonzero_B_init(module)
-    output = module(**batch)
-
-    # Because routing is initialized to uniform, should give same result
-    assert np.allclose(output.loss.item(), 19.0 if is_coalesced else 19.12, atol=0.1)
-
-    # Now let's change the routing, to make sure the output also changes
-    for mod in module.modules():
-        if isinstance(mod, PolySelector):
-            mod.module_logits.data.uniform_(-10, 10)
-            mod.module_logits.data[:, -1] = 999
-
-    output = module(**batch)
-    assert np.allclose(output.loss.item(), 20.375 if is_coalesced else 19.875, atol=0.1)
-
-    # Finally, Test invalid tasks
-    batch["task_names"][-1] = "task_10"
-    with pytest.raises(AssertionError):
+        nonzero_B_init(module)
         output = module(**batch)
+
+        # Because routing is initialized to uniform, should give same result
+        assert np.allclose(output.loss.item(), 19.0, atol=0.1)
+
+        # Now let's change the routing, to make sure the output also changes
+        for mod in module.modules():
+            if isinstance(mod, PolySelector):
+                mod.module_logits.data.uniform_(-10, 10)
+                mod.module_logits.data[:, -1] = 999
+
+        output = module(**batch)
+        assert np.allclose(output.loss.item(), 20.375, atol=0.1)
+
+        # Finally, Test invalid tasks
+        batch["task_names"][-1] = "task_10"
+        with pytest.raises(AssertionError):
+            output = module(**batch)
 
 
 def test_expert_selector_with_task_name_routing(tmp_multi_exp_config):
@@ -233,7 +239,6 @@ def test_expert_selector_with_task_name_routing(tmp_multi_exp_config):
         module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
     )
 
-    # Model has been created. Now, we fix the generator to ensure that coalesced vs not coalesced gives the same as base llama
     generator = torch.Generator()
     generator.manual_seed(0)
     batch = {
@@ -271,7 +276,6 @@ def test_expert_selector_with_poly_routing(tmp_multi_exp_config):
         module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
     )
 
-    # Model has been created. Now, we fix the generator to ensure that coalesced vs not coalesced gives the same as base llama
     generator = torch.Generator()
     generator.manual_seed(0)
     batch = {
@@ -390,11 +394,9 @@ def test_expert_selector_with_moe_routing_soft_granularity(
         module = create_expert_model_from_args(config)
 
 
-def test_expert_selector_with_moe_routing_soft_coalesced(
+def test_expert_selector_with_moe_routing_soft(
     mocker, tmp_moe_exp_config, dummy_batch, monkeypatch
 ):
-    monkeypatch.setenv("COALESCED_LORA_CONTAINER", "1")
-
     seed_everything(0)
     config: MoEExpertConfig = tmp_moe_exp_config
     config.router_selector = "moe_rkhs_router"
@@ -406,7 +408,7 @@ def test_expert_selector_with_moe_routing_soft_coalesced(
     module = create_expert_model_from_args(config)
 
     container = module.model.transformer.h[0].attn.attention.k_proj
-    assert isinstance(container, CoalescedLoRAExpertContainer)
+    assert isinstance(container, SkilledLoRAExpertContainer)
     assert isinstance(container.selector, MOERKHSSelector)
     assert container.selector.top_k == -1
 
@@ -450,11 +452,9 @@ def test_expert_selector_with_moe_routing_hard(mocker, tmp_moe_exp_config, dummy
     assert spy.spy_return.weights.shape == (2, 3, 2)
 
 
-def test_expert_selector_with_moe_clown_routing_soft_coalesced(
+def test_expert_selector_with_moe_clown_routing_soft(
     mocker, tmp_moe_exp_config, bigger_dummy_batch, monkeypatch
 ):
-    monkeypatch.setenv("COALESCED_LORA_CONTAINER", "1")
-
     seed_everything(0)
     config: MoEExpertConfig = tmp_moe_exp_config
     config.router_selector = "arrow_router"
@@ -464,7 +464,7 @@ def test_expert_selector_with_moe_clown_routing_soft_coalesced(
     module = create_expert_model_from_args(config)
 
     container = module.model.transformer.h[0].attn.attention.k_proj
-    assert isinstance(container, CoalescedLoRAExpertContainer)
+    assert isinstance(container, SkilledLoRAExpertContainer)
     assert isinstance(container.selector, PerTokenSelector)
     assert container.selector.config.top_k == -1
     assert container.selector.config.router_temp == 0.1

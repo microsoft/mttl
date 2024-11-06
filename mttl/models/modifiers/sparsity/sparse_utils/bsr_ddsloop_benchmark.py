@@ -18,7 +18,7 @@ from mttl.logging import logger
 from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.base import Modifier
 from mttl.models.modifiers.lora import LoRA, LoRAConfig, SkilledLoRA, SkilledLoRAConfig
-from mttl.models.modifiers.sparsity.sparse_mask import (
+from mttl.models.modifiers.sparse_mask import (
     MaskedLinear,
     ScatteredSparseLinearModule,
     SparseLinearModule,
