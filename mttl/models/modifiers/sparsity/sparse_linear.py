@@ -14,7 +14,6 @@ from mttl.models.modifiers.base import Modifier, ModifierConfig
 from mttl.models.modifiers.sparsity.sparse_utils.utils import (
     BlcokSparseLinearFunction_SP_ADD,
     BlcokSparseLinearFunction_SP_SCATTER,
-    LinearWithSparseDelta,
     SparseLinearFunction_SP_ADD,
     _scatter_add_flattened,
     get_2d_indices_from_csr_matrix,
@@ -360,6 +359,10 @@ class MaskedLinear(SparseLinear, nn.Module):
         data = self.sparse_weights.data[row_idx, col_idx].cpu().float().numpy()
         return csr_matrix((data, (row_idx, col_idx)), shape=self.base_weight.shape)
 
+#############
+# MaskedLinear keeps sparse weights in the dense format. THis has the advantage that we do not neet to fumble with the optimizer.
+# Class below try implementing sparse layer in a memory efficient way, similar to to SpIEL (https://arxiv.org/pdf/2401.16405), which uses essentially uses ScatteredSparseLinearModule.
+# Using below classes may require additional tricks like in the SpIEL paper.
 
 class SparseLinearModule(SparseWeights, SparseLinear):
     """
@@ -587,54 +590,4 @@ class ScatteredSparseLinearModule(SparseWeights, SparseLinear):
             np.array(self.twoD_indices),
             dtype=torch.int64,
             device=self.base_weight.device,
-        )
-
-
-class SpieLSparseLinearModule(SparseLinearModule):
-    """
-    This implements the SpIEL kernel: https://arxiv.org/pdf/2401.16405
-    """
-
-    def __init__(
-        self,
-        weight,
-        bias,
-        config: SparseLinearConfig,
-        parent_name=None,
-        mask: torch.Tensor = None,
-    ):
-        super().__init__(
-            weight,
-            bias,
-            config,
-            parent_name,
-            sparse_func=LinearWithSparseDelta,
-        )
-        indices = torch.tensor(
-            np.array(self.oneD_indices),
-            dtype=torch.int64,
-            device=self.base_weight.device,
-        )
-        self.register_buffer("idxs", indices)
-
-    @property
-    def oneD_indices(self):
-        """
-        Returns a simple 1d representation of the sparse weights instead of the CSR format.
-        """
-        twoD_indices = self.twoD_indices
-        return twoD_indices[0] * self.shape[1] + twoD_indices[1]
-
-    def forward(self, input):
-        bias = self.base_bias
-        if bias and self.sparse_bias:
-            bias = self.base_bias + self.sparse_bias
-        return self.sparse_func.apply(
-            input,
-            self.base_weight,
-            self.sparse_weights,
-            self.idxs,
-            bias,
-            None,
-            self.base_weight.dtype,
         )

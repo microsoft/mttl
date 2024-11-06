@@ -8,9 +8,9 @@ from triton.ops.blocksparse.matmul import dsd_lut, sdd_lut
 
 from mttl.logging import logger
 from mttl.models.modifiers.base import Modifier, ModifierConfig
-from mttl.models.modifiers.sm_config import SparseMaskConfig
-from mttl.models.modifiers.sm_updater import MaskUpdater
-from mttl.models.modifiers.sparsity.sparse_utils.sparse_linear import (
+from mttl.models.modifiers.sparse_mask_config import SparseMaskConfig
+from mttl.models.modifiers.sparsity.mask_updater import MaskUpdater
+from mttl.models.modifiers.sparsity.sparse_linear import (
     MaskedLinear,
     ScatteredSparseLinearModule,
     SparseLinear,
@@ -46,7 +46,7 @@ class SparseMaskAdapter(Modifier):
 
     def forward(self, input):
         if self.maks_update_mode and self.training:
-            return self.mask_updater(self.sparse_layer, input)
+            return self.mask_updater(input)
         return self.sparse_layer(input)
 
     def prepare_for_mask_update(self):
