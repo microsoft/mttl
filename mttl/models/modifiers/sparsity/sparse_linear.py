@@ -359,10 +359,12 @@ class MaskedLinear(SparseLinear, nn.Module):
         data = self.sparse_weights.data[row_idx, col_idx].cpu().float().numpy()
         return csr_matrix((data, (row_idx, col_idx)), shape=self.base_weight.shape)
 
+
 #############
 # MaskedLinear keeps sparse weights in the dense format. THis has the advantage that we do not neet to fumble with the optimizer.
 # Class below try implementing sparse layer in a memory efficient way, similar to to SpIEL (https://arxiv.org/pdf/2401.16405), which uses essentially uses ScatteredSparseLinearModule.
 # Using below classes may require additional tricks like in the SpIEL paper.
+
 
 class SparseLinearModule(SparseWeights, SparseLinear):
     """

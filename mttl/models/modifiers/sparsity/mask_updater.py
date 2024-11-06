@@ -135,7 +135,9 @@ class SNIPMaskUpdater(MaskUpdater):
     def selected_indices(self) -> torch.Tensor:
         if self.config.steps_in_mask_selection == 1:
             return self._selected_indices
-        raise NotImplementedError("More than one step in mask selection is not supported")
+        raise NotImplementedError(
+            "More than one step in mask selection is not supported"
+        )
 
     def forward(self, x: torch.Tensor):
         input_dtype = x.dtype
