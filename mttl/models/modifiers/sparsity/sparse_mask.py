@@ -3,19 +3,28 @@ from collections import namedtuple
 from dataclasses import dataclass
 from typing import Union
 
+import numpy as np
+import torch
+from scipy.sparse import csr_matrix
 from torch import nn
 from triton.ops.blocksparse.matmul import dsd_lut, sdd_lut
 
 from mttl.logging import logger
 from mttl.models.modifiers.base import Modifier, ModifierConfig
 from mttl.models.modifiers.sparse_mask_config import SparseMaskConfig
-from mttl.models.modifiers.sparsity.mask_updater import MaskUpdater
-from mttl.models.modifiers.sparsity.sparse_linear import (
+from mttl.models.modifiers.sparse_utils.sparse_linear import (
     MaskedLinear,
     ScatteredSparseLinearModule,
     SparseLinear,
     SparseLinearConfig,
 )
+from mttl.models.modifiers.sparse_utils.utils import (
+    get_2d_indices_from_csr_matrix,
+    get_top_k_sparcity,
+    scipy_csr_to_torch_csr,
+    torch_csr_to_scipy_csr,
+)
+from mttl.models.modifiers.sparsity.mask_updater import MaskUpdater
 
 
 class SparseMaskAdapter(Modifier):
@@ -46,7 +55,7 @@ class SparseMaskAdapter(Modifier):
 
     def forward(self, input):
         if self.maks_update_mode and self.training:
-            return self.mask_updater(input)
+            return self.mask_updater(self.sparse_layer, input)
         return self.sparse_layer(input)
 
     def prepare_for_mask_update(self):

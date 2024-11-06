@@ -14,7 +14,7 @@ from mttl.models.modifiers.sparse_mask import (
     ScatteredSparseAdapter,
     ScatteredSparseLinearModule,
 )
-from mttl.models.modifiers.sparse_utils.sparse_linear import ScatteredSparseLinearModule
+from mttl.models.modifiers.sparsity.sparse_linear import ScatteredSparseLinearModule
 
 
 def test_sm_adapter():

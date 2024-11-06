@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from mttl.models.modifiers.sparse_utils.sparse_linear import SparseLinearConfig
+from mttl.models.modifiers.sparsity.sparse_linear import SparseLinearConfig
 
 
 @dataclass

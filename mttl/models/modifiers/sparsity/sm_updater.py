@@ -146,34 +146,8 @@ class SNIPMaskUpdater(MaskUpdater):
     def selected_indices(self) -> torch.Tensor:
         if self.config.steps_in_mask_selection == 1:
             return self._selected_indices
-
-        raise NotImplementedError
-        # _selected_indices keeps track of how many times each parameter has been selected
-        # an alternative, coudl be to actually accumulate gradients for the mask, but it can be too memory expensive, we coudl use cuantization.
-        # Now we need to take keep_ratio of the selected params
-        # since we used more than 1 batch to estimate the most important ones, some will be selected more than once and some only once
-        # self._selected_indices = self._selected_indices
-        selected_indices_dense = self._selected_indices.to_dense()
-        selected_indices_dense = get_top_k_sparcity(
-            selected_indices_dense,
-            self.config.sps_type,
-            self.keep_ratio,
-            self.block_size,
-        )
-        return selected_indices_dense.to_sparse_csr()
-
-    def _time_to_update_mask(self, sparse_layer: SparseLinear):
-        return (
-            self._steps_since_last_mask_update % self.config.mask_reselection_interval
-            == 0
-            and sparse_layer.training
-            and self.config.n_max_mask_reselection <= self._n_mask_updates
-        )
-
-    def _time_to_update_sparse_weights(self, sparse_layer: SparseLinear):
-        return (
-            self._mask_update_steps % self.config.steps_in_mask_selection == 0
-            and sparse_layer.training
+        raise NotImplementedError(
+            "More than one step in mask selection is not supported"
         )
 
     def prepare_mask_or_weights_learning(self, sparse_layer: SparseLinear):
