@@ -12,10 +12,7 @@ from triton.ops.blocksparse.matmul import dsd_lut, sdd_lut
 from mttl.logging import logger
 from mttl.models.modifiers.base import Modifier
 from mttl.models.modifiers.sparse_mask_config import SparseMaskConfig
-from mttl.models.modifiers.sparsity.sparse_linear import (
-    MaskedLinear,
-    SparseLinear,
-)
+from mttl.models.modifiers.sparsity.sparse_linear import MaskedLinear, SparseLinear
 from mttl.models.modifiers.sparsity.sparse_utils.utils import (
     get_2d_indices_from_csr_matrix,
     get_top_k_sparcity,

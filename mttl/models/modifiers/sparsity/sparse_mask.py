@@ -12,7 +12,6 @@ from triton.ops.blocksparse.matmul import dsd_lut, sdd_lut
 from mttl.logging import logger
 from mttl.models.modifiers.base import Modifier, ModifierConfig
 from mttl.models.modifiers.sparse_mask_config import SparseMaskConfig
-from mttl.models.modifiers.sparsity.mask_updater import MaskUpdater
 from mttl.models.modifiers.sparse_utils.sparse_linear import (
     MaskedLinear,
     ScatteredSparseLinearModule,
@@ -25,6 +24,7 @@ from mttl.models.modifiers.sparse_utils.utils import (
     scipy_csr_to_torch_csr,
     torch_csr_to_scipy_csr,
 )
+from mttl.models.modifiers.sparsity.mask_updater import MaskUpdater
 
 
 class SparseMaskAdapter(Modifier):
