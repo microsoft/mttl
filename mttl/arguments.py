@@ -489,6 +489,7 @@ class TrainingArgs(DataArgs):
             warmup_steps=self.warmup_steps if self.warmup_steps > 0 else 0,
             warmup_ratio=self.warmup_proportion if self.warmup_proportion > 0 else 0,
             num_train_epochs=self.num_train_epochs,
+            max_grad_norm=self.max_grad_norm,
             max_steps=self.total_steps,
             save_total_limit=1,
             remove_unused_columns=False,
