@@ -32,12 +32,7 @@ class DCDTrainer(ExpertModelTrainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-        assert (
-            self.mttl_args.dcd_logit_loss
-            or self.mttl_args.dcd_hidden_state_loss
-            or self.mttl_args.dcd_hidden_logit_loss
-        )
-
+        assert self.mttl_args.dcd_logit_loss or self.mttl_args.dcd_hidden_state_loss
         self.kl_loss = torch.nn.KLDivLoss(reduction="none")
 
     def get_reference_model(self, model):
@@ -105,11 +100,8 @@ class DCDTrainer(ExpertModelTrainer):
             return_dict=True,
         )
 
-        # RMSnorms are at the start of each block (before the attn)
-        # and again after attn and before the FFN
-        # the the output of each block has not been "normalized"
         loss = 0.0
-        if self.mttl_args.dcd_hidden_state_loss or self.mttl_args.dcd_hidden_logit_loss:
+        if self.mttl_args.dcd_hidden_state_loss:
             losses = []
             for layer_id, (actual_states, target_states) in enumerate(
                 zip(outputs.hidden_states, target_hidden_states)
@@ -121,35 +113,12 @@ class DCDTrainer(ExpertModelTrainer):
                     logger.warning("Skipping batch due to mismatch in shape")
                     continue
 
-                if self.mttl_args.dcd_hidden_state_loss:
-                    # Loss is the mean abs difference between target and predicted states,
-                    # normalised by mean magnitude of target states
-                    loss = (
-                        actual_states - target_states
-                    ).abs().mean() / target_states.abs().mean()
-                    losses.append(loss)
-                if self.mttl_args.dcd_hidden_logit_loss and (layer_id + 1) < len(
-                    outputs.hidden_states
-                ):
-                    # Always normalize by the final hidden layer norm
-                    actual_states = model.model.model.norm(actual_states)
-                    target_states = model.model.model.norm(target_states)
-                    actual_states = actual_states.to(model.model.lm_head.weight.dtype)
-                    target_states = target_states.to(model.model.lm_head.weight.dtype)
-
-                    actual_logprobs = F.log_softmax(
-                        model.model.lm_head(actual_states), dim=-1
-                    )
-                    with torch.no_grad():
-                        target_probs = F.softmax(
-                            model.model.lm_head(target_states), dim=-1
-                        )
-
-                    # compute KL
-                    kl_loss = (
-                        self.kl_loss(actual_logprobs, target_probs).sum(dim=-1).mean()
-                    )
-                    losses.append(kl_loss)
+                # Loss is the mean abs difference between target and predicted states,
+                # normalised by mean magnitude of target states
+                loss = (
+                    actual_states - target_states
+                ).abs().mean() / target_states.abs().mean()
+                losses.append(loss)
 
             # Can we log the `kl_loss` of different layers ?
             if len(losses) == 0:
@@ -157,7 +126,7 @@ class DCDTrainer(ExpertModelTrainer):
                 fake_loss = actual_states.sum() * 0.0
                 return (fake_loss, outputs.logits) if return_outputs else fake_loss
 
-            loss = torch.sum(torch.stack(losses))
+            loss = torch.mean(torch.stack(losses))
 
         if self.mttl_args.dcd_logit_loss:
             # Add KL divergence between target and predicted output distributions to loss
@@ -263,4 +232,7 @@ def train_km(training_args):
 
 if __name__ == "__main__":
     args = KMArguments.parse()
+
+    assert not args.dcd_hidden_logit_loss, "Not supported yet"
+
     train_km(args)
