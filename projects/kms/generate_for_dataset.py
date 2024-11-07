@@ -32,6 +32,7 @@ class AugmentArgs(Args):
     output_path: str = "/tmp/"
     push_to_hub: str = None
     model_type: str = "vllm"
+    do_filtering: bool = False
 
 
 def main(args):
@@ -49,6 +50,7 @@ def main(args):
         args.num_generations,
         args.generation_top_p,
         model_type=args.model_type,
+        do_filtering=args.do_filtering,
     )
     for task in args.use_prompts.split(","):
         augmenter.add_task(task)

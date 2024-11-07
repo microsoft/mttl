@@ -13,8 +13,6 @@ class NQAZeroShotEvaluator(RougeEvaluator):
         from mttl.datamodule.base import get_datamodule
 
         # set the dataset type
-        # dataset_args.prompt = "Answer the following question, following the format of these example answers: 'A student.', 'Evelyn.', 'walks away.'. Question : "
-        dataset_args.prompt = "Answer the following question. Give only the answer, and no extra commentary, formatting, or chattiness. Question : "
         dataset_args.dataset_type = "narrativeqa"
 
         datamodule = get_datamodule(dataset_args, for_generation=True)
