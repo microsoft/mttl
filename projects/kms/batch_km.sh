@@ -11,6 +11,8 @@ WORKER_ID=$1
 NUM_WORKERS=$2
 JSON_FILE=$3
 CONFIG_ID=$4
+export WANDB_PROJECT=knowledge-modules-${CONFIG_ID}
+export WANDB_MODE="online"
 
 CONFIG_FILE=configs/${CONFIG_ID}.json
 OUTPUT_DIR=/mnt/output/kms/${CONFIG_ID}/

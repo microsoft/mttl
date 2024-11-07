@@ -22,6 +22,7 @@ logger.setLevel(logging.INFO)
 @dataclass
 class QAEvalArguments(KEArguments):
     ke_expert_name: str = "KE"
+    split: str = "test"
 
 
 def eval_qa(training_args):
@@ -65,7 +66,7 @@ def eval_qa(training_args):
 
     # Call the NQA callback
     rougeL, predictions = evaluator.evaluate(
-        model, split="test", return_predictions=True
+        model, split=args.split, return_predictions=True
     )
 
     print(f"ROUGE-L: {rougeL}")
@@ -85,10 +86,16 @@ if __name__ == "__main__":
     if isinstance(args.finetune_task_name, str) and args.finetune_task_name.endswith(
         ".json"
     ):
+
+        if args.subsample_file and args.subsample_file != args.finetune_task_name:
+            raise ValueError(
+                "Cannot have different subsample_file and finetune_task_name"
+            )
+
         with open(args.finetune_task_name, "r") as f:
             split_dict = json.load(f)
 
-        tasks = split_dict["test"]
+        tasks = split_dict[args.split]
         logger.info(f"Setting finetune_task_name to {tasks}")
         args.finetune_task_name = tasks
 

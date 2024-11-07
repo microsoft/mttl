@@ -7,6 +7,7 @@ from lightning_fabric import seed_everything
 
 # register this datamodule!
 from nqa_datamodule import NQADatamodule
+from train_km import KMArguments
 from utils.callbacks import LogMttlArgs
 
 from mttl.arguments import MultiExpertConfig
@@ -25,7 +26,7 @@ logger.setLevel(logging.INFO)
 
 
 @dataclass
-class KEArguments(MultiExpertConfig):
+class KEArguments(MultiExpertConfig, KMArguments):
     # set the following if you want to enable the NQA callback during training
     nqa_dataset: str = None
     # Where to save the KE expert
