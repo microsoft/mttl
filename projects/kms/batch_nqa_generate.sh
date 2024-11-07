@@ -4,6 +4,7 @@
 WORKER_ID=$1
 NUM_WORKERS=$2
 MODEL_TYPE=$3
+OUTPUT_PATH=$4
 
 # Validate that WORKER_ID and NUM_WORKERS are integers
 if ! [[ $WORKER_ID =~ ^[0-9]+$ ]] ; then
@@ -31,11 +32,12 @@ DOCUMENT_IDS=$(awk -v wid=$WORKER_ID -v nworkers=$NUM_WORKERS '{
 }' "input.txt" | paste -sd, -)
 
 echo $DOCUMENT_IDS
-CUDA_VISIBLE_DEVICES=0 python \
+export VLLM_WORKER_MULTIPROC_METHOD=spawn
+python \
     generate_for_dataset.py \
     -k model=$MODEL_TYPE \
     -k model_type=local \
     -k dataset_type=narrativeqa \
     -k dataset_task=$DOCUMENT_IDS \
     -k use_prompts=summary,qa \
-    -k output_path=/mnt/output/kms-datagen/$WORKER_ID
+    -k output_path=$OUTPUT_PATH/$WORKER_ID
