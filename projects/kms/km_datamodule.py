@@ -24,9 +24,9 @@ class KMDatasetConfig(DatasetConfig):
     # for each input example, we could have several outputs (e.g. several summaries or QA pairs), we can only use N of these
     num_outputs_per_chunk: int = -1
     # field in the dataset that contains the task name
-    task_name_field: str = "subject"
+    task_name_field: str = "document_id"
     # field in the dataset that contains the task source
-    task_source_field: str = "subject"
+    task_source_field: str = "document_id"
     # for train / dev split, split by document chunk, or split the list of summary / q/a's ?
     split_train_dev_on: str = "document_chunk"
 
@@ -92,41 +92,56 @@ class KMDatasetModule(DataModule):
             for i in range(len(example["input"])):
                 input = example["input"][i]
                 outputs = example["outputs"][i]
-                type = example["type"][i]
+                type_ = example["type"][i]
                 subject = example[self.config.task_name_field][i]
 
-                prompt = self.tokenizer.apply_chat_template(
-                    [
-                        {
-                            "role": "user",
-                            "content": AVAILABLE_PROMPTS[type],
-                        }
-                    ],
-                    tokenize=False,
-                    add_generation_prompt=True,
-                )
-
-                source = self.tokenizer.apply_chat_template(
-                    [
-                        {
-                            "role": "user",
-                            "content": input + "\n\n" + AVAILABLE_PROMPTS[type],
-                        }
-                    ],
-                    tokenize=False,
-                    add_generation_prompt=True,
-                )
-
                 for i, output in enumerate(outputs):
-                    return_dict["source"].append(source)
-                    return_dict["target"].append(output)
-                    return_dict["prompt"].append(prompt)
+                    # for QA, we want to show the question as well as the prompt
+                    if type(output) == dict:
+                        if type_ == "qa":
+                            prompt_str = AVAILABLE_PROMPTS[type_]
+                            output_str = f"\nQuestion: {output['question']}\nAnswer: {output['answer']}"
+                        elif type_ == "summary":
+                            prompt_str = AVAILABLE_PROMPTS[type_]
+                            output_str = output["summary"]
+                    else:
+                        # fallback to default prompt (both q and a are treated as targets)
+                        prompt_str = AVAILABLE_PROMPTS[type_]
+                        output_str = output
+
+                    prompt_str = self.tokenizer.apply_chat_template(
+                        [
+                            {
+                                "role": "user",
+                                "content": prompt_str,
+                            }
+                        ],
+                        tokenize=False,
+                        add_generation_prompt=True,
+                    )
+
+                    source_str = self.tokenizer.apply_chat_template(
+                        [
+                            {
+                                "role": "user",
+                                "content": input + "\n\n" + prompt_str,
+                            }
+                        ],
+                        tokenize=False,
+                        add_generation_prompt=True,
+                    )
+
+                    return_dict["source"].append(source_str)
+                    return_dict["target"].append(output_str)
+                    return_dict["prompt"].append(prompt_str)
+
                     if self.config.split_train_dev_on == "output":
                         # ensure that 95% or at least 1 point goes to dev
                         if i < max(int(len(outputs) * 0.05), 1):
                             return_dict["split"].append("dev")
                         else:
                             return_dict["split"].append("train")
+
                     return_dict[self.config.task_name_field].append(subject)
 
             return return_dict

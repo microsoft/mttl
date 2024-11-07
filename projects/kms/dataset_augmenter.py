@@ -103,6 +103,19 @@ class GenerationTask(Registrable):
     def get_prompt(self, text):
         return text
 
+    def extract_score(self, text):
+        import re
+
+        # Find all question tags
+        try:
+            scores = re.findall(r"Score:\s(\d+)", text, re.DOTALL | re.IGNORECASE)
+        except:
+            return
+        return scores[0]
+
+    def get_filter_prompt(self, prompt, text):
+        return None
+
     def create_task(self, text, add_chat_template=True):
         task = self.get_prompt(text)
         if add_chat_template:
@@ -113,18 +126,100 @@ class GenerationTask(Registrable):
             )
         return task
 
+    def postprocess_generation(self, text):
+        return text
+
 
 @GenerationTask.register("qa")
 class QATask(GenerationTask):
     def __init__(self, tokenizer):
         self.tokenizer = tokenizer
+        self.num_questions = 5
 
     def get_prompt(self, text):
         return (
-            f"Create one question that can be answerable from the following text, and answer it.\n********** Text **********\n"
+            f"Create {self.num_questions} questions that can be answerable from the following text, along with their answers.\n"
+            "Strive to generate challenging questions that require aggregating information across the provided text.\n"
+            "Focus on different sections of the text to increase diversity of the generated questions. Format your answer as follows:\n"
+            + "<question id='1'>QUESTION 1 HERE</question>\n"
+            + "<answer id='1'>ANSWER 1 HERE</answer>\n"
+            + "<question id='2'>QUESTION 2 HERE</question>\n"
+            + "<answer id='2'>ANSWER 2 HERE</answer>\n"
+            + "\n"
+            + "********** Text **********\n"
             + text
-            + f"\n********************\n"
+            + f"\n********************"
         )
+
+    def get_filter_prompt(self, prompt, qa):
+        return (
+            f"Below is a question/answer pair written given the text passage.\n"
+            + "Evaluate whether or not the question and the answer are correct and make sense.\n"
+            + "Please assign a score using the following 5-point scale:\n"
+            + "1: The question and answer are both incorrect or nonsensical.\n"
+            + "2: The question is correct but the answer is incorrect.\n"
+            + "3: The question is correct but trivial, the answer is correct.\n"
+            + "4: The question is correct and challenging, the answer is correct.\n"
+            + "5: The question is correct and challenging, the answer is correct, insightful and elaborate.\n"
+            + "\nPlease derive the rating score, finally write 'Score: <rating>' in the last line.\n"
+            + "\n"
+            + "********** Text **********\n"
+            + prompt
+            + f"\n********************\n"
+            + f"\n********** Question/Answer **********\n"
+            + f"Question: {qa['question']}\n"
+            + f"Answer: {qa['answer']}\n"
+            + f"\n********************"
+        )
+
+    def postprocess_generation(self, text):
+        import re
+
+        # Regular expression patterns (more forgiving)
+        question_pattern = r"<question\s+id=['\"]?(\d+)['\"]?>\s*(.*?)\s*</question>"
+        answer_pattern = r"<answer\s+id=['\"]?(\d+)['\"]?>\s*(.*?)\s*</answer>"
+
+        # Find all question tags
+        try:
+            questions = re.findall(question_pattern, text, re.DOTALL | re.IGNORECASE)
+        except:
+            questions = []
+            return []
+
+        qa_dict = {}
+
+        for q_id, question in questions:
+            qa_dict[q_id] = {"question": question.strip(), "answer": ""}
+
+        # Find all answer tags
+        try:
+            answers = re.findall(answer_pattern, text, re.DOTALL | re.IGNORECASE)
+        except:
+            answers = []
+            return []
+
+        for q_id, answer in answers:
+            if q_id in qa_dict:
+                qa_dict[q_id]["answer"] = answer.strip()
+            else:
+                # Handle case where answer ID doesn't match any question
+                print(f"Warning: Answer ID {q_id} has no matching question.")
+                qa_dict[q_id] = {"question": "", "answer": answer.strip()}
+
+        # Prepare the final list
+        qa_list = []
+        for q_id, qa in qa_dict.items():
+            if qa["question"] and qa["answer"]:
+                qa_list.append(
+                    {
+                        "question": qa["question"],
+                        "answer": qa["answer"],
+                    }
+                )
+            else:
+                print(f"Warning: Incomplete data for ID {q_id}.")
+
+        return qa_list
 
 
 @GenerationTask.register("summary")
@@ -132,12 +227,36 @@ class SummaryTask(GenerationTask):
     def __init__(self, tokenizer):
         self.tokenizer = tokenizer
 
-    def get_prompt(self, text):
+    def get_filter_prompt(self, prompt, summary):
         return (
-            f"Summarize the following text in around {int(len(text) / 4)} words without omitting any important details:\n********** Text **********\n"
-            + text
+            f"Below is a summary written given the text passage. Evaluate the quality of the summary.\n"
+            + "Please assign a score using the following 5-point scale:\n"
+            + "1: The summary reports incorrect facts, is badly written or contains grammatical errors.\n"
+            + "2: The summary is mostly correct, but it is too short or misses important information.\n"
+            + "3: The summary is mostly correct, but it misses some information.\n"
+            + "4: The summary is correct, it covers most of the important information in the text.\n"
+            + "5: The summary is correct, it covers all the important information, is insightful and elaborate.\n"
+            + "\nPlease derive the rating score, finally write 'Score: <rating>' in the last line.\n"
+            + "\n"
+            + "********** Text **********\n"
+            + prompt
+            + f"\n********************\n"
+            + f"\n********** Summary **********\n"
+            + summary["summary"]
             + f"\n********************"
         )
+
+    def get_prompt(self, text):
+        return (
+            f"Summarize the following text in around {int(len(text) / 4)} words without omitting any important details.\n"
+            "The summary should be grammatically correct and summarize all the different sections in the text.\n"
+            + "********** Text **********\n"
+            + text
+            + "\n********************"
+        )
+
+    def postprocess_generation(self, text):
+        return {"summary": text}
 
 
 class DatasetAugmenter:
@@ -149,13 +268,15 @@ class DatasetAugmenter:
         num_generations,
         generation_top_p,
         model_type="oai",
+        do_filtering=True,
     ):
-        self.tasks = []
+        self.tasks = {}
         self.model = model
         self.block_size = block_size
         self.max_continuation_length = max_continuation_length
         self.num_generations = num_generations
         self.generation_top_p = generation_top_p
+        self.do_filtering = do_filtering
 
         self.oai = model_type in ["oai", "azure_oai"]
         if not self.oai:
@@ -201,9 +322,49 @@ class DatasetAugmenter:
             self.llm = None
 
     def add_task(self, task):
-        task = GenerationTask.get_class_by_name(task)(self.tokenizer)
-        self.tasks.append(task)
+        task_gen = GenerationTask.get_class_by_name(task)(self.tokenizer)
+        self.tasks[task] = task_gen
         return self
+
+    def filter(
+        self,
+        dataset: Dataset,
+    ):
+        """Filters data produced by the augment method."""
+        indices, prompts = [], []
+        for i, example in enumerate(dataset):
+            for output in example["outputs"]:
+                prompt = self.tasks[example["type"]].get_filter_prompt(
+                    example["input"], output
+                )
+                if prompt:
+                    prompts.append(prompt)
+                    indices.append(i)
+
+        if not self.oai:
+            outputs = self.llm.generate(prompts, self.sampling_params)
+        else:
+            outputs = asyncio.run(
+                oai_get_completions_batched(
+                    prompts,
+                    self.model,
+                    num_completions=1,
+                    top_p=self.generation_top_p,
+                    max_tokens=self.max_continuation_length,
+                )
+            )
+
+        scores = [[] for _ in range(len(dataset))]
+        for index, generation_output in zip(indices, outputs):
+            example = dataset[index]
+            type = example["type"]
+
+            text = generation_output.outputs[0].text
+            text = self.tasks[type].extract_score(text)
+            scores[index].append(text)
+
+        dataset = dataset.add_column("scores", scores)
+        return dataset
 
     def augment(
         self,
@@ -219,7 +380,7 @@ class DatasetAugmenter:
             chunks_iterator = chunk_text(text, self.tokenizer, self.block_size)
 
             for chunk in chunks_iterator:
-                for task in self.tasks:
+                for task in self.tasks.values():
                     chunks.append(chunk)
                     types.append(task.registered_name)
                     prompts.append(
@@ -247,15 +408,34 @@ class DatasetAugmenter:
                 )
             )
 
-        for generation_output, chunk, type, rest in zip(outputs, chunks, types, rests):
+        for n, (generation_output, chunk, type, rest) in enumerate(
+            zip(outputs, chunks, types, rests)
+        ):
             section = {}
             section["input"] = chunk
             section["type"] = type
             section["outputs"] = []
             for i, response in enumerate(generation_output.outputs):
-                section["outputs"].append(response.text)
+                text = self.tasks[type].postprocess_generation(response.text)
+                if isinstance(text, list):
+                    for t in text:
+                        section["outputs"].append(t)
+                else:
+                    section["outputs"].append(text)
+
+            if n < 5:
+                print("********************")
+                print("Type: ", section["type"])
+                print("Input: ", section["input"])
+                print("Output: ", section["outputs"][0])
+                print("********************")
+
             section.update(rest)
             output_dataset.append(section)
 
         d = Dataset.from_list(output_dataset)
+
+        if self.do_filtering:
+            d = self.filter(d)
+
         return d
