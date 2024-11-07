@@ -115,9 +115,8 @@ class DCDTrainer(ExpertModelTrainer):
 
                 # Loss is the mean abs difference between target and predicted states,
                 # normalised by mean magnitude of target states
-                loss = (
-                    actual_states - target_states
-                ).abs().mean() / target_states.abs().mean()
+                loss = (actual_states - target_states).abs().mean()
+                loss = loss / target_states.abs().mean()
                 losses.append(loss)
 
             # Can we log the `kl_loss` of different layers ?
