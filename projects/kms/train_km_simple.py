@@ -48,7 +48,7 @@ class SimpleLogger:
             logger.error(f"Failed to log metrics: {e}")
 
 
-def dcd_loss(model, inputs):
+def dcd_loss(model, inputs, dcd_logit_loss=True, dcd_hidden_state_loss=False):
     kl_loss = torch.nn.KLDivLoss(reduction="none")
 
     # document + small task prompt + task output (e.g. summary, or question and answer)
@@ -60,7 +60,17 @@ def dcd_loss(model, inputs):
     nc_input_ids = inputs["nc_input_ids"]
     nc_labels = inputs["nc_labels"]
     nc_attention_mask = inputs["nc_attention_mask"]
-    position_ids = None
+
+    # length of the context!
+    all_length = attention_mask.sum(1)
+    context_length = all_length - nc_attention_mask.sum(1)
+    position_ids = torch.arange(
+        0,
+        nc_input_ids.size(1),
+        device=input_ids.device,
+        dtype=torch.long,
+    )
+    position_ids = context_length.unsqueeze(1) + position_ids.unsqueeze(0)
 
     # for the context-aware pass, we need to disable the adapter
     with disable_modifiers(model):
@@ -84,26 +94,25 @@ def dcd_loss(model, inputs):
         return_dict=True,
     )
 
+    loss = 0.0
     losses = []
-    for actual_states, target_states in zip(
-        outputs.hidden_states, target_hidden_states
+    for layer_id, (actual_states, target_states) in enumerate(
+        zip(outputs.hidden_states, target_hidden_states)
     ):
         actual_states = actual_states[nc_labels != -100, :]
 
-        # Calculate mean magnitude of target states
-        mean = torch.sum(torch.abs(target_states)) / (actual_states.size(-1))
         if actual_states.size(0) != target_states.size(0):
             # this shouldn't happen, but sometimes it does probably due to weird tokenization issues
             logger.warning("Skipping batch due to mismatch in shape")
             continue
 
-        losses.append(
-            # Loss is the mean abs difference between target and predicted states,
-            # normalised by mean magnitude of target states
-            torch.sum(torch.abs(actual_states - target_states))
-            / (mean * np.prod(target_states.shape))
-        )
+        # Loss is the mean abs difference between target and predicted states,
+        # normalised by mean magnitude of target states
+        loss = (actual_states - target_states).abs().mean()
+        loss = loss / target_states.abs().mean()
+        losses.append(loss)
 
+    # Can we log the `kl_loss` of different layers ?
     if len(losses) == 0:
         # this happens when shape mismatch due to tokenization issues, should happen rarely
         fake_loss = actual_states.sum() * 0.0
@@ -133,7 +142,7 @@ def do_evaluation(datamodule, model, loss_function, nqa_evaluator) -> bool:
 
     rougeL = nqa_evaluator.evaluate(model, "dev")
     logger.info(f"Validation Loss: {val_loss}, ROUGE-L: {rougeL}")
-    return val_loss
+    return val_loss, rougeL
 
 
 @dataclass
@@ -188,7 +197,10 @@ def train_km(training_args: KMArguments):
     data_args.dataset = training_args.nqa_dataset
     evaluator = NQAZeroShotEvaluator(data_args, generation_kwargs={})
 
-    loss_function = dcd_loss if training_args.loss_function == "dcd" else None
+    if training_args.loss_function == "dcd":
+        loss_function = dcd_loss
+    else:
+        raise ValueError(f"Loss function {training_args.loss_function} not supported")
 
     datamodule = get_datamodule(training_args)
     (optimizer, scheduler), trainable_param_names = get_optimizer_and_scheduler(
@@ -210,8 +222,8 @@ def train_km(training_args: KMArguments):
     best_val = float("inf")
     met_logger = SimpleLogger(training_args.output_dir)
 
-    val_loss, rougeL = do_evaluation(datamodule, model, loss_function, evaluator)
-    met_logger.log_metrics({"val_loss": val_loss, "rougeL": rougeL}, step=global_step)
+    # val_loss, rougeL = do_evaluation(datamodule, model, loss_function, evaluator)
+    # met_logger.log_metrics({"val_loss": val_loss, "rougeL": rougeL}, step=global_step)
 
     for epoch in range(args.num_train_epochs):
         epoch_end = False
@@ -266,7 +278,7 @@ def train_km(training_args: KMArguments):
         if val_loss < best_val:
             best_val = val_loss
             model.save_pretrained(training_args.output_dir)
-            logger.info(f"Saving model to {training_args.output}")
+            logger.info(f"Saving model to {training_args.output_dir}")
 
 
 if __name__ == "__main__":
