@@ -1,5 +1,7 @@
 import copy
+import json
 import logging
+import os
 from dataclasses import dataclass
 
 import numpy as np
@@ -20,6 +22,30 @@ from mttl.models.expert_model import ExpertModel, ExpertModelConfig, disable_mod
 from mttl.models.get_optimizer import get_optimizer_and_scheduler
 from mttl.models.utils import transfer_batch_to_device
 from mttl.utils import create_library, remote_login, upload_library
+
+
+class SimpleLogger:
+    def __init__(self, output_dir):
+        self.output_file = os.path.join(output_dir, "metrics.json")
+        os.makedirs(output_dir, exist_ok=True)
+
+        if os.path.exists(self.output_file):
+            os.remove(self.output_file)
+
+    def log_metrics(self, metrics, step=None):
+        lines = []
+
+        for k, v in metrics.items():
+            if isinstance(v, torch.Tensor):
+                v = v.item()
+            lines.append({"name": k, "value": v, "step": step})
+
+        try:
+            with open(self.output_file, "a+") as f:
+                for l in lines:
+                    f.write(json.dumps(l) + "\n")
+        except Exception as e:
+            logger.error(f"Failed to log metrics: {e}")
 
 
 def dcd_loss(model, inputs):
@@ -93,6 +119,23 @@ def dcd_loss(model, inputs):
     return loss
 
 
+def do_evaluation(datamodule, model, loss_function, nqa_evaluator) -> bool:
+    # validation
+    for batch in tqdm(datamodule.val_dataloader()):
+        val_loss = 0.0
+        step = 0.0
+
+        with torch.no_grad():
+            batch = transfer_batch_to_device(batch, "cuda")
+            val_loss += loss_function(model, batch).item()
+            step += 1
+        val_loss /= step
+
+    rougeL = nqa_evaluator.evaluate(model, "dev")
+    logger.info(f"Validation Loss: {val_loss}, ROUGE-L: {rougeL}")
+    return val_loss
+
+
 @dataclass
 class KMArguments(ExpertConfig):
     loss_function: str = "dcd"
@@ -100,11 +143,15 @@ class KMArguments(ExpertConfig):
     nqa_dataset: str = "sordonia/narrativeqa"
 
 
-def train_km(training_args):
+def train_km(training_args: KMArguments):
     seed_everything(training_args.seed, workers=True)
 
     # get directory of the current file
     setup_logging(training_args.output_dir)
+
+    # save mttl args
+    training_args.save_config(training_args.output_dir)
+
     logger.info("Args: %s", training_args.to_json())
 
     remote_login(training_args.remote_token)
@@ -139,7 +186,6 @@ def train_km(training_args):
 
     data_args = copy.deepcopy(training_args)
     data_args.dataset = training_args.nqa_dataset
-    data_args.dataset_type = "narrativeqa"
     evaluator = NQAZeroShotEvaluator(data_args, generation_kwargs={})
 
     loss_function = dcd_loss if training_args.loss_function == "dcd" else None
@@ -159,22 +205,16 @@ def train_km(training_args):
         * training_args.num_train_epochs
         // args.gradient_accumulation_steps
     )
+
+    global_step = 0
+    best_val = float("inf")
+    met_logger = SimpleLogger(training_args.output_dir)
+
+    val_loss, rougeL = do_evaluation(datamodule, model, loss_function, evaluator)
+    met_logger.log_metrics({"val_loss": val_loss, "rougeL": rougeL}, step=global_step)
+
     for epoch in range(args.num_train_epochs):
         epoch_end = False
-
-        # validation
-        for batch in tqdm(datamodule.val_dataloader()):
-            val_loss = 0.0
-            step = 0.0
-
-            with torch.no_grad():
-                batch = transfer_batch_to_device(batch, "cuda")
-                val_loss += loss_function(model, batch).item()
-                step += 1
-            val_loss /= step
-
-        rougeL = evaluator.evaluate(model, "dev")
-        logger.info(f"Validation Loss: {val_loss}, ROUGE-L: {rougeL}")
 
         iter_train = iter(datamodule.train_dataloader())
         while not epoch_end:
@@ -208,9 +248,25 @@ def train_km(training_args):
                 pbar.update(1)
 
                 lr = optimizer.param_groups[0]["lr"]
+                met_logger.log_metrics(
+                    {"train_loss": loss_accum.item(), "grad_norm": norm, "lr": lr},
+                    step=global_step,
+                )
                 logger.info(
                     f"Epoch {epoch}, Loss: {loss_accum.item():.5f}, Grad Norm: {norm:.5f}, LR: {lr:.6f}"
                 )
+
+            global_step += 1
+
+        val_loss, rougeL = do_evaluation(datamodule, model, loss_function, evaluator)
+        met_logger.log_metrics(
+            {"val_loss": val_loss, "rougeL": rougeL}, step=global_step
+        )
+
+        if val_loss < best_val:
+            best_val = val_loss
+            model.save_pretrained(training_args.output_dir)
+            logger.info(f"Saving model to {training_args.output}")
 
 
 if __name__ == "__main__":
