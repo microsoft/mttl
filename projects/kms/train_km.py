@@ -32,6 +32,12 @@ class DCDTrainer(ExpertModelTrainer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
+        assert (
+            self.mttl_args.dcd_logit_loss
+            or self.mttl_args.dcd_hidden_state_loss
+            or self.mttl_args.dcd_hidden_logit_loss
+        )
+
         self.kl_loss = torch.nn.KLDivLoss(reduction="none")
 
     def get_reference_model(self, model):
@@ -71,6 +77,24 @@ class DCDTrainer(ExpertModelTrainer):
             ]
             target_logits = outputs.logits[labels != -100, :]
 
+            """
+            # n_layers, seq_len, D
+            target_hidden_states = torch.stack(target_hidden_states)
+
+            # note that the last hidden state is the output to the lm_head, so we can remove
+            target_hidden_states = target_hidden_states[:-1, ...]
+
+            target_hidden_states = model.model.model.norm(target_hidden_states).to(model.model.lm_head.weight.dtype)
+            target_hidden_logits = model.model.lm_head(target_hidden_states)
+
+            target_hidden_logits = torch.cat(
+                (target_hidden_logits, target_logits.unsqueeze(0)), dim=0
+            )
+            
+            breakpoint()
+            xx = 1
+            """
+
         # for the context-less pass, we need to enable the adapter
         stu_model = self.get_student_model(model)
 
@@ -81,38 +105,66 @@ class DCDTrainer(ExpertModelTrainer):
             return_dict=True,
         )
 
-        losses = []
-        for actual_states, target_states in zip(
-            outputs.hidden_states, target_hidden_states
-        ):
-            actual_states = actual_states[nc_labels != -100, :]
+        # RMSnorms are at the start of each block (before the attn)
+        # and again after attn and before the FFN
+        # the the output of each block has not been "normalized"
+        loss = 0.0
+        if self.mttl_args.dcd_hidden_state_loss or self.mttl_args.dcd_hidden_logit_loss:
+            losses = []
+            for layer_id, (actual_states, target_states) in enumerate(
+                zip(outputs.hidden_states, target_hidden_states)
+            ):
+                actual_states = actual_states[nc_labels != -100, :]
 
-            # Calculate mean magnitude of target states
-            mean = torch.sum(torch.abs(target_states)) / (actual_states.size(-1))
-            if actual_states.size(0) != target_states.size(0):
-                # this shouldn't happen, but sometimes it does probably due to weird tokenization issues
-                logger.warning("Skipping batch due to mismatch in shape")
-                continue
+                if actual_states.size(0) != target_states.size(0):
+                    # this shouldn't happen, but sometimes it does probably due to weird tokenization issues
+                    logger.warning("Skipping batch due to mismatch in shape")
+                    continue
 
-            losses.append(
-                # Loss is the mean abs difference between target and predicted states,
-                # normalised by mean magnitude of target states
-                torch.sum(torch.abs(actual_states - target_states))
-                / (mean * np.prod(target_states.shape))
-            )
+                if self.mttl_args.dcd_hidden_state_loss:
+                    # Loss is the mean abs difference between target and predicted states,
+                    # normalised by mean magnitude of target states
+                    loss = (
+                        actual_states - target_states
+                    ).abs().mean() / target_states.abs().mean()
+                    losses.append(loss)
+                if self.mttl_args.dcd_hidden_logit_loss and (layer_id + 1) < len(
+                    outputs.hidden_states
+                ):
+                    # Always normalize by the final hidden layer norm
+                    actual_states = model.model.model.norm(actual_states)
+                    target_states = model.model.model.norm(target_states)
+                    actual_states = actual_states.to(model.model.lm_head.weight.dtype)
+                    target_states = target_states.to(model.model.lm_head.weight.dtype)
 
-        if len(losses) == 0:
-            # this happens when shape mismatch due to tokenization issues, should happen rarely
-            fake_loss = actual_states.sum() * 0.0
-            return (fake_loss, outputs.logits) if return_outputs else fake_loss
+                    actual_logprobs = F.log_softmax(
+                        model.model.lm_head(actual_states), dim=-1
+                    )
+                    with torch.no_grad():
+                        target_probs = F.softmax(
+                            model.model.lm_head(target_states), dim=-1
+                        )
 
-        loss = torch.mean(torch.stack(losses))
+                    # compute KL
+                    kl_loss = (
+                        self.kl_loss(actual_logprobs, target_probs).sum(dim=-1).mean()
+                    )
+                    losses.append(kl_loss)
 
-        # Add KL divergence between target and predicted output distributions to loss
-        target_probs = F.softmax(target_logits, dim=-1)
-        preds = F.log_softmax(outputs.logits[nc_labels != -100, ...], dim=-1)
-        kl_loss = self.kl_loss(preds, target_probs).sum(dim=-1).mean()
-        loss = loss + kl_loss
+            # Can we log the `kl_loss` of different layers ?
+            if len(losses) == 0:
+                # this happens when shape mismatch due to tokenization issues, should happen rarely
+                fake_loss = actual_states.sum() * 0.0
+                return (fake_loss, outputs.logits) if return_outputs else fake_loss
+
+            loss = torch.sum(torch.stack(losses))
+
+        if self.mttl_args.dcd_logit_loss:
+            # Add KL divergence between target and predicted output distributions to loss
+            target_probs = F.softmax(target_logits, dim=-1)
+            preds = F.log_softmax(outputs.logits[nc_labels != -100, ...], dim=-1)
+            kl_loss = self.kl_loss(preds, target_probs).sum(dim=-1).mean()
+            loss = loss + kl_loss
 
         return (loss, outputs.logits) if return_outputs else loss
 
@@ -122,6 +174,10 @@ class KMArguments(ExpertConfig):
     loss_function: str = "dcd"
     # set the following if you want to enable the NQA callback during training
     nqa_dataset: str = "sordonia/narrativeqa"
+    # the following are DCD Trainer arguments
+    dcd_logit_loss: bool = True
+    dcd_hidden_state_loss: bool = True
+    dcd_hidden_logit_loss: bool = False
 
 
 def train_km(training_args):
