@@ -222,8 +222,8 @@ def train_km(training_args: KMArguments):
     best_val = float("inf")
     met_logger = SimpleLogger(training_args.output_dir)
 
-    # val_loss, rougeL = do_evaluation(datamodule, model, loss_function, evaluator)
-    # met_logger.log_metrics({"val_loss": val_loss, "rougeL": rougeL}, step=global_step)
+    val_loss, rougeL = do_evaluation(datamodule, model, loss_function, evaluator)
+    met_logger.log_metrics({"val_loss": val_loss, "rougeL": rougeL}, step=global_step)
 
     for epoch in range(args.num_train_epochs):
         epoch_end = False
