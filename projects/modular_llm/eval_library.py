@@ -161,9 +161,7 @@ def run_eval(args: EvaluationConfig):
         selection=args.expert_selection,
     )
     an_expert = library[next(iter(library.keys()))]
-    train_cfg = deepcopy(an_expert.training_config)
-    train_cfg.subsample_dev = args.subsample_dev
-    train_cfg.subsample_test = args.subsample_test
+    train_cfg = args
 
     # For starts, always overwrite the following arguments
     for arg_name in [
