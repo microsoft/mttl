@@ -13,6 +13,7 @@ from datasets import DatasetDict
 from km_datamodule import KMDatasetModule
 from lightning_fabric import seed_everything
 from nqa_datamodule import NQADatamodule  # noqa: F401
+from nqa_evaluator import NQAZeroShotEvaluator
 from simple_utils import SimpleLogger, dcd_loss, do_evaluation
 from tqdm import tqdm
 
@@ -100,7 +101,6 @@ def create_synthetic_data_for_epoch(model, dataset, epoch, output_dir, use_only_
             num_generations=6,
             generation_top_p=0.95,
             model_type="local",
-            do_filtering=False,
         )
         for task in use_only_type.split(","):
             augmenter.add_task(task)
@@ -141,6 +141,8 @@ def train_km(training_args: KMIterArguments):
 
     # get directory of the current file
     setup_logging(training_args.output_dir)
+
+    # save mttl args
     training_args.save_config(training_args.output_dir)
 
     logger.info("Args: %s", training_args.to_json())
@@ -161,9 +163,6 @@ def train_km(training_args: KMIterArguments):
         device_map=training_args.device_map,
         attn_implementation=training_args.attn_implementation,
     ).to("cuda")
-
-    # load the NQA callback to monitor zero-shot performance
-    from nqa_evaluator import NQAZeroShotEvaluator
 
     data_args = copy.deepcopy(training_args)
     data_args.dataset = training_args.nqa_dataset
@@ -233,7 +232,7 @@ def train_km(training_args: KMIterArguments):
                 norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 scheduler.step()
                 optimizer.step()
-                torch.cuda.synchronize()  # wait for the GPU to finish work
+                torch.cuda.synchronize()
                 pbar.update(1)
 
                 lr = optimizer.param_groups[0]["lr"]

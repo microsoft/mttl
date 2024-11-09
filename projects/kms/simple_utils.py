@@ -2,6 +2,7 @@ import json
 import os
 
 import torch
+from torch.nn import functional as F
 from tqdm import tqdm
 
 from mttl.logging import logger
