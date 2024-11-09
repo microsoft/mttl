@@ -106,8 +106,8 @@ def model_loader_helper(
         raise ValueError("Specify either 'load_in_4bit' or 'load_in_8bit' or neither.")
 
     from transformers import (
-        AutoModelForCausalLM,
         AutoModel,
+        AutoModelForCausalLM,
         BitsAndBytesConfig,
         LlamaForCausalLM,
         PreTrainedModel,
