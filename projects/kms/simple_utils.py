@@ -2,9 +2,15 @@ import json
 import os
 
 import torch
+import torch.distributed as dist
 from torch.nn import functional as F
 from tqdm import tqdm
 
+from mttl.dist_utils import (
+    distributed_mean,
+    is_dist_avail_and_initialized,
+    is_main_process,
+)
 from mttl.logging import logger
 from mttl.models.expert_model import disable_modifiers
 from mttl.models.utils import transfer_batch_to_device
@@ -33,9 +39,10 @@ def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0):
         dtype=torch.long,
     )
     position_ids = context_length.unsqueeze(1) + position_ids.unsqueeze(0)
+    raw_model = model.module if is_dist_avail_and_initialized() else model
 
     # for the context-aware pass, we need to disable the adapter
-    with disable_modifiers(model):
+    with disable_modifiers(raw_model):
         with torch.no_grad():
             outputs = model(
                 input_ids=input_ids,
@@ -95,16 +102,13 @@ def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0):
 
 def do_evaluation(datamodule, model, loss_function, evaluator) -> bool:
     # validation
-    for batch in tqdm(datamodule.val_dataloader()):
-        val_loss = 0.0
-        step = 0.0
-
+    val_loss = []
+    for batch in tqdm(datamodule.val_dataloader(), disable=not is_main_process()):
         with torch.no_grad():
-            batch = transfer_batch_to_device(batch, "cuda")
-            val_loss += loss_function(model, batch).item()
-            step += 1
-        val_loss /= step
+            batch = transfer_batch_to_device(batch, model.device)
+            val_loss.append(loss_function(model, batch).item())
 
+    val_loss = distributed_mean(val_loss, model.device)
     rougeL = evaluator.evaluate(model, "dev")
     logger.info(f"Validation Loss: {val_loss}, ROUGE-L: {rougeL}")
     return val_loss, rougeL
@@ -119,6 +123,11 @@ class SimpleLogger:
             os.remove(self.output_file)
 
     def log_metrics(self, metrics, step=None):
+        from mttl.dist_utils import is_main_process
+
+        if not is_main_process():
+            return
+
         lines = []
 
         for k, v in metrics.items():

@@ -1,8 +1,15 @@
 from dataclasses import dataclass
 
 import numpy as np
+import torch
+import torch.distributed as dist
 import tqdm
 
+from mttl.dist_utils import (
+    distributed_mean,
+    is_dist_avail_and_initialized,
+    is_main_process,
+)
 from mttl.evaluators.base import GenerativeEvaluator, switch_to_eval_mode
 from mttl.evaluators.ni_evaluator import compute_metrics
 from mttl.logging import logger
@@ -51,6 +58,7 @@ class RougeEvaluator(GenerativeEvaluator):
         pbar = tqdm.tqdm(
             enumerate(dataloader),
             total=len(dataloader),
+            disable=not is_main_process(),
         )
 
         all_rougeL = []
@@ -85,7 +93,7 @@ class RougeEvaluator(GenerativeEvaluator):
             all_references.extend(labels_texts)
             all_sources.extend(sources_texts)
 
-        rouge_L = np.mean(all_rougeL)
+        rouge_L = distributed_mean(all_rougeL, model.device)
 
         if return_predictions:
             return rouge_L, GenerationOutput(

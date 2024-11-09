@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import torch
+import torch.distributed as dist
 import torch.nn.functional as F
 
 # register this datamodule!
@@ -13,15 +14,25 @@ from km_datamodule import KMDatasetModule
 from lightning_fabric import seed_everything
 from nqa_datamodule import NQADatamodule  # noqa: F401
 from simple_utils import SimpleLogger, dcd_loss, do_evaluation
+from torch.distributed import destroy_process_group, init_process_group
+from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm import tqdm
 
 from mttl.arguments import ExpertConfig
 from mttl.datamodule.base import get_datamodule
+from mttl.dist_utils import (
+    get_device,
+    get_local_rank,
+    is_dist_avail_and_initialized,
+    is_main_process,
+)
 from mttl.logging import logger, setup_logging
 from mttl.models.expert_model import ExpertModel, ExpertModelConfig, disable_modifiers
 from mttl.models.get_optimizer import get_optimizer_and_scheduler
 from mttl.models.utils import transfer_batch_to_device
 from mttl.utils import create_library, remote_login, upload_library
+
+torch.set_float32_matmul_precision("high")
 
 
 @dataclass
@@ -37,8 +48,8 @@ def train_km(training_args: KMArguments):
     # get directory of the current file
     setup_logging(training_args.output_dir)
 
-    # save mttl args
-    training_args.save_config(training_args.output_dir)
+    if is_main_process():
+        training_args.save_config(training_args.output_dir)
 
     logger.info("Args: %s", training_args.to_json())
 
@@ -51,13 +62,17 @@ def train_km(training_args: KMArguments):
         modifier_config=args.modifier_config,
     )
 
-    model = ExpertModel(
+    device = get_device()
+    raw_model = model = ExpertModel(
         model_config,
         load_in_4bit=training_args.load_in_4bit,
         load_in_8bit=training_args.load_in_8bit,
         device_map=training_args.device_map,
         attn_implementation=training_args.attn_implementation,
-    ).to("cuda")
+    ).to(device)
+
+    if is_dist_avail_and_initialized():
+        model = DDP(model, device_ids=[get_local_rank()])
 
     # load the NQA callback to monitor zero-shot performance
     from nqa_evaluator import NQAZeroShotEvaluator
@@ -114,7 +129,7 @@ def train_km(training_args: KMArguments):
                     device_type="cuda",
                     dtype=torch.bfloat16,
                 ):
-                    batch = transfer_batch_to_device(batch, "cuda")
+                    batch = transfer_batch_to_device(batch, device)
 
                 loss = loss_function(model, batch)
                 loss = loss / args.gradient_accumulation_steps
@@ -144,9 +159,9 @@ def train_km(training_args: KMArguments):
             {"val_loss": val_loss, "rougeL": rougeL}, step=global_step
         )
 
-        if val_loss < best_val:
+        if val_loss < best_val and is_main_process():
             best_val = val_loss
-            model.save_pretrained(training_args.output_dir)
+            raw_model.save_pretrained(training_args.output_dir)
             logger.info(f"Saving model to {training_args.output_dir}")
 
 

@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import tqdm
 
+from mttl.dist_utils import distributed_mean, is_main_process
 from mttl.evaluators.base import Evaluator, switch_to_eval_mode
 from mttl.logging import logger
 from mttl.models.utils import compute_loglike_loss
@@ -34,6 +35,7 @@ class LogLikeEvaluator(Evaluator):
         pbar = tqdm.tqdm(
             enumerate(dataloader),
             total=len(dataloader),
+            disable=not is_main_process(),
         )
 
         all_losses = []
@@ -95,11 +97,16 @@ class LogLikeEvaluator(Evaluator):
             if all_accuracies:
                 pbar.set_description("Accuracy: {:.4f}".format(np.mean(all_accuracies)))
 
+        loss = distributed_mean(all_losses, device)
+        all_accuracies = (
+            distributed_mean(all_accuracies, device) if all_accuracies else None
+        )
+
         metrics = {
-            "loss": float(np.mean(all_losses)),
-            "loglike": -float(np.mean(all_losses)),
+            "loss": loss,
+            "loglike": -loss,
             "predictions": all_predictions,
-            "accuracy": float(np.mean(all_accuracies)) if all_accuracies else None,
+            "accuracy": all_accuracies,
         }
 
         self.save_metrics(metrics, output_path)

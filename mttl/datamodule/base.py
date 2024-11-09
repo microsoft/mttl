@@ -552,15 +552,26 @@ class DataModule(LightningDataModule, Registrable):
     collate_extra_fields: List[str] = None
 
     def train_dataloader(self, subsample=None):
+        import torch
+
         subsample = subsample or self.config.subsample
         train_dataset = self.train_dataset
         if subsample and subsample > 0:
             train_dataset = subsample_dst(train_dataset, subsample)
 
+        is_dist = torch.distributed.is_initialized()
+        if is_dist:
+            train_sampler = torch.utils.data.distributed.DistributedSampler(
+                train_dataset,
+            )
+        else:
+            train_sampler = None
+
         return DataLoader(
             train_dataset,
             batch_size=self.config.train_batch_size,
-            shuffle=True,
+            shuffle=train_sampler is None,
+            sampler=train_sampler,
             num_workers=self.config.dataloader_num_workers,
             pin_memory=True,
             persistent_workers=False,
@@ -572,10 +583,20 @@ class DataModule(LightningDataModule, Registrable):
         dev_dataset = self.dev_dataset
         if subsample and subsample > 0:
             dev_dataset = subsample_dst(dev_dataset, subsample)
+
+        is_dist = torch.distributed.is_initialized()
+        if is_dist:
+            dev_sampler = torch.utils.data.distributed.DistributedSampler(
+                dev_dataset,
+            )
+        else:
+            dev_sampler = None
+
         return DataLoader(
             dev_dataset,
             batch_size=self.config.predict_batch_size,
-            shuffle=shuffle,
+            shuffle=shuffle and dev_sampler is None,
+            sampler=dev_sampler,
             num_workers=self.config.dataloader_num_workers,
             pin_memory=False,
             persistent_workers=False,
@@ -588,12 +609,22 @@ class DataModule(LightningDataModule, Registrable):
         test_dataset = self.test_dataset
         if subsample and subsample > 0:
             test_dataset = subsample_dst(test_dataset, subsample)
+
+        is_dist = torch.distributed.is_initialized()
+        if is_dist:
+            test_sampler = torch.utils.data.distributed.DistributedSampler(
+                test_dataset,
+            )
+        else:
+            test_sampler = None
+
         return DataLoader(
             test_dataset,
             batch_size=self.config.predict_batch_size,
-            shuffle=shuffle,
+            shuffle=shuffle and test_sampler is None,
             num_workers=self.config.dataloader_num_workers,
             pin_memory=False,
+            sampler=test_sampler,
             persistent_workers=False,
             collate_fn=self.collate_fn,
             drop_last=False,
