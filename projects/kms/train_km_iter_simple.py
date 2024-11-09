@@ -100,6 +100,7 @@ def create_synthetic_data_for_epoch(model, dataset, epoch, output_dir, use_only_
             num_generations=6,
             generation_top_p=0.95,
             model_type="local",
+            do_filtering=False,
         )
         for task in use_only_type.split(","):
             augmenter.add_task(task)
@@ -140,8 +141,6 @@ def train_km(training_args: KMIterArguments):
 
     # get directory of the current file
     setup_logging(training_args.output_dir)
-
-    # save mttl args
     training_args.save_config(training_args.output_dir)
 
     logger.info("Args: %s", training_args.to_json())
