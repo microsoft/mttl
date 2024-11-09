@@ -107,6 +107,7 @@ def model_loader_helper(
 
     from transformers import (
         AutoModelForCausalLM,
+        AutoModel,
         BitsAndBytesConfig,
         LlamaForCausalLM,
         PreTrainedModel,
@@ -145,7 +146,7 @@ def model_loader_helper(
         model_name = os.environ["PHI_PATH"]
         logger.info(f"Loading phi-2 model from {os.environ['PHI_PATH']}")
 
-    model_object = AutoModelForCausalLM.from_pretrained(
+    model_object = AutoModel.from_pretrained(
         model_name,
         device_map=device_map,
         trust_remote_code=True,
