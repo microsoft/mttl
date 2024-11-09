@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 import torch.nn.functional as F
+from datasets import DatasetDict
 
 # register this datamodule!
 from km_datamodule import KMDatasetModule
@@ -16,7 +17,8 @@ from simple_utils import SimpleLogger, dcd_loss, do_evaluation
 from tqdm import tqdm
 
 from mttl.arguments import ExpertConfig
-from mttl.datamodule.base import get_datamodule
+from mttl.datamodule.base import DataModule, DatasetConfig, get_datamodule
+from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from mttl.logging import logger, setup_logging
 from mttl.models.expert_model import ExpertModel, ExpertModelConfig, disable_modifiers
 from mttl.models.get_optimizer import get_optimizer_and_scheduler
@@ -25,13 +27,115 @@ from mttl.utils import create_library, remote_login, upload_library
 
 
 @dataclass
-class KMArguments(ExpertConfig):
+class TextDatasetConfig(DatasetConfig):
+    text_column: str = "text"
+
+
+@DataModule.register("text_dataset", config_cls=TextDatasetConfig)
+class TextDatamodule(DataModule):
+    """Just a datamodule that loads a dataset with a 'text' column."""
+
+    def collate_fn(self, examples):
+        return None
+
+    def setup_dataset(self):
+        from mttl.models.library.dataset_library import DatasetLibrary
+
+        dataset = DatasetLibrary.pull_dataset(self.config.dataset)
+
+        if self.config.text_column not in dataset["train"].column_names:
+            raise ValueError(f"The dataset must contain a `{self.config.text}` column")
+
+        (
+            self._task_names,
+            self._task_to_id,
+            self.train_dataset,
+            _,
+            _,
+        ) = maybe_filter_hf_dataset_by_task(
+            dataset,
+            self.config.task_name_field,
+            self.config.finetune_task_name,
+        )
+
+        self.dev_dataset = None
+        self.test_dataset = None
+
+
+def create_datamodule(training_args, dataset_path):
+    args_copy = copy.deepcopy(training_args)
+    args_copy.dataset = "local://" + dataset_path
+    args_copy.dataset_type = "dcd_km"
+    return get_datamodule(args_copy)
+
+
+def create_synthetic_data_for_epoch(model, dataset, epoch, output_dir, use_only_type):
+    dataset_path = output_dir + f"/gen__epoch_{epoch}"
+
+    if os.path.exists(dataset_path):
+        return dataset_path
+
+    # Clean up temporary directory
+    import gc
+    import shutil
+    import tempfile
+
+    from dataset_augmenter import DatasetAugmenter
+
+    from mttl.models.utils import model_loader_helper
+
+    with tempfile.TemporaryDirectory() as temp_directory:
+        device = model.device
+
+        # we need to save the model in the temp directory, this moves it to CPU so that VLLM
+        # doesn't complain, one alternative is to use 2 gpus, one for generation, one for training
+        model.merge_and_save_base_model(temp_directory, device="cpu")
+        model_name_or_path = temp_directory
+
+        # Generate a set of prompts
+        augmenter = DatasetAugmenter(
+            model_name_or_path,
+            block_size=2048,
+            max_continuation_length=768,
+            num_generations=6,
+            generation_top_p=0.95,
+            model_type="local",
+        )
+        for task in use_only_type.split(","):
+            augmenter.add_task(task)
+        synth_dataset = augmenter.augment(dataset=dataset)
+
+        # Force garbage collection
+        del augmenter
+        gc.collect()
+        torch.cuda.empty_cache()
+        model.to(device)
+
+        synth_dataset = DatasetDict({"train": synth_dataset})
+        synth_dataset.save_to_disk(dataset_path)
+
+    return dataset_path
+
+
+def get_text_dataset(training_args):
+    args = copy.deepcopy(training_args)
+    args.dataset = training_args.text_dataset
+    args.dataset_type = "text_dataset"
+    text_datamodule = get_datamodule(args)
+    text_dataset = text_datamodule.train_dataset
+    return text_dataset
+
+
+@dataclass
+class KMIterArguments(ExpertConfig):
     loss_function: str = "dcd"
+    generate_every_n_epochs: int = 1
     # set the following if you want to enable the NQA callback during training
+    text_dataset: str = "sordonia/narrativeqa_sanitized"
     nqa_dataset: str = "sordonia/narrativeqa_sanitized"
 
 
-def train_km(training_args: KMArguments):
+def train_km(training_args: KMIterArguments):
     seed_everything(training_args.seed, workers=True)
 
     # get directory of the current file
@@ -71,9 +175,14 @@ def train_km(training_args: KMArguments):
     else:
         raise ValueError(f"Loss function {training_args.loss_function} not supported")
 
-    datamodule = get_datamodule(training_args)
+    text_dataset = get_text_dataset(training_args)
+    synth_dataset_path = create_synthetic_data_for_epoch(
+        model, text_dataset, 0, training_args.output_dir, training_args.use_only_type
+    )
+    synth_datamodule = create_datamodule(training_args, synth_dataset_path)
+
     (optimizer, scheduler), trainable_param_names = get_optimizer_and_scheduler(
-        model, training_args, num_train_examples=len(datamodule.train_dataset)
+        model, training_args, num_train_examples=len(synth_datamodule.train_dataset)
     )
     # compute number of trainable parameters
     num_trainable_params = sum(
@@ -82,7 +191,7 @@ def train_km(training_args: KMArguments):
     logger.info(f"Number of trainable parameters: {num_trainable_params // 1e6:.2f}M")
 
     pbar = tqdm(
-        total=len(datamodule.train_dataloader())
+        total=len(synth_datamodule.train_dataloader())
         * training_args.num_train_epochs
         // args.gradient_accumulation_steps
     )
@@ -91,13 +200,13 @@ def train_km(training_args: KMArguments):
     best_val = float("inf")
     met_logger = SimpleLogger(training_args.output_dir)
 
-    val_loss, rougeL = do_evaluation(datamodule, model, loss_function, evaluator)
+    val_loss, rougeL = do_evaluation(synth_datamodule, model, loss_function, evaluator)
     met_logger.log_metrics({"val_loss": val_loss, "rougeL": rougeL}, step=global_step)
 
     for epoch in range(args.num_train_epochs):
         epoch_end = False
 
-        iter_train = iter(datamodule.train_dataloader())
+        iter_train = iter(synth_datamodule.train_dataloader())
         while not epoch_end:
             loss_accum = 0.0
             model.train()
@@ -139,7 +248,9 @@ def train_km(training_args: KMArguments):
 
             global_step += 1
 
-        val_loss, rougeL = do_evaluation(datamodule, model, loss_function, evaluator)
+        val_loss, rougeL = do_evaluation(
+            synth_datamodule, model, loss_function, evaluator
+        )
         met_logger.log_metrics(
             {"val_loss": val_loss, "rougeL": rougeL}, step=global_step
         )
@@ -149,7 +260,14 @@ def train_km(training_args: KMArguments):
             model.save_pretrained(training_args.output_dir)
             logger.info(f"Saving model to {training_args.output_dir}")
 
+        if epoch % training_args.generate_every_n_epochs == 0:
+            # regenerate synthetic data for next epoch!
+            synth_dataset_path = create_synthetic_data_for_epoch(
+                model, text_dataset, epoch + 1, training_args.output_dir
+            )
+            synth_datamodule = create_datamodule(training_args, synth_dataset_path)
+
 
 if __name__ == "__main__":
-    args = KMArguments.parse()
+    args = KMIterArguments.parse()
     train_km(args)
