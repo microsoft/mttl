@@ -106,7 +106,6 @@ def model_loader_helper(
         raise ValueError("Specify either 'load_in_4bit' or 'load_in_8bit' or neither.")
 
     from transformers import (
-        AutoModel,
         AutoModelForCausalLM,
         BitsAndBytesConfig,
         LlamaForCausalLM,
@@ -146,7 +145,7 @@ def model_loader_helper(
         model_name = os.environ["PHI_PATH"]
         logger.info(f"Loading phi-2 model from {os.environ['PHI_PATH']}")
 
-    model_object = AutoModel.from_pretrained(
+    model_object = AutoModelForCausalLM.from_pretrained(
         model_name,
         device_map=device_map,
         trust_remote_code=True,
