@@ -17,6 +17,7 @@ from mttl.models.utils import transfer_batch_to_device
 
 
 def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0):
+    """Deep Contextual Distillation loss."""
     kl_loss = torch.nn.KLDivLoss(reduction="none")
 
     # document + small task prompt + task output (e.g. summary, or question and answer)
@@ -98,6 +99,29 @@ def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0):
 
     loss = loss + logit_factor * kl_loss
     return loss
+
+
+def lm_loss(model, inputs):
+    """Next-token prediction loss."""
+    input_ids = inputs["input_ids"]
+    labels = inputs["labels"]
+    attention_mask = inputs["attention_mask"]
+
+    assert input_ids.size() == labels.size()
+    # assert that labels is either -100 or the same as input_ids
+    assert torch.all((labels == -100) | (labels == input_ids))
+
+    # NOTE: when using `LMTrainer` for training the KM, batch has unwanted keys.
+    # This Trainer is also used for training the KE.
+    # Also: I need **batch for the KE training with knowledge modules (the task names)
+    outputs = model(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        labels=labels,
+        task_names=inputs.get("task_names"),
+    )
+
+    return outputs.loss
 
 
 def do_evaluation(datamodule, model, loss_function, evaluator) -> bool:

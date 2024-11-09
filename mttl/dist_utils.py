@@ -26,6 +26,13 @@ def is_dist_avail_and_initialized():
     return ddp
 
 
+def get_data_sampler(dataset):
+    if is_dist_avail_and_initialized():
+        return torch.utils.data.distributed.DistributedSampler(dataset)
+    else:
+        return None
+
+
 def distributed_mean(metrics: List[float], device: torch.device) -> float:
     count = len(metrics)
     metric = np.sum(metrics)

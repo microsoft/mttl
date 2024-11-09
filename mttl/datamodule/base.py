@@ -17,6 +17,7 @@ from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
 
 from mttl.datamodule.utils import get_tokenizer
+from mttl.dist_utils import get_data_sampler
 from mttl.logging import logger, warn_once
 from mttl.registrable import Registrable
 
@@ -559,14 +560,7 @@ class DataModule(LightningDataModule, Registrable):
         if subsample and subsample > 0:
             train_dataset = subsample_dst(train_dataset, subsample)
 
-        is_dist = torch.distributed.is_initialized()
-        if is_dist:
-            train_sampler = torch.utils.data.distributed.DistributedSampler(
-                train_dataset,
-            )
-        else:
-            train_sampler = None
-
+        train_sampler = get_data_sampler(train_dataset)
         return DataLoader(
             train_dataset,
             batch_size=self.config.train_batch_size,
@@ -584,14 +578,7 @@ class DataModule(LightningDataModule, Registrable):
         if subsample and subsample > 0:
             dev_dataset = subsample_dst(dev_dataset, subsample)
 
-        is_dist = torch.distributed.is_initialized()
-        if is_dist:
-            dev_sampler = torch.utils.data.distributed.DistributedSampler(
-                dev_dataset,
-            )
-        else:
-            dev_sampler = None
-
+        dev_sampler = get_data_sampler(dev_dataset)
         return DataLoader(
             dev_dataset,
             batch_size=self.config.predict_batch_size,
@@ -610,14 +597,7 @@ class DataModule(LightningDataModule, Registrable):
         if subsample and subsample > 0:
             test_dataset = subsample_dst(test_dataset, subsample)
 
-        is_dist = torch.distributed.is_initialized()
-        if is_dist:
-            test_sampler = torch.utils.data.distributed.DistributedSampler(
-                test_dataset,
-            )
-        else:
-            test_sampler = None
-
+        test_sampler = get_data_sampler(test_dataset)
         return DataLoader(
             test_dataset,
             batch_size=self.config.predict_batch_size,
