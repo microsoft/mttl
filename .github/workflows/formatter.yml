@@ -20,7 +20,7 @@ jobs:
     steps:
       - name: Install isort
         run: |
-          pip install isort==5.12.3
+          pip install isort==5.13.2
 
       - name: Run isort
         run: |
