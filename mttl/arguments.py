@@ -474,7 +474,9 @@ class TrainingArgs(DataArgs):
                     )
 
                 # load task names from json file
-                task_sets = json.load(open(self.tasksets_path))
+                with open(self.finetune_task_path) as f:
+                    task_sets = json.load(f)
+
                 for task_name in tasks:
                     # try to fetch task_names from the file
                     if task_name in task_sets:
