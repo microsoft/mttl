@@ -760,15 +760,14 @@ class ExpertLibrary:
 
     @classmethod
     def from_expert_library(
-        cls,
+        cls: Type["ExpertLibrary"],
         expert_lib: "ExpertLibrary",
-        repo_id,
+        repo_id: str,
         force=False,
         upload_aux_data=False,
         only_tasks=None,
     ):
-        expert_lib_class = cls._get_expert_lib_class(repo_id)
-        new_lib = expert_lib_class(repo_id=repo_id, create=True)
+        new_lib = cls(repo_id=repo_id, create=True)
 
         only_tasks = only_tasks or expert_lib.tasks
         with new_lib.batched_commit():
@@ -873,6 +872,7 @@ class ExpertLibrary:
         else:
             # if repo_id includes "local://", "virtual://", "az://", "hf://"
             prefix = repo_id.split("://")
+
             if prefix[0] in available_libraries:
                 expert_library_type = prefix[0]
                 repo_id = prefix[1]

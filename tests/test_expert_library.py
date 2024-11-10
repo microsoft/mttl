@@ -515,10 +515,13 @@ def test_virtual_library_is_in_memory(tmp_path, build_meta_ckpt, setup_repo, rep
     # Create a library with two experts
     local_path = tmp_path / "base_repo"
     local_path.mkdir()
+
     engine = LocalFSEngine()
-    setup_repo(engine, local_path)
+    setup_repo(engine, str(local_path))
+
     filenames = build_meta_ckpt(local_path, 2)
     repo_id = f"local://{local_path}"
+
     # Get the expert library
     local_library = ExpertLibrary.get_expert_library(repo_id)
 
