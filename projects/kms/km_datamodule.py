@@ -85,7 +85,7 @@ class KMDatasetModule(DataModule):
                 if type_ not in allowed_types:
                     if type_ == "qa" and "q" in allowed_types:
                         type_ = "q"
-                    if type_ == "qa" and "a" in allowed_types:
+                    elif type_ == "qa" and "a" in allowed_types:
                         type_ = "a"
                     else:
                         continue
