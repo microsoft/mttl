@@ -345,7 +345,7 @@ class MultiExpertMixin:
     def _get_selector_config(self, model_modifier: str) -> SelectorConfig:
         if not self.selector_config:
             return None
-        if isinstance(self.selector_config, dict):
+        if isinstance(self.selector_config, MultiSelectorConfig):
             return self.selector_config.get(model_modifier)
         else:
             return self.selector_config
