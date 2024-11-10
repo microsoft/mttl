@@ -337,6 +337,9 @@ class TrainingArgs(DataArgs):
     data_dir: str = os.getenv("TRAIN_DIR", "/tmp/")
     output_dir: str = os.getenv("OUTPUT_DIR", "./output")
 
+    # meta-tasks or group of tasks
+    finetune_task_path: str = None
+    # name of tasks, or name of group of tasks if finetune_task_path is set
     finetune_task_name: str = None
     exp_name: str = None
     expert_name: str = None
@@ -456,6 +459,30 @@ class TrainingArgs(DataArgs):
             self.train_batch_size // self.micro_batch_size
         )
         self.train_batch_size = self.micro_batch_size
+
+        if self.finetune_task_name is not None and isinstance(
+            self.finetune_task_name, str
+        ):
+            # resolve task keys
+            task_names = []
+            tasks = self.finetune_task_name.split(",")
+
+            if self.finetune_task_path is not None:
+                if not os.path.exists(self.finetune_task_path):
+                    raise ValueError(
+                        f"Task path {self.finetune_task_path} does not exist!"
+                    )
+
+                # load task names from json file
+                task_sets = json.load(open(self.tasksets_path))
+                for task_name in tasks:
+                    # try to fetch task_names from the file
+                    if task_name in task_sets:
+                        task_names.extend(task_sets[task_name])
+                    else:
+                        task_names.append(task_name)
+            else:
+                task_names = tasks
 
         n_devices = torch.cuda.device_count()
         if n_devices > 1:
