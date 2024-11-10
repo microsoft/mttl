@@ -523,9 +523,7 @@ class LocalFSEngine(BackendEngine):
         return repo_info
 
     def list_repo_files(self, repo_id):
-        import glob
-
-        return list(glob.glob(os.path.join(repo_id, "*")))
+        return os.listdir(repo_id)
 
 
 class VirtualFSEngine(LocalFSEngine):
