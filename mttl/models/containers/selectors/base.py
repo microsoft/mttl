@@ -101,6 +101,9 @@ class MultiSelectorConfig(SelectorConfig):
     def __getitem__(self, key):
         return self.selectors[key]
 
+    def get(self, key):
+        return self.selectors.get(key, default=TaskNameSelectorConfig())
+
     def keys(self):
         return self.selectors.keys()
 
