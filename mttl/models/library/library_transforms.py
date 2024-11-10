@@ -1423,5 +1423,5 @@ class MBCWithCosSimTransform(LibraryTransform):
         clusters = defaultdict(list)
 
         for key, label in zip(expert_names, cluster_labels):
-            clusters[label].append(key)
+            clusters[f"cluster_{label}"].append(key)
         return clusters
