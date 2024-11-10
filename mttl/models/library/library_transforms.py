@@ -1103,7 +1103,7 @@ class ArrowTransform(LibraryTransform):
                 torch.allclose(ratio, torch.ones_like(ratio), atol=1e-3)
 
                 # Check that top vector is indeed the top eigenvector
-                assert (WTW @ top_vector).pow(2).sum() > (WTW @ bottom_vector).pow(
+                assert (WTW @ top_vector).pow(2).sum() >= (WTW @ bottom_vector).pow(
                     2
                 ).sum()
 

@@ -201,15 +201,15 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
                     with expert_library.batched_commit():
                         for expert_name in module.experts_names:
                             expert = module.get_expert_instance(expert_name)
-                            expert_library.add_expert(expert, expert_name)
+                            expert_library.add_expert(expert, expert_name, force=True)
                 elif isinstance(module, ExpertModule):
-                    expert = module.as_expert()
+                    expert = module.as_expert(training_config=args.to_dict())
                     expert_name = (
                         args.expert_name
                         or args.finetune_task_name
                         or generate_random_string()
                     )
-                    expert_library.add_expert(expert, expert_name)
+                    expert_library.add_expert(expert, expert_name, force=True)
                 else:
                     raise ValueError("Model class not recognized")
 

@@ -3,15 +3,21 @@ import os
 from copy import deepcopy
 
 import torch
-import wandb
 from pytorch_lightning import seed_everything
 
-from mttl.arguments import EvaluationConfig
+import wandb
+from mttl.arguments import EvaluationConfig, ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 from mttl.logging import TableLogger, logger, setup_logging
 from mttl.models.containers.selectors.base import Selector, SelectorConfig
+from mttl.models.expert_model import (
+    ExpertModel,
+    ExpertModelConfig,
+    MultiExpertModel,
+    MultiExpertModelConfig,
+)
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.library.library_transforms import (
     TiesMerge,
@@ -161,9 +167,13 @@ def run_eval(args: EvaluationConfig):
         selection=args.expert_selection,
     )
     an_expert = library[next(iter(library.keys()))]
-    train_cfg = deepcopy(an_expert.training_config)
-    train_cfg.subsample_dev = args.subsample_dev
-    train_cfg.subsample_test = args.subsample_test
+    base_model = an_expert.expert_info.expert_model
+    train_cfg = ExpertConfig.from_dict(an_expert.training_config)
+
+    loading_kwargs = {
+        "device_map": args.device_map,
+        "precision": args.precision,
+    }
 
     # For starts, always overwrite the following arguments
     for arg_name in [
@@ -171,9 +181,20 @@ def run_eval(args: EvaluationConfig):
         "eval_metric",
         "remove_phi_eval_tasks",
         "include_task_source",
+        "subsample_dev",
+        "subsample_test",
+        "predict_batch_size",
+        "add_eos_to_downstream_targets",
     ]:
         value = getattr(args, arg_name, None)
+
+        if value != getattr(train_cfg, arg_name, None):
+            logger.info(f"Overwriting {arg_name} in training config with value {value}")
+
         setattr(train_cfg, arg_name, value)
+
+    if args.merge_or_route is None:
+        raise ValueError("Please specify a valid merge_or_route!")
 
     """ Parameter Merging Approaches """
     if args.merge_or_route in ["uniform", "ties"]:
@@ -183,45 +204,69 @@ def run_eval(args: EvaluationConfig):
             cfg = TiesMergeConfig(top_k=args.transform_sparsity)
             expert = TiesMerge(cfg).transform(library)
 
-        module = MultiExpertModule(**vars(expert.training_config)).to("cuda")
-        module.add_expert_instance(expert, is_default=True)
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        model.add_expert_instance(expert, is_default=True)
 
     elif args.merge_or_route == "uniform_lora_after_op":
         # Here we merge the LoRA experts after the outer product we cannot really do it
         # with the lib transform, cause this would require storing large matrices in memory
         # Instead we do it with a uniform selector
-        assert type(an_expert.expert_info.expert_config) == LoRAConfig
-        train_cfg.router_selector = "uniform"
-        train_cfg.lora_merge_after = True
-        module = MultiExpertModule(**vars(train_cfg)).to("cuda")
-        module.add_experts_from_library(library)
+        from mttl.models.containers.selectors.poly_selector import (
+            PolySelectorDirectConfigUniform,
+        )
 
+        model = MultiExpertModel.from_pretrained_library(
+            library,
+            selector_config=PolySelectorDirectConfigUniform(lora_merge_after=True),
+            **loading_kwargs,
+        )
     elif args.merge_or_route == "base":
-        module = ExpertModule(**vars(train_cfg))
+        model = ExpertModel(
+            ExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
 
     elif args.merge_or_route in ["phatgoose", "arrow", "avg_act"]:
         """Routing Approaches"""
-        args.router_selector = f"{args.merge_or_route}_router"
+        from mttl.models.containers.selectors import (
+            ArrowSelectorConfig,
+            AverageActivationSelectorConfig,
+            PhatgooseSelectorConfig,
+        )
 
-        selector_config = SelectorConfig.from_training_config(args)
-        if not args.selector_data_id:
-            args.selector_data_id = fetch_prototypes(args, library)
+        # compute prototypes if not provided
+        if args.merge_or_route == "phatgoose":
+            selector_config = PhatgooseSelectorConfig.from_training_config(args)
+        elif args.merge_or_route == "arrow":
+            selector_config = ArrowSelectorConfig.from_training_config(args)
+        elif args.merge_or_route == "avg_act":
+            selector_config = AverageActivationSelectorConfig.from_training_config(args)
 
-        module = MultiExpertModule(
-            **vars(train_cfg), selector_config=selector_config
-        ).to("cuda")
+        # if a specific prototype hash is *not* specified in the config, compute it and store them in the library
+        # otherwise, the selector data id will be used to load the prototypes automatically
+        if not selector_config.selector_data_id:
+            selector_config.selector_data_id = fetch_prototypes(args, library)
 
-        module.add_experts_from_library(library)
+        model = MultiExpertModel.from_pretrained_library(
+            library,
+            selector_config=selector_config,
+            **loading_kwargs,
+        )
 
     elif args.merge_or_route == "oracle":
         """TaskNameSelector"""
-        args.router_selector = "task_selector"
-        selector_config = SelectorConfig.from_training_config(args)
+        from mttl.models.containers.selectors import TaskNameSelectorConfig
 
-        module = MultiExpertModule(
-            **vars(train_cfg), selector_config=selector_config
-        ).to("cuda")
-        module.add_experts_from_library(library)
+        selector_config = TaskNameSelectorConfig.from_training_config(args)
+
+        model = MultiExpertModel.from_pretrained_library(
+            library,
+            selector_config=selector_config,
+            **loading_kwargs,
+        )
     else:
         raise ValueError(f"Unknown merge_or_route {args.merge_or_route}")
 
@@ -230,51 +275,52 @@ def run_eval(args: EvaluationConfig):
     if wandb.run is None and os.environ.get("WANDB_API_KEY"):
         wandb.init(
             project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
-            config=dict(module.hparams),
+            config=vars(args),
             name=os.environ.get("AMLT_JOB_NAME", None),
         )
         # update config
         wandb.config.update({f"cmd_args_{k}": v for k, v in vars(args).items()})
 
-    if args.pipeline_eval_tasks is None:
-        logger.info(
-            "`pipeline_eval_tasks` was not set, setting pipeline_eval_tasks='all'..."
-        )
-        args.pipeline_eval_tasks = "all"
-
     if args.pipeline_eval_tasks in [
         "in_distribution",
     ]:
         tasks = [expert.expert_task_name for expert in library.data.values()]
-        tasks = [expert.expert_task_name for expert in library.data.values()]
+
         if tasks[0] is None:
             # for some older version of lib (in case of joint experts) no expert_task_name was set
             tasks = json.load(open(args.flan_tasks_path))["flan256"]
+
         # make sure we evaluate each task seperately (so the mean is over tasks at the end)
         tasks = ",".join(tasks).split(",")
         train_cfg.eval_metric = args.eval_metric
-        scores = eval_in_distribution(module, train_cfg, tasks)
-    elif args.pipeline_eval_tasks in [
-        "task1356_xlsum_title_generation",
-        "task304_numeric_fused_head_resolution",
-        "task202_mnli_contradiction_classification",
-        "task035_winogrande_question_modification_person",
-        "task614_glucose_cause_event_detection",
-        "task362_spolin_yesand_prompt_response_sub_classification",
-        "task242_tweetqa_classification",
-        "task613_politifact_text_generation",
-        "task1728_web_nlg_data_to_text",
-        "task1153_bard_analogical_reasoning_affordance",
-        "task039_qasc_find_overlapping_words",
-        "task1557_jfleg_answer_generation",
-    ]:
-        logger.info(f"Evaluating SNI with Rouge: task {args.pipeline_eval_tasks}")
-        train_cfg.finetune_task_name = args.pipeline_eval_tasks
-        train_cfg.pipeline_eval_tasks = None
-        train_cfg.predict_batch_size = args.predict_batch_size
+        scores = eval_in_distribution(model, train_cfg, tasks)
+    elif (
+        args.pipeline_eval_tasks
+        in [
+            "task1356_xlsum_title_generation",
+            "task304_numeric_fused_head_resolution",
+            "task202_mnli_contradiction_classification",
+            "task035_winogrande_question_modification_person",
+            "task614_glucose_cause_event_detection",
+            "task362_spolin_yesand_prompt_response_sub_classification",
+            "task242_tweetqa_classification",
+            "task613_politifact_text_generation",
+            "task1728_web_nlg_data_to_text",
+            "task1153_bard_analogical_reasoning_affordance",
+            "task039_qasc_find_overlapping_words",
+            "task1557_jfleg_answer_generation",
+        ]
+        or args.finetune_task_name is not None
+    ):
+        task = args.pipeline_eval_tasks or args.finetune_task_name
+        logger.info(f"Evaluating Rouge on: {task}")
+
+        train_cfg.finetune_task_name = task
         dm_for_gen = get_datamodule(train_cfg, for_generation=True)
+
         rouge_evaluator = RougeEvaluator(dm_for_gen)
-        rouge = rouge_evaluator.evaluate(module, split="test", verbose=False)
+        rouge = rouge_evaluator.evaluate(model, split="test", verbose=False)
+
         logger.info(f"RougeL: {rouge}")
         if wandb.run is not None:
             if rouge is not None:
@@ -287,17 +333,17 @@ def run_eval(args: EvaluationConfig):
 
         with torch.no_grad():
             runner: EvaluatorRunner = setup_evaluators(
-                model_type=module.hparams.model,
-                model_family=module.hparams.model_family,
-                max_input_length=module.hparams.max_input_length,
-                max_output_length=module.hparams.max_output_length,
-                predict_batch_size=args.predict_batch_size,
-                truncation_side=module.hparams.truncation_side,
+                model_type=base_model,
+                model_family=train_cfg.model_family,
+                max_input_length=train_cfg.max_input_length,
+                max_output_length=train_cfg.max_output_length,
+                predict_batch_size=train_cfg.predict_batch_size,
+                truncation_side=train_cfg.truncation_side,
                 tasks=args.pipeline_eval_tasks,
                 output_path=os.path.join(args.output_dir, "DOWNSTREAM"),
                 add_eos_to_targets=args.add_eos_to_downstream_targets,
             )
-            scores = runner.run(module)
+            scores = runner.run(model)
 
     if len(metric_logger) > 0:
         task_table = metric_logger.pretty_table(match_on="task|.*uniform.*")
