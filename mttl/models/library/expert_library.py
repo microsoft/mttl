@@ -767,7 +767,8 @@ class ExpertLibrary:
         upload_aux_data=False,
         only_tasks=None,
     ):
-        new_lib = cls(repo_id=repo_id, create=True)
+        expert_lib_class = cls._get_expert_lib_class(repo_id)
+        new_lib = expert_lib_class(repo_id=repo_id, create=True)
 
         only_tasks = only_tasks or expert_lib.tasks
         with new_lib.batched_commit():
@@ -856,7 +857,7 @@ class ExpertLibrary:
         return new_lib
 
     @staticmethod
-    def _get_expert_lib_class(repo_id, expert_library_type):
+    def _get_expert_lib_class(repo_id, expert_library_type=None):
         """Decide which ExpertLibrary subclass to use based on the repo_id."""
         available_libraries = {
             "local": LocalExpertLibrary,
