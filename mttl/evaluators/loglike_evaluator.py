@@ -68,7 +68,11 @@ class LogLikeEvaluator(Evaluator):
                 loss_per_option = compute_loglike_loss(
                     logits, batch["labels"], reduction="none"
                 )
-                loss_per_option = loss_per_option.cpu().numpy()
+                loss_per_option = loss_per_option.cpu()
+
+                if loss_per_option.dtype in [torch.bfloat16, torch.float16]:
+                    loss_per_option = loss_per_option.float().numpy()
+
                 loss_per_example = [
                     loss_per_option[
                         int(np.sum(num_options[:i])) : int(np.sum(num_options[: i + 1]))
