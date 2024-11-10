@@ -101,13 +101,13 @@ class MultiSelectorConfig(SelectorConfig):
     def __getitem__(self, key):
         return self.selectors[key]
 
-    def __keys__(self):
+    def keys(self):
         return self.selectors.keys()
 
-    def __values__(self):
+    def values(self):
         return self.selectors.values()
 
-    def __items__(self):
+    def items(self):
         return self.selectors.items()
 
     def __setitem__(self, key, value):
