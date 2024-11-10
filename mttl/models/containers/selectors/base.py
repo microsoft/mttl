@@ -349,7 +349,7 @@ class Selector(nn.Module, Registrable):
                     logger.warning(
                         f"Task name {task_name} already assigned to expert {self._task_to_expert_name[task_name]}"
                     )
-            self._task_to_expert_name[task_name] = expert_name
+                self._task_to_expert_name[task_name] = expert_name
 
         # standard bookkeeping for all selectors
         if is_default:
