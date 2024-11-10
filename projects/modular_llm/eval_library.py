@@ -193,6 +193,9 @@ def run_eval(args: EvaluationConfig):
 
         setattr(train_cfg, arg_name, value)
 
+    if args.merge_or_route is None:
+        raise ValueError("Please specify a valid merge_or_route!")
+
     """ Parameter Merging Approaches """
     if args.merge_or_route in ["uniform", "ties"]:
         if args.merge_or_route == "uniform":
