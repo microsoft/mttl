@@ -534,3 +534,24 @@ class TaskNameSelector(Selector):
         raise NotImplementedError(
             "Not required for TaskNameSelector as it performs hard selection. Use 'get_expert_instance' instead."
         )
+
+
+@dataclass
+class UniformSelectorConfig(SelectorConfig):
+    pass
+
+
+@Selector.register("uniform_selector", UniformSelectorConfig)
+class UniformSelector(Selector):
+    def __init__(self, **kwargs) -> None:
+        super().__init__()
+
+    @forward_with_cache
+    def forward(self, input, **kwargs) -> BatchExpertsSelectorOutput:
+        return ExpertsAndWeightsSelectorOutput(
+            experts=self.expert_names,
+            weights=torch.ones(
+                len(self.expert_names), device=input.device, dtype=input.dtype
+            )
+            / len(self.expert_names),
+        )
