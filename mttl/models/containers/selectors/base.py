@@ -513,7 +513,7 @@ class TaskNameSelector(Selector):
             task_names = self.routing_infos.task_names
 
             if (
-                any(
+                all(
                     task_name not in self.task_to_expert_name
                     for task_name in task_names
                 )
