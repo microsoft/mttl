@@ -24,4 +24,4 @@ jobs:
 
       - name: Run isort
         run: |
-          isort --settings-path ./pyproject.toml --check-only --diff .
+          isort --profile black --check-only --diff .
