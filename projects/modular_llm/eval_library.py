@@ -6,8 +6,7 @@ import torch
 import wandb
 from pytorch_lightning import seed_everything
 
-from mttl.arguments import EvaluationConfig
-from mttl.arguments import ExpertConfig
+from mttl.arguments import EvaluationConfig, ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
