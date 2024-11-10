@@ -7,6 +7,7 @@ import wandb
 from pytorch_lightning import seed_everything
 
 from mttl.arguments import EvaluationConfig
+from mttl.arguments import ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
@@ -161,7 +162,9 @@ def run_eval(args: EvaluationConfig):
         selection=args.expert_selection,
     )
     an_expert = library[next(iter(library.keys()))]
-    train_cfg = args
+    train_cfg = ExpertConfig.from_dict(an_expert.training_config)
+    train_cfg.subsample_dev = args.subsample_dev
+    train_cfg.subsample_test = args.subsample_test
 
     # For starts, always overwrite the following arguments
     for arg_name in [
