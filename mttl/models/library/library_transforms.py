@@ -862,7 +862,7 @@ class ArrowTransform(LibraryTransform):
 
         diff_AB = (U_W.T @ U_A).abs().diag()
         if diff_AB[0] < 0.9:
-            logger.warning("The first singular vector of U_A and U_AB are not aligned")
+            logger.debug("The first singular vector of U_A and U_AB are not aligned")
 
         return U_W, Sigma_C, V_W_T
 
