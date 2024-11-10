@@ -460,7 +460,7 @@ class TrainingArgs(DataArgs):
         )
         self.train_batch_size = self.micro_batch_size
 
-        if self.finetune_path is not None:
+        if self.finetune_task_path is not None:
             if not os.path.exists(self.finetune_task_path):
                 raise ValueError(f"Task path {self.finetune_task_path} does not exist!")
 
