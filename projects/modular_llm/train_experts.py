@@ -137,8 +137,6 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
         elif val_check_interval > args.total_steps and args.total_steps != -1:
             val_check_interval = args.total_steps
 
-    breakpoint()
-
     trainer = Trainer(
         devices=-1,
         profiler=profiler,
