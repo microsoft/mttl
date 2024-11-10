@@ -460,31 +460,25 @@ class TrainingArgs(DataArgs):
         )
         self.train_batch_size = self.micro_batch_size
 
-        if self.finetune_task_name is not None and isinstance(
-            self.finetune_task_name, str
-        ):
+        if self.finetune_path is not None:
+            if not os.path.exists(self.finetune_task_path):
+                raise ValueError(f"Task path {self.finetune_task_path} does not exist!")
+
             # resolve task keys
             task_names = []
-            tasks = self.finetune_task_name.split(",")
+            meta_tasks = self.finetune_task_name.split(",")
+            # load task names from json file
+            with open(self.finetune_task_path) as f:
+                task_sets = json.load(f)
 
-            if self.finetune_task_path is not None:
-                if not os.path.exists(self.finetune_task_path):
-                    raise ValueError(
-                        f"Task path {self.finetune_task_path} does not exist!"
-                    )
+            for task_name in meta_tasks:
+                # try to fetch task_names from the file
+                if task_name in task_sets:
+                    task_names.extend(task_sets[task_name])
+                else:
+                    task_names.append(task_name)
 
-                # load task names from json file
-                with open(self.finetune_task_path) as f:
-                    task_sets = json.load(f)
-
-                for task_name in tasks:
-                    # try to fetch task_names from the file
-                    if task_name in task_sets:
-                        task_names.extend(task_sets[task_name])
-                    else:
-                        task_names.append(task_name)
-            else:
-                task_names = tasks
+            self.finetune_task_name = ",".join(task_names)
 
         n_devices = torch.cuda.device_count()
         if n_devices > 1:
