@@ -8,7 +8,7 @@
     "modify_layers": "q_proj|v_proj|k_proj",
     "trainable_param_names": ".*lora_[ab].*",
     "num_train_epochs": 10,
-    "learning_rate": 1e-3,
+    "learning_rate": 1e-2,
     "micro_batch_size": 16,
     "train_batch_size": 16,
     "predict_batch_size": 8,
@@ -17,7 +17,7 @@
     "model_family": "gpt",
     "optimizer": "adamw",
     "dataset": "sordonia/flan-debug-flat",
-    "warmup_proportion": 0.06,
+    "warmup_proportion": 0.0,
     "max_input_length": 1024,
     "max_output_length": 128,
     "truncation_side": "left"
