@@ -758,20 +758,19 @@ class ExpertLibrary:
             if metadatum.expert_task_name == task
         ]
 
-    @classmethod
-    def from_expert_library(
-        cls: Type["ExpertLibrary"],
-        expert_lib: "ExpertLibrary",
+    def clone(
+        self,
         repo_id: str,
         force=False,
         upload_aux_data=False,
         only_tasks=None,
-    ):
-        new_lib = cls(repo_id=repo_id, create=True)
+    ) -> "ExpertLibrary":
+        expert_lib_class = self._get_expert_lib_class(repo_id)
+        new_lib = expert_lib_class(repo_id=repo_id, create=True)
 
-        only_tasks = only_tasks or expert_lib.tasks
+        only_tasks = only_tasks or self.tasks
         with new_lib.batched_commit():
-            for name, expert in expert_lib.items():
+            for name, expert in self.items():
                 if expert.name not in new_lib:
                     new_lib.add_expert(expert, name, force=force)
 
@@ -779,15 +778,13 @@ class ExpertLibrary:
         # are in this lib but were deleted from the expert_lib
         with new_lib.batched_commit():
             for name, metadatum in list(new_lib.data.items()):
-                if (
-                    name not in expert_lib.keys()
-                    and metadatum.expert_task_name in only_tasks
-                ):
+                if name not in self.keys() and metadatum.expert_task_name in only_tasks:
                     new_lib.remove_expert(name, soft_delete=True)
 
         # also update the scores
         if upload_aux_data:
-            scores = expert_lib.get_auxiliary_data(data_type="scores")
+            scores = self.get_auxiliary_data(data_type="scores")
+
             for expert_name, expert_scores in scores.items():
                 for score in expert_scores.values():
                     try:
@@ -796,7 +793,8 @@ class ExpertLibrary:
                         logger.error(e)
                         continue
 
-            embeddings = expert_lib.get_auxiliary_data(data_type="embeddings")
+            embeddings = self.get_auxiliary_data(data_type="embeddings")
+
             for expert_name, expert_embeddings in embeddings.items():
                 for embedding in expert_embeddings.values():
                     try:
@@ -920,13 +918,9 @@ class ExpertLibrary:
             create=create,
             ignore_sliced=ignore_sliced,
         )
+
         if destination_id is not None:
-            expert_lib_class_copy = cls._get_expert_lib_class(
-                destination_id, expert_library_type
-            )
-            expert_lib = expert_lib_class_copy.from_expert_library(
-                expert_lib, destination_id, force=True, upload_aux_data=True
-            )
+            expert_lib.clone(destination_id, force=True, upload_aux_data=True)
 
         return expert_lib
 
