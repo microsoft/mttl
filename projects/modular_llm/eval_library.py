@@ -313,7 +313,6 @@ def run_eval(args: EvaluationConfig):
         or args.finetune_task_name is not None
     ):
         task = args.pipeline_eval_tasks or args.finetune_task_name
-
         logger.info(f"Evaluating Rouge on: {task}")
 
         train_cfg.finetune_task_name = task
