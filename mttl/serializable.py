@@ -48,10 +48,10 @@ class Serializable:
                 data_[field.name] = [get_args(field_type)[0].fromdict(v) for v in value]
             # handle the case of a dict of configs
             elif get_origin(field_type) == dict and hasattr(
-                get_args(field_type)[0], "asdict"
+                get_args(field_type)[1], "fromdict"
             ):
                 data_[field.name] = {
-                    k: get_args(field_type)[0].fromdict(v) for k, v in value.items()
+                    k: get_args(field_type)[1].fromdict(v) for k, v in value.items()
                 }
             # simple value
             else:
@@ -108,10 +108,13 @@ class Serializable:
                 data[field.name] = value.asdict()
             elif isinstance(value, list) and all(hasattr(v, "asdict") for v in value):
                 data[field.name] = [v.asdict() for v in value]
-            elif isinstance(value, dict) and all(
-                hasattr(k, "asdict") for k in value.keys()
-            ):
-                data[field.name] = {k: v.asdict() for k, v in value.items()}
+            elif isinstance(value, dict):
+                data[field.name] = {}
+                for k, v in value.items():
+                    if hasattr(v, "asdict"):
+                        data[field.name][k] = v.asdict()
+                    else:
+                        data[field.name][k] = v
             else:
                 data[field.name] = value
             data["class_name"] = (
