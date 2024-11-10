@@ -281,48 +281,47 @@ def run_eval(args: EvaluationConfig):
         # update config
         wandb.config.update({f"cmd_args_{k}": v for k, v in vars(args).items()})
 
-    if args.pipeline_eval_tasks is None:
-        logger.info(
-            "`pipeline_eval_tasks` was not set, setting pipeline_eval_tasks='all'..."
-        )
-        args.pipeline_eval_tasks = "all"
-
     if args.pipeline_eval_tasks in [
         "in_distribution",
     ]:
         tasks = [expert.expert_task_name for expert in library.data.values()]
-        tasks = [expert.expert_task_name for expert in library.data.values()]
+
         if tasks[0] is None:
             # for some older version of lib (in case of joint experts) no expert_task_name was set
             tasks = json.load(open(args.flan_tasks_path))["flan256"]
+
         # make sure we evaluate each task seperately (so the mean is over tasks at the end)
         tasks = ",".join(tasks).split(",")
         train_cfg.eval_metric = args.eval_metric
         scores = eval_in_distribution(model, train_cfg, tasks)
-    elif args.pipeline_eval_tasks in [
-        "task1356_xlsum_title_generation",
-        "task304_numeric_fused_head_resolution",
-        "task202_mnli_contradiction_classification",
-        "task035_winogrande_question_modification_person",
-        "task614_glucose_cause_event_detection",
-        "task362_spolin_yesand_prompt_response_sub_classification",
-        "task242_tweetqa_classification",
-        "task613_politifact_text_generation",
-        "task1728_web_nlg_data_to_text",
-        "task1153_bard_analogical_reasoning_affordance",
-        "task039_qasc_find_overlapping_words",
-        "task1557_jfleg_answer_generation",
-    ]:
-        logger.info(f"Evaluating SNI with Rouge: task {args.pipeline_eval_tasks}")
+    elif (
+        args.pipeline_eval_tasks
+        in [
+            "task1356_xlsum_title_generation",
+            "task304_numeric_fused_head_resolution",
+            "task202_mnli_contradiction_classification",
+            "task035_winogrande_question_modification_person",
+            "task614_glucose_cause_event_detection",
+            "task362_spolin_yesand_prompt_response_sub_classification",
+            "task242_tweetqa_classification",
+            "task613_politifact_text_generation",
+            "task1728_web_nlg_data_to_text",
+            "task1153_bard_analogical_reasoning_affordance",
+            "task039_qasc_find_overlapping_words",
+            "task1557_jfleg_answer_generation",
+        ]
+        or args.finetune_task_name is not None
+    ):
+        task = args.pipeline_eval_tasks or args.finetune_task_name
 
-        train_cfg.finetune_task_name = args.pipeline_eval_tasks
-        train_cfg.pipeline_eval_tasks = None
-        train_cfg.predict_batch_size = args.predict_batch_size
+        logger.info(f"Evaluating Rouge on: {task}")
 
+        train_cfg.finetune_task_name = task
         dm_for_gen = get_datamodule(train_cfg, for_generation=True)
 
         rouge_evaluator = RougeEvaluator(dm_for_gen)
         rouge = rouge_evaluator.evaluate(model, split="test", verbose=False)
+
         logger.info(f"RougeL: {rouge}")
         if wandb.run is not None:
             if rouge is not None:
