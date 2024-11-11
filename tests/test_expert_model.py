@@ -153,6 +153,25 @@ def test_from_pretrained(tmp_path):
     assert "b" in model.experts_names
 
 
+def test_from_pretrained_multi_selector(tmp_path):
+    from mttl.models.containers.selectors.base import UniformSelectorConfig
+    from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
+
+    # create a dummy library
+    model = MultiExpertModel(MultiExpertModelConfig("EleutherAI/gpt-neo-125m"))
+    model.add_empty_expert("a", LoRAConfig(modify_layers=".*out_proj.*"))
+    model.add_empty_expert("b", LoRAConfig(modify_layers=".*out_proj.*"))
+    model.set_selector("lora", UniformSelectorConfig())
+    model.save_pretrained(tmp_path)
+
+    # from pretrained library
+    model = MultiExpertModel.from_pretrained(tmp_path)
+    assert "a" in model.experts_names
+    assert "b" in model.experts_names
+    assert len(model.experts_names) == 2
+    assert model.selector_config.get("lora").__class__ == UniformSelectorConfig
+
+
 def test_from_pretrained_with_arrow(tmp_path):
     # create a dummy library
     model = MultiExpertModel(MultiExpertModelConfig("EleutherAI/gpt-neo-125m"))

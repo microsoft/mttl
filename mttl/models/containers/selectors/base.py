@@ -98,6 +98,9 @@ class MultiSelectorConfig(Serializable):
     def __len__(self):
         return len(self.selectors)
 
+    def __getitem__(self, key):
+        return self.selectors[key]
+
     def get(self, key):
         return self.selectors.get(key, TaskNameSelectorConfig())
 
