@@ -10,9 +10,9 @@ if int(os.environ.get("RANK", -1)) != -1:
     dist.init_process_group(backend="nccl")
 
     ddp = True
-    ddp_rank = int(os.environ["RANK"])
-    ddp_local_rank = int(os.environ["LOCAL_RANK"])
-    ddp_world_size = int(os.environ["WORLD_SIZE"])
+    ddp_rank = int(os.environ.get("RANK", 0))
+    ddp_local_rank = int(os.environ.get("LOCAL_RANK", 0))
+    ddp_world_size = int(os.environ.get("WORLD_SIZE", 1))
     master_process = ddp_rank == 0
 else:
     ddp = False
