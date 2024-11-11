@@ -92,8 +92,8 @@ class AutoSelectorConfig(AutoSerializable):
 
 
 @dataclass
-class MultiSelectorConfig(SelectorConfig):
-    selectors: Dict[str, SelectorConfig] = field(default_factory=dict)
+class MultiSelectorConfig(Serializable):
+    selectors: Dict[str, AutoSelectorConfig] = field(default_factory=dict)
 
     def __len__(self):
         return len(self.selectors)
@@ -497,7 +497,7 @@ class TaskNameSelectorConfig(SelectorConfig):
 @Selector.register("task_selector", TaskNameSelectorConfig)
 class TaskNameSelector(Selector):
     def __init__(self, **kwargs) -> None:
-        super().__init__()
+        super().__init__(**kwargs)
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchExpertsSelectorOutput:
@@ -547,7 +547,7 @@ class UniformSelectorConfig(SelectorConfig):
 @Selector.register("uniform_selector", UniformSelectorConfig)
 class UniformSelector(Selector):
     def __init__(self, **kwargs) -> None:
-        super().__init__()
+        super().__init__(**kwargs)
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchExpertsSelectorOutput:
