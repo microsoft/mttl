@@ -19,6 +19,7 @@ from mttl.models.monitors import get_monitors
 from mttl.utils import (
     create_library,
     generate_random_string,
+    rank_zero_only_and_wait,
     remote_login,
     upload_library,
 )
@@ -184,6 +185,28 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
 
         module.load_state_dict(checkpoint)
         trainer.test(module, dm)
+
+        @rank_zero_only_and_wait(before=False, after=True)
+        def upload_library(expert_library, module):
+            if expert_library is not None:
+                # refresh expert library: so we dont overwrite the readme if the remote has changed.
+                expert_library.refresh_from_remote()
+
+                if isinstance(module, MoEModule):
+                    with expert_library.batched_commit():
+                        for expert_name in module.experts_names:
+                            expert = module.get_expert_instance(expert_name)
+                            expert_library.add_expert(expert, expert_name, force=True)
+                elif isinstance(module, ExpertModule):
+                    expert = module.as_expert(training_config=args.to_dict())
+                    expert_name = (
+                        args.expert_name
+                        or args.finetune_task_name
+                        or generate_random_string()
+                    )
+                    expert_library.add_expert(expert, expert_name, force=True)
+                else:
+                    raise ValueError("Model class not recognized")
 
         upload_library(expert_library, module)
 

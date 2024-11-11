@@ -344,7 +344,7 @@ class MultiExpertMixin:
     def _get_selector_config(self, model_modifier: str) -> SelectorConfig:
         if not self.selector_config:
             return None
-        if isinstance(self.selector_config, dict):
+        if isinstance(self.selector_config, MultiSelectorConfig):
             return self.selector_config.get(model_modifier)
         else:
             return self.selector_config
@@ -404,6 +404,7 @@ class MultiExpertMixin:
 
         # refresh current selector config
         self.selector_config = MultiSelectorConfig()
+
         for modifier_name, selectors in self.selectors.items():
             if len(selectors) == 0:
                 continue
@@ -590,6 +591,7 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
         return model
 
     def _clear_library_id_from_selector_config(self) -> SelectorConfig:
+        """When saving the model, we must clear the library id given that the weights are saved in the checkpoint."""
         import copy
 
         selector_config = copy.deepcopy(self.selector_config)
@@ -597,8 +599,10 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
         if selector_config is not None:
             if isinstance(selector_config, MultiSelectorConfig):
                 for key, config in selector_config.items():
+
                     if isinstance(config, LoadableSelectorConfig):
                         config.library_id = None
+
             elif isinstance(selector_config, LoadableSelectorConfig):
                 selector_config.library_id = None
 

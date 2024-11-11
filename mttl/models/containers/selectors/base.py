@@ -92,8 +92,8 @@ class AutoSelectorConfig(AutoSerializable):
 
 
 @dataclass
-class MultiSelectorConfig(SelectorConfig):
-    selectors: Dict[str, SelectorConfig] = field(default_factory=dict)
+class MultiSelectorConfig(Serializable):
+    selectors: Dict[str, AutoSelectorConfig] = field(default_factory=dict)
 
     def __len__(self):
         return len(self.selectors)
@@ -101,13 +101,16 @@ class MultiSelectorConfig(SelectorConfig):
     def __getitem__(self, key):
         return self.selectors[key]
 
-    def __keys__(self):
+    def get(self, key):
+        return self.selectors.get(key, TaskNameSelectorConfig())
+
+    def keys(self):
         return self.selectors.keys()
 
-    def __values__(self):
+    def values(self):
         return self.selectors.values()
 
-    def __items__(self):
+    def items(self):
         return self.selectors.items()
 
     def __setitem__(self, key, value):
@@ -349,7 +352,7 @@ class Selector(nn.Module, Registrable):
                     logger.warning(
                         f"Task name {task_name} already assigned to expert {self._task_to_expert_name[task_name]}"
                     )
-            self._task_to_expert_name[task_name] = expert_name
+                self._task_to_expert_name[task_name] = expert_name
 
         # standard bookkeeping for all selectors
         if is_default:
@@ -494,7 +497,7 @@ class TaskNameSelectorConfig(SelectorConfig):
 @Selector.register("task_selector", TaskNameSelectorConfig)
 class TaskNameSelector(Selector):
     def __init__(self, **kwargs) -> None:
-        super().__init__()
+        super().__init__(**kwargs)
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchExpertsSelectorOutput:
@@ -513,7 +516,7 @@ class TaskNameSelector(Selector):
             task_names = self.routing_infos.task_names
 
             if (
-                any(
+                all(
                     task_name not in self.task_to_expert_name
                     for task_name in task_names
                 )
@@ -533,4 +536,25 @@ class TaskNameSelector(Selector):
     def get_merging_weights(self, **selector_kwargs) -> Dict:
         raise NotImplementedError(
             "Not required for TaskNameSelector as it performs hard selection. Use 'get_expert_instance' instead."
+        )
+
+
+@dataclass
+class UniformSelectorConfig(SelectorConfig):
+    pass
+
+
+@Selector.register("uniform_selector", UniformSelectorConfig)
+class UniformSelector(Selector):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+
+    @forward_with_cache
+    def forward(self, input, **kwargs) -> BatchExpertsSelectorOutput:
+        return ExpertsAndWeightsSelectorOutput(
+            experts=self.expert_names,
+            weights=torch.ones(
+                len(self.expert_names), device=input.device, dtype=input.dtype
+            )
+            / len(self.expert_names),
         )

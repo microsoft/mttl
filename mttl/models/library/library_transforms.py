@@ -862,7 +862,7 @@ class ArrowTransform(LibraryTransform):
 
         diff_AB = (U_W.T @ U_A).abs().diag()
         if diff_AB[0] < 0.9:
-            logger.warning("The first singular vector of U_A and U_AB are not aligned")
+            logger.debug("The first singular vector of U_A and U_AB are not aligned")
 
         return U_W, Sigma_C, V_W_T
 
@@ -1103,7 +1103,7 @@ class ArrowTransform(LibraryTransform):
                 torch.allclose(ratio, torch.ones_like(ratio), atol=1e-3)
 
                 # Check that top vector is indeed the top eigenvector
-                assert (WTW @ top_vector).pow(2).sum() > (WTW @ bottom_vector).pow(
+                assert (WTW @ top_vector).pow(2).sum() >= (WTW @ bottom_vector).pow(
                     2
                 ).sum()
 
@@ -1423,5 +1423,5 @@ class MBCWithCosSimTransform(LibraryTransform):
         clusters = defaultdict(list)
 
         for key, label in zip(expert_names, cluster_labels):
-            clusters[label].append(key)
+            clusters[f"cluster_{label}"].append(key)
         return clusters

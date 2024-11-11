@@ -236,7 +236,7 @@ class PolySelectorDirect(PolySelector):
 
 
 @dataclass
-class PolySelectorDirectConfigUniform(PolySelectorConfig):
+class PolySelectorDirectConfigUniform(PolySelectorDirectConfig):
     pass
 
 
