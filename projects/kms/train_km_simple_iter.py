@@ -98,6 +98,7 @@ def create_synthetic_data_for_epoch(
             model_name_or_path = temp_directory
         else:
             model_name_or_path = model.config.base_model
+            model.to("cpu")
 
         # Generate a set of prompts
         augmenter = DatasetAugmenter(
@@ -138,7 +139,7 @@ def get_text_dataset(training_args):
 @dataclass
 class KMIterArguments(ExpertConfig):
     loss_function: str = "dcd"
-    generate_using_last_km: bool = True
+    use_last_km: bool = True
     generate_every_n_epochs: int = 1
     # set the following if you want to enable the NQA callback during training
     text_dataset: str = "sordonia/narrativeqa_sanitized"
@@ -278,7 +279,7 @@ def train_km(training_args: KMIterArguments):
                 epoch + 1,
                 training_args.output_dir,
                 training_args.use_only_type,
-                training_args.generate_using_last_km,
+                training_args.use_last_km,
             )
             synth_datamodule = create_datamodule(training_args, synth_dataset_path)
 
