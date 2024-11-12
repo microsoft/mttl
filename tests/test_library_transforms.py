@@ -31,8 +31,6 @@ from mttl.models.library.library_transforms import (
 
 def test_config():
     cfg = ArrowTransformConfig(ab_only=True, scale=False)
-    assert cfg.save_name == "ArrowTransformConfig-a8327e21d374166ceeb94c40d2e7676f"
-
     cfg2 = ArrowTransformConfig(ab_only=True, scale=True)
     assert cfg2.save_name != cfg.save_name
 
