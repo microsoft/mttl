@@ -158,10 +158,10 @@ def model_loader_helper(
                     torch_dtype=torch_dtype,
                 )
                 break
-            except:
+            except Exception as e:
                 continue
         if model_object is None:
-            raise ValueError(f"Couldn't load {model_name}!")
+            raise ValueError(f"Couldn't load {model_name}! Exception: {e}")
 
     if bnb_config is not None:
         model_object = prepare_model_for_kbit_training(model_object)
