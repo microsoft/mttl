@@ -124,7 +124,7 @@ def get_optimizer_and_scheduler(model, args, num_train_examples, no_decay=None):
         )
 
     if args.warmup_steps == -1 or args.warmup_proportion > 0.0:
-        logger.warning(
+        logger.info(
             "Warmup proportion is set to {}, has priority over warmup_steps".format(
                 args.warmup_proportion
             )

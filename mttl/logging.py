@@ -8,7 +8,10 @@ import prettytable
 
 import wandb
 
+# warning if logger is not initialized
 logger = logging.getLogger("mttl")
+logger.setLevel(logging.WARNING)
+logging.getLogger("datasets.arrow_dataset").setLevel(logging.CRITICAL + 1)
 
 
 def maybe_wandb_log(logs: dict):
