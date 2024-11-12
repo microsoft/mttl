@@ -72,7 +72,8 @@ def train_phatgoose(args, model, datamodule):
             running_loss += loss_accum.item()
             optimizer.step()
             scheduler.step()
-            torch.cuda.synchronize()
+            if model.device.type == "cuda":
+                torch.cuda.synchronize()
             bar.set_description_str(
                 f"Step {step + 1}/{args.total_steps}, Loss: {running_loss / (step + 1):.4f}, Lr: {scheduler.get_last_lr()[0]:.4f}"
             )
