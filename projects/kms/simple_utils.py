@@ -120,7 +120,6 @@ def lm_loss(model, inputs):
         labels=labels,
         task_names=inputs.get("task_names"),
     )
-
     return outputs.loss
 
 

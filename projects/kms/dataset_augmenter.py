@@ -270,6 +270,7 @@ class DatasetAugmenter:
         num_generations,
         generation_top_p,
         model_type="oai",
+        num_devices=-1,
         do_filtering=True,
     ):
         import os
@@ -299,7 +300,9 @@ class DatasetAugmenter:
                 trust_remote_code=True,
                 gpu_memory_utilization=0.9,
                 dtype="bfloat16",
-                tensor_parallel_size=torch.cuda.device_count(),
+                tensor_parallel_size=(
+                    torch.cuda.device_count() if num_devices == -1 else num_devices
+                ),
                 max_num_seqs=64,
                 max_model_len=min(4096, self.tokenizer.model_max_length),
             )

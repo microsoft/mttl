@@ -30,6 +30,7 @@ from mttl.utils import create_library, remote_login, upload_library
 @dataclass
 class TextDatasetConfig(DatasetConfig):
     text_column: str = "text"
+    task_name_field: str = "document_id"
 
 
 @DataModule.register("text_dataset", config_cls=TextDatasetConfig)
@@ -70,7 +71,9 @@ def create_datamodule(training_args, dataset_path):
     return get_datamodule(args_copy)
 
 
-def create_synthetic_data_for_epoch(model, dataset, epoch, output_dir, use_only_type):
+def create_synthetic_data_for_epoch(
+    model, dataset, epoch, output_dir, use_only_type, use_last_km=True
+):
     dataset_path = output_dir + f"/gen__epoch_{epoch}"
 
     if os.path.exists(dataset_path):
@@ -90,17 +93,22 @@ def create_synthetic_data_for_epoch(model, dataset, epoch, output_dir, use_only_
 
         # we need to save the model in the temp directory, this moves it to CPU so that VLLM
         # doesn't complain, one alternative is to use 2 gpus, one for generation, one for training
-        model.merge_and_save_base_model(temp_directory, device="cpu")
-        model_name_or_path = temp_directory
+        if use_last_km:
+            model.merge_and_save_base_model(temp_directory, device="cpu")
+            model_name_or_path = temp_directory
+        else:
+            model_name_or_path = model.config.base_model
 
         # Generate a set of prompts
         augmenter = DatasetAugmenter(
             model_name_or_path,
             block_size=2048,
             max_continuation_length=768,
-            num_generations=6,
+            num_generations=4,
             generation_top_p=0.95,
+            num_devices=1,
             model_type="local",
+            do_filtering=False,
         )
         for task in use_only_type.split(","):
             augmenter.add_task(task)
@@ -130,6 +138,7 @@ def get_text_dataset(training_args):
 @dataclass
 class KMIterArguments(ExpertConfig):
     loss_function: str = "dcd"
+    generate_using_last_km: bool = True
     generate_every_n_epochs: int = 1
     # set the following if you want to enable the NQA callback during training
     text_dataset: str = "sordonia/narrativeqa_sanitized"
@@ -255,13 +264,21 @@ def train_km(training_args: KMIterArguments):
 
         if val_loss < best_val:
             best_val = val_loss
-            model.save_pretrained(training_args.output_dir)
+            model.save_pretrained(training_args.output_dir + "/best_model")
             logger.info(f"Saving model to {training_args.output_dir}")
 
-        if epoch % training_args.generate_every_n_epochs == 0:
+        if (
+            epoch % training_args.generate_every_n_epochs == 0
+            and epoch != training_args.num_train_epochs - 1
+        ):
             # regenerate synthetic data for next epoch!
             synth_dataset_path = create_synthetic_data_for_epoch(
-                model, text_dataset, epoch + 1, training_args.output_dir
+                model,
+                text_dataset,
+                epoch + 1,
+                training_args.output_dir,
+                training_args.use_only_type,
+                training_args.generate_using_last_km,
             )
             synth_datamodule = create_datamodule(training_args, synth_dataset_path)
 
