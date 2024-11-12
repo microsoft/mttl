@@ -75,9 +75,7 @@ class PhatgooseSelector(PerTokenSelector):
             PhatgooseTransform,
         )
 
-        return PhatgooseTransform(PhatgooseConfig(name=config.selector_data_id)).fetch(
-            config.library_id
-        )
+        return PhatgooseTransform.fetch(config.library_id, config.selector_data_id)
 
 
 @dataclass

@@ -58,6 +58,4 @@ class AverageActivationSelector(PerTokenSelector):
             HiddenStateComputerConfig,
         )
 
-        return HiddenStateComputer(
-            HiddenStateComputerConfig(name=config.selector_data_id)
-        ).fetch(config.library_id)
+        return HiddenStateComputer.fetch(config.library_id, config.selector_data_id)

@@ -50,6 +50,4 @@ class ArrowSelector(PerTokenSelector):
         """Fetches prototypes from the library."""
         from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
 
-        return ArrowTransform(ArrowConfig(name=config.selector_data_id)).fetch(
-            config.library_id
-        )
+        return ArrowTransform.fetch(config.library_id, config.selector_data_id)
