@@ -160,10 +160,11 @@ def model_loader_helper(
                 )
                 break
             except Exception as e:
+                logger.warning(f"Couldn't load {model_name}! Exception: {e}")
                 exception = e
                 continue
         if model_object is None:
-            raise ValueError(f"Couldn't load {model_name}! Exception: {exception}")
+            raise ValueError(f"Couldn't load {model_name}!")
 
     if bnb_config is not None:
         model_object = prepare_model_for_kbit_training(model_object)
