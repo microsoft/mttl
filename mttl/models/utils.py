@@ -147,6 +147,7 @@ def model_loader_helper(
         logger.info(f"Loading phi-2 model from {os.environ['PHI_PATH']}")
     else:
         model_object = None
+        exception = None
         for klass in [AutoModelForCausalLM, AutoModelForSeq2SeqLM]:
             try:
                 model_object = klass.from_pretrained(
@@ -159,9 +160,10 @@ def model_loader_helper(
                 )
                 break
             except Exception as e:
+                exception = e
                 continue
         if model_object is None:
-            raise ValueError(f"Couldn't load {model_name}! Exception: {e}")
+            raise ValueError(f"Couldn't load {model_name}! Exception: {exception}")
 
     if bnb_config is not None:
         model_object = prepare_model_for_kbit_training(model_object)
