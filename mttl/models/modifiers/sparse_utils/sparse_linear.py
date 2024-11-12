@@ -7,7 +7,6 @@ import numpy as np
 import torch
 from scipy.sparse import csr_matrix
 from torch import nn
-from triton.ops.blocksparse.matmul import dsd_lut, sdd_lut
 
 from mttl.logging import logger
 from mttl.models.modifiers.base import Modifier, ModifierConfig
@@ -430,6 +429,8 @@ class BlockSparseLinearModule(BlockSparseWeights, SparseLinear):
         parent_name=None,
         sparse_func=None,
     ):
+        from triton.ops.blocksparse.matmul import sdd_lut
+
         assert (
             config.sps_type == "block_sparse"
         ), "BlockSparseLinearModule only supports block_sparse type"

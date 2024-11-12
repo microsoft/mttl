@@ -5,7 +5,6 @@ import torch
 import torch.nn.functional as F
 import triton as tn
 from spops import csr_add, sddmm
-from triton.ops.blocksparse import matmul
 
 from mttl.models.modifiers.sparse_mask import SparseMaskConfig, SparseWeights
 from mttl.models.modifiers.sparse_utils.utils import init_sparse_weights

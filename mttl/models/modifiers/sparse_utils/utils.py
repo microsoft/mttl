@@ -5,7 +5,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from scipy.sparse import csr_matrix
-from triton.ops.blocksparse.matmul import _matmul
 
 from mttl.logging import logger
 
@@ -515,6 +514,8 @@ class BlcokSparseLinearFunction_SP_ADD(Function):
             c_lut,
             block_size,
         ) = ctx.saved_tensors
+        from triton.ops.blocksparse.matmul import _matmul
+
         weights = csr_add(
             sparse_weights, row_offs, row_idx, col_idx, dense_weights
         )  # could be done also with torch.sparse.sampled_addmm
@@ -524,6 +525,7 @@ class BlcokSparseLinearFunction_SP_ADD(Function):
         dX = grad_output @ weights
         grad_output = grad_output.contiguous()
         input = input.contiguous()
+
         dsW = _matmul.fn["sdd"](
             grad_output.unsqueeze(1),
             input.unsqueeze(1),
@@ -582,12 +584,15 @@ class BlcokSparseLinearFunction_SP_SCATTER(Function):
             c_lut,
             block_size,
         ) = ctx.saved_tensors
+        from triton.ops.blocksparse.matmul import _matmul
+
         weights = _scatter_add_flattened(dense_weights, sparse_weights, idxs)
         block_size = block_size.item()
         spdims = (1, weights.shape[0] // block_size, weights.shape[1] // block_size)
         dX = grad_output @ weights
         grad_output = grad_output.contiguous()
         input = input.contiguous()
+
         dsW = _matmul.fn["sdd"](
             grad_output.unsqueeze(1),
             input.unsqueeze(1),
