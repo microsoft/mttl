@@ -172,6 +172,54 @@ def test_from_pretrained_multi_selector(tmp_path):
     assert model.selector_config.get("lora").__class__ == UniformSelectorConfig
 
 
+def test_from_pretrained_with_arrow_save_and_reload(tmp_path):
+    # create a dummy library
+    model = MultiExpertModel(MultiExpertModelConfig("EleutherAI/gpt-neo-125m"))
+    model.add_empty_expert(
+        "a", LoRAConfig(modify_layers=".*out_proj", lora_init_b_random=True)
+    )
+    model.add_empty_expert(
+        "b", LoRAConfig(modify_layers=".*out_proj", lora_init_b_random=True)
+    )
+    library = model.save_to_library(f"local://{tmp_path}")
+
+    # store arrow experts
+    protos = ArrowTransform(ArrowConfig()).transform(library, persist=True)
+
+    # from pretrained library
+    selector_config = ArrowSelectorConfig(top_k=4)
+    model = MultiExpertModel.from_pretrained_library(
+        library, selector_config=selector_config
+    )
+    assert len(model.experts_names) == 2
+    # the order might be different due to multi-threading in adding experts in parallel
+    assert "a" in model.experts_names
+    assert "b" in model.experts_names
+
+    selector = model.selectors["lora"][0]
+    assert selector.config == selector_config
+    assert isinstance(selector, ArrowSelector)
+    model.save_pretrained(tmp_path)
+
+    # reload from the checkpoint
+    model = MultiExpertModel.from_pretrained(tmp_path)
+    selector = model.selectors["lora"][0]
+    assert selector.prototypes.shape[0] == 2
+    name1 = selector.expert_names[0]
+    name2 = selector.expert_names[1]
+    ln = selector.layer_name.replace(".selector", "")
+
+    assert np.allclose(
+        selector.prototypes[0].sum().item(),
+        protos[name1][ln].sum().item(),
+    )
+
+    assert np.allclose(
+        selector.prototypes[1].sum().item(),
+        protos[name2][ln].sum().item(),
+    )
+
+
 def test_from_pretrained_with_arrow(tmp_path):
     # create a dummy library
     model = MultiExpertModel(MultiExpertModelConfig("EleutherAI/gpt-neo-125m"))
