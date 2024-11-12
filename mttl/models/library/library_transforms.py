@@ -42,12 +42,6 @@ def train_phatgoose(args, model, datamodule):
         model, args, num_train_examples=len(datamodule.train_dataset)
     )
     iter_train = iter(datamodule.train_dataloader())
-    if args.precision == "bf16":
-        dtype = torch.bfloat16
-    elif args.precision == "16":
-        dtype = torch.float16
-    else:
-        dtype = torch.float32
 
     bar = tqdm.tqdm(range(args.total_steps))
     running_loss = 0.0
@@ -64,8 +58,8 @@ def train_phatgoose(args, model, datamodule):
                 batch = next(iter_train)
 
             with torch.autocast(
-                device_type="cuda",
-                dtype=dtype,
+                device_type=model.device.type,
+                dtype=model.dtype,
             ):
                 batch = transfer_batch_to_device(batch, model.device)
                 loss = model.forward(**batch).loss
