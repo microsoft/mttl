@@ -53,9 +53,9 @@ class AverageActivationSelector(PerTokenSelector):
     @artifacts_cache
     def load_from_library(cls, config):
         """Fetches prototypes from the library."""
-        from mttl.models.library.library_transforms import (
-            HiddenStateComputer,
-            HiddenStateComputerConfig,
-        )
+        from mttl.models.library.library_transforms import HiddenStateComputer
 
-        return HiddenStateComputer.fetch(config.library_id, config.selector_data_id)
+        return HiddenStateComputer.fetch(
+            config.library_id,
+            config.selector_data_id,
+        )

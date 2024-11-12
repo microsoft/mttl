@@ -25,7 +25,7 @@ from mttl.models.expert_model import (
     MultiExpertModelConfig,
 )
 from mttl.models.library.expert import Expert
-from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
+from mttl.models.library.library_transforms import ArrowTransform, ArrowTransformConfig
 from mttl.models.modifiers.lora import LoRAConfig, SkilledLoRAConfig
 
 
@@ -184,7 +184,7 @@ def test_from_pretrained_with_arrow_save_and_reload(tmp_path):
     library = model.save_to_library(f"local://{tmp_path}")
 
     # store arrow experts
-    protos = ArrowTransform(ArrowConfig()).transform(library, persist=True)
+    protos = ArrowTransform(ArrowTransformConfig()).transform(library, persist=True)
 
     # from pretrained library
     selector_config = ArrowSelectorConfig(top_k=4)
@@ -232,7 +232,7 @@ def test_from_pretrained_with_arrow(tmp_path):
     library = model.save_to_library(f"local://{tmp_path}")
 
     # store arrow experts
-    protos = ArrowTransform(ArrowConfig()).transform(library, persist=True)
+    protos = ArrowTransform(ArrowTransformConfig()).transform(library, persist=True)
 
     # from pretrained library
     selector_config = ArrowSelectorConfig(top_k=4)

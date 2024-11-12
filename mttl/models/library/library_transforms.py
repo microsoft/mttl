@@ -166,9 +166,11 @@ class SVDEmbeddingTransform(LibraryTransform):
 
     @classmethod
     @torch.no_grad()
-    def fetch(cls, library: Union[str, ExpertLibrary], config_hash: str):
+    def fetch(cls, library: Union[str, ExpertLibrary], config_hash: str = None):
         if isinstance(library, str):
             library = ExpertLibrary.get_expert_library(library)
+
+        config_hash = config_hash or SVDEmbeddingTransformConfig().save_name
 
         # try to fetch auxiliary data
         output = library.get_auxiliary_data(data_type=config_hash)
@@ -493,9 +495,11 @@ class HiddenStateComputer(LibraryTransform):
 
     @classmethod
     @torch.no_grad()
-    def fetch(cls, library: Union[str, ExpertLibrary], config_hash: str):
+    def fetch(cls, library: Union[str, ExpertLibrary], config_hash: str = None):
         if isinstance(library, str):
             library = ExpertLibrary.get_expert_library(library)
+
+        config_hash = config_hash or HiddenStateComputerConfig().save_name
 
         # try to fetch auxiliary data
         output = library.get_auxiliary_data(data_type=config_hash)
@@ -632,7 +636,7 @@ class HiddenStateComputer(LibraryTransform):
 
 
 @dataclass
-class PhatgooseConfig(LibraryTransformConfig):
+class PhatgooseTransformConfig(LibraryTransformConfig):
     n_steps: int = 100
     learning_rate: float = 1e-3
     warmup_ratio: float = 0.1
@@ -641,16 +645,18 @@ class PhatgooseConfig(LibraryTransformConfig):
     seed: int = 42
 
 
-@LibraryTransform.register("phatgoose", PhatgooseConfig)
+@LibraryTransform.register("phatgoose", PhatgooseTransformConfig)
 class PhatgooseTransform(HiddenStateComputer):
-    def __init__(self, config: PhatgooseConfig = None):
-        super().__init__(config or PhatgooseConfig())
+    def __init__(self, config: PhatgooseTransformConfig = None):
+        super().__init__(config or PhatgooseTransformConfig())
 
     @classmethod
     @torch.no_grad()
     def fetch(cls, library: Union[str, ExpertLibrary], config_hash: str):
         if isinstance(library, str):
             library = ExpertLibrary.get_expert_library(library)
+
+        config_hash = config_hash or PhatgooseTransformConfig().save_name
 
         # try to fetch auxiliary data
         output = library.get_auxiliary_data(data_type=config_hash)
@@ -790,7 +796,7 @@ class PhatgooseTransform(HiddenStateComputer):
 
 
 @dataclass
-class ArrowConfig(LibraryTransformConfig):
+class ArrowTransformConfig(LibraryTransformConfig):
     ab_only: bool = True
     scale: bool = False  # If True, scale by eigenvalue
     tie_params: str = (
@@ -799,14 +805,14 @@ class ArrowConfig(LibraryTransformConfig):
     tie_op: str = "concat"  # or "sum"
 
 
-@LibraryTransform.register("arrow", ArrowConfig)
+@LibraryTransform.register("arrow", ArrowTransformConfig)
 class ArrowTransform(LibraryTransform):
     """
     Given a library of experts, extract the input direction most affected by the linear transforms
     """
 
-    def __init__(self, config: ArrowConfig = None):
-        super().__init__(config or ArrowConfig())
+    def __init__(self, config: ArrowTransformConfig = None):
+        super().__init__(config or ArrowTransformConfig())
 
     def _maybe_scale(self, vectors, eigvals):
         """
@@ -867,6 +873,8 @@ class ArrowTransform(LibraryTransform):
         """
         if not isinstance(library, ExpertLibrary):
             library = ExpertLibrary.get_expert_library(library)
+
+        config_hash = config_hash or ArrowTransformConfig().save_name
 
         # try to fetch auxiliary data
         protos = library.get_auxiliary_data(data_type=config_hash + "_protos")
