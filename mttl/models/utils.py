@@ -147,6 +147,7 @@ def model_loader_helper(
         logger.info(f"Loading phi-2 model from {os.environ['PHI_PATH']}")
     else:
         model_object = None
+        exception = None
         for klass in [AutoModelForCausalLM, AutoModelForSeq2SeqLM]:
             try:
                 model_object = klass.from_pretrained(
@@ -158,7 +159,9 @@ def model_loader_helper(
                     torch_dtype=torch_dtype,
                 )
                 break
-            except:
+            except Exception as e:
+                logger.warning(f"Couldn't load {model_name}! Exception: {e}")
+                exception = e
                 continue
         if model_object is None:
             raise ValueError(f"Couldn't load {model_name}!")

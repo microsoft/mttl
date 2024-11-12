@@ -121,16 +121,13 @@ def test_arrow_with_tiedlora(tmp_path, create_dummy_expert):
 
 
 def test_phatgoose(tiny_flan, tmp_path, create_dummy_expert, monkeypatch):
-    # disable wandb
-    monkeypatch.setenv("WANDB_MODE", "disabled")
-
     dataset, dataset_id = tiny_flan
 
     config = ExpertConfig(
         **{
             "model_modifier": "lora",
-            "lora_rank": 32,
-            "lora_alpha": 16,
+            "lora_rank": 4,
+            "lora_alpha": 1,
             "warmup_steps": 0,
             "modify_layers": "k_proj|v_proj|q_proj|o_proj",
             "trainable_param_names": ".*lora_[ab].*",
@@ -156,7 +153,6 @@ def test_phatgoose(tiny_flan, tmp_path, create_dummy_expert, monkeypatch):
 
     pg_config = PhatgooseConfig(n_steps=1, warmup_ratio=0.0, learning_rate=1e-2)
     phatgoose = PhatgooseTransform(pg_config)
-
     phatgoose.transform(library, persist=True, recompute=True, default_args=config)
 
     # now try to load a selector with the same config

@@ -479,6 +479,7 @@ class TrainingArgs(DataArgs):
                     task_names.append(task_name)
 
             self.finetune_task_name = ",".join(task_names)
+            self.finetune_task_path = None
 
         n_devices = torch.cuda.device_count()
         if n_devices > 1:

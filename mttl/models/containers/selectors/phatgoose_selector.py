@@ -86,9 +86,10 @@ class PhatgooseTrainerSelectorConfig(SelectorConfig):
 
 
 class SigmoidGate(nn.Module):
-    def __init__(self, input_dim, output_dim=1, **kwargs):
+    def __init__(self, input_dim, output_dim=1, device="cpu", **kwargs):
         super().__init__()
-        self.v = nn.Parameter(torch.zeros(output_dim, input_dim))
+
+        self.v = nn.Parameter(torch.zeros(output_dim, input_dim, device=device))
 
     def forward(self, x):
         return torch.sigmoid(torch.nn.functional.linear(x, self.v, bias=None))
@@ -130,7 +131,7 @@ class PhatgooseTrainerSelector(Selector):
     def on_add_expert(
         self, expert_name: str, expert_info: "ExpertInfo", is_default: bool = False
     ):
-        self.gates[expert_name] = SigmoidGate(self.input_dim)
+        self.gates[expert_name] = SigmoidGate(self.input_dim, device=self.device)
 
     def get_merging_weights(self, **selector_kwargs) -> Dict:
         raise ValueError(

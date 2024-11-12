@@ -7,7 +7,7 @@ import numpy as np
 import torch
 from torch import nn
 
-from mttl.logging import warn_once
+from mttl.logging import debug_once, warn_once
 from mttl.models.modifiers.base import MergeableModifierMixin, Modifier, ModifierConfig
 
 
@@ -392,7 +392,7 @@ class SkilledLoRA(LoRA):
 
         if n_skills == 1:
             # For Phatgoose, we have a single skill, but we still need a selector
-            warn_once(
+            debug_once(
                 f"You are using Skilled LoRA with only one skill. Make sure this is needed"
             )
 

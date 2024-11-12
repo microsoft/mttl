@@ -138,7 +138,9 @@ def apply_source_template(dataset, source_template):
 class FlatMultiTaskModule(DataModule):
     def setup_dataset(self):
         self.dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
-        n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
+        n_proc = min(
+            len(self.dataset), int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
+        )
 
         if "split" not in self.dataset.column_names["train"]:
             logger.warning(

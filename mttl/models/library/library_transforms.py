@@ -19,7 +19,11 @@ from tqdm import tqdm
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import logger
 from mttl.models.containers.lora_containers import ExpertContainer
+from mttl.models.containers.selectors.phatgoose_selector import (
+    PhatgooseTrainerSelectorConfig,
+)
 from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
+from mttl.models.get_optimizer import get_optimizer_and_scheduler
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.lightning.callbacks import LiveCheckpointCallback
@@ -31,60 +35,49 @@ from mttl.registrable import Registrable
 from mttl.serializable import Serializable
 
 
-def train_module(args: "ExpertConfig", module: "ExpertModule", dm):
-    loggers = get_pl_loggers(args)
-    callbacks = get_monitors(args)
+def train_phatgoose(args, model, datamodule):
+    import tqdm
 
-    monitor = "val/loss"
-    mode = "min"
-
-    checkpoint_callback = LiveCheckpointCallback(
-        dirpath=args.output_dir,
-        monitor=monitor,
-        save_last=True,
-        mode=mode,
+    (optimizer, scheduler), _ = get_optimizer_and_scheduler(
+        model, args, num_train_examples=len(datamodule.train_dataset)
     )
-    callbacks.append(checkpoint_callback)
+    iter_train = iter(datamodule.train_dataloader())
 
-    val_check_interval = args.eval_every
-    if val_check_interval == -1 or val_check_interval is None:
-        val_check_interval = None
-    else:
-        val_check_interval = args.gradient_accumulation_steps * args.eval_every
+    bar = tqdm.tqdm(range(args.total_steps))
+    running_loss = 0.0
+    for step in bar:
+        loss_accum = 0.0
+        model.train()
+        optimizer.zero_grad()
 
-        if val_check_interval > len(dm.train_dataloader()):
-            val_check_interval = len(dm.train_dataloader())
+        for micro_step in range(args.gradient_accumulation_steps):
+            try:
+                batch = next(iter_train)
+            except StopIteration:
+                iter_train = iter(datamodule.train_dataloader())
+                batch = next(iter_train)
 
-        if val_check_interval > args.total_steps and args.total_steps != -1:
-            val_check_interval = args.total_steps
+            with torch.autocast(
+                device_type=model.device.type,
+                dtype=model.dtype,
+            ):
+                batch = transfer_batch_to_device(batch, model.device)
+                loss = model.forward(**batch).loss
+                loss = loss / args.gradient_accumulation_steps
+                loss_accum += loss.detach()
+                loss.backward()
 
-    trainer = Trainer(
-        devices=1,
-        accelerator="cpu" if args.device_map == "cpu" else "gpu",
-        num_sanity_val_steps=0,
-        default_root_dir=args.output_dir,
-        max_epochs=args.num_train_epochs,
-        max_steps=args.total_steps,
-        gradient_clip_val=args.max_grad_norm,
-        strategy=args.compute_strategy,
-        callbacks=callbacks,
-        logger=loggers,
-        enable_checkpointing=False,
-        log_every_n_steps=args.gradient_accumulation_steps,
-        accumulate_grad_batches=args.gradient_accumulation_steps,
-        precision=args.precision,
-        val_check_interval=val_check_interval,
-    )
-
-    trainer.fit(module, dm)
-
-    checkpoint = (
-        checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
-    )
-
-    # reload the best/last model from the checkpoint
-    module.load_from_checkpoint(checkpoint)
-    return checkpoint
+        if loss_accum:
+            norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            running_loss += loss_accum.item()
+            optimizer.step()
+            scheduler.step()
+            if model.device.type == "cuda":
+                torch.cuda.synchronize()
+            bar.set_description_str(
+                f"Step {step + 1}/{args.total_steps}, Loss: {running_loss / (step + 1):.4f}, Lr: {scheduler.get_last_lr()[0]:.4f}"
+            )
+    return model
 
 
 class LibraryTransform(abc.ABC, Registrable):
@@ -633,9 +626,9 @@ class HiddenStateComputer(LibraryTransform):
 
 @dataclass
 class PhatgooseConfig(LibraryTransformConfig):
-    n_steps: int = 1000
+    n_steps: int = 200
     learning_rate: float = 3e-3
-    warmup_ratio: float = 0.1  # 0.9999999 # 0.1
+    warmup_ratio: float = 0.1
     micro_batch_size: int = 1
     batch_size: int = 1
 
@@ -657,7 +650,7 @@ class PhatgooseTransform(HiddenStateComputer):
         output = library.get_auxiliary_data(data_type=self.config.save_name)
 
         if len(output) != len(library):
-            logger.warn(
+            logger.warning(
                 "Found {} precomputed Phatgoose prototypes. Some experts might not have prototypes.".format(
                     len(output)
                 )
@@ -702,14 +695,8 @@ class PhatgooseTransform(HiddenStateComputer):
             if default_args is not None:
                 self._update_args(training_config, default_args)
 
-            training_config.router_selector = "phatgoose_trainer_selector"
             training_config.trainable_param_names = ".*selector.*"
-            training_config.logging_prefix = expert_name + "/"
             training_config.weight_decay = 0.0
-            # for training, we set this to true even if there is just a single expert.
-            # This ensures that we do (gate * AB * x) instead of ((gate * A) * (gate * B) * x)
-            training_config.lora_merge_after = True
-            training_config.eval_every = -1
             training_config.total_steps = self.config.n_steps
             training_config.learning_rate = self.config.learning_rate
             training_config.warmup_proportion = self.config.warmup_ratio
@@ -730,7 +717,16 @@ class PhatgooseTransform(HiddenStateComputer):
 
             logger.info("Training config: {}".format(vars(training_config)))
 
-            model = MultiExpertModule(**vars(training_config))
+            model = MultiExpertModel(
+                MultiExpertModelConfig(
+                    base_model=training_config.model,
+                    selector_config=PhatgooseTrainerSelectorConfig(
+                        lora_merge_after=True,
+                    ),
+                ),
+                precision=training_config.precision,
+                device_map="cuda" if torch.cuda.is_available() else "cpu",
+            )
             model.add_expert_instance(expert, is_default=True)
 
             # for checksum
@@ -745,34 +741,22 @@ class PhatgooseTransform(HiddenStateComputer):
                     frozen_sum += value.sum()
                     value.requires_grad = False
 
-            checkpoint = train_module(training_config, model, dm)
+            train_phatgoose(training_config, model, dm)
 
-            if (
-                training_config.compute_strategy
-                and training_config.compute_strategy != "deepspeed"
-            ):
-                from mttl.models.lightning.expert_module import MultiExpertModule
+            # for checksum
+            frozen_sum_after, unfrozen_sum_after = 0, 0
+            for key, value in model.state_dict().items():
+                if re.match(".*selector.gates.*.v", key):
+                    unfrozen_sum_after += value.sum()
+                else:
+                    frozen_sum_after += value.sum()
 
-                model_after = MultiExpertModule(**vars(training_config))
-                model_after.add_expert_instance(expert, is_default=True)
-                model_after.load_state_dict(
-                    torch.load(checkpoint, weights_only=False)["state_dict"]
-                )
-
-                # for checksum
-                frozen_sum_after, unfrozen_sum_after = 0, 0
-                for key, value in model_after.state_dict().items():
-                    if re.match(".*selector.gates.*.v", key):
-                        unfrozen_sum_after += value.sum()
-                    else:
-                        frozen_sum_after += value.sum()
-
-                assert (
-                    frozen_sum == frozen_sum_after
-                ), "Frozen params changed during training"
-                assert (
-                    unfrozen_sum != unfrozen_sum_after
-                ), "Unfrozen params did not change during training"
+            assert (
+                frozen_sum == frozen_sum_after
+            ), "Frozen params changed during training"
+            assert (
+                unfrozen_sum != unfrozen_sum_after
+            ), "Unfrozen params did not change during training"
 
             # extract prototypes
             prototypes = {}

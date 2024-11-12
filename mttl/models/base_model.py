@@ -178,6 +178,10 @@ class BaseExpertModel(torch.nn.Module, Registrable, PushToHubMixin):
         return self.model.device
 
     @property
+    def dtype(self):
+        return self.model.dtype
+
+    @property
     def generation_config(self):
         return self.model.generation_config
 
