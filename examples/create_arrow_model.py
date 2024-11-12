@@ -5,7 +5,7 @@ import click
 from mttl.models.containers.selectors import ArrowSelectorConfig
 from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
 from mttl.models.library.expert_library import ExpertLibrary
-from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
+from mttl.models.library.library_transforms import ArrowTransform, ArrowTransformConfig
 
 
 @click.command()
@@ -30,7 +30,7 @@ def make_arrow(experts, push_to_hub):
         library.add_expert_from_ckpt(path)
 
     # compute arrow prototypes and store them in the library
-    arrow_config = ArrowConfig()
+    arrow_config = ArrowTransformConfig()
     transform = ArrowTransform(arrow_config)
     transform.transform(library, persist=True)
 
