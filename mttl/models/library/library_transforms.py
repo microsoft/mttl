@@ -622,14 +622,11 @@ class HiddenStateComputer(LibraryTransform):
 
 @dataclass
 class PhatgooseConfig(LibraryTransformConfig):
-    n_steps: int = 100
+    n_steps: int = 200
     learning_rate: float = 3e-3
-    warmup_ratio: float = 0.1  # 0.9999999 # 0.1
+    warmup_ratio: float = 0.1
     micro_batch_size: int = 1
     batch_size: int = 1
-
-    def __post_init__(self):
-        self.gradient_accumulation_steps = self.batch_size // self.micro_batch_size
 
 
 @LibraryTransform.register("phatgoose", PhatgooseConfig)
@@ -699,7 +696,7 @@ class PhatgooseTransform(HiddenStateComputer):
             training_config.train_batch_size = self.config.batch_size
             training_config.micro_batch_size = self.config.micro_batch_size
             training_config.gradient_accumulation_steps = (
-                self.config.gradient_accumulation_steps
+                self.config.batch_size // self.config.micro_batch_size
             )
             training_config.dataset = expert.expert_info.dataset
 
