@@ -43,7 +43,9 @@ def train_phatgoose(args, model, datamodule):
     )
     iter_train = iter(datamodule.train_dataloader())
 
-    for step in tqdm.tqdm(range(args.total_steps)):
+    bar = tqdm.tqdm(range(args.total_steps))
+    running_loss = 0.0
+    for step in bar:
         loss_accum = 0.0
         model.train()
         optimizer.zero_grad()
@@ -67,11 +69,12 @@ def train_phatgoose(args, model, datamodule):
 
         if loss_accum:
             norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            scheduler.step()
+            running_loss += loss_accum.item()
             optimizer.step()
+            scheduler.step()
             torch.cuda.synchronize()
-            logger.debug(
-                f"Step {step}/{args.total_steps}, Loss: {loss_accum.item():.4f}"
+            bar.set_description_str(
+                f"Step {step + 1}/{args.total_steps}, Loss: {running_loss / (step + 1):.4f}, Lr: {scheduler.get_last_lr()[0]:.4f}"
             )
     return model
 
@@ -628,6 +631,9 @@ class PhatgooseConfig(LibraryTransformConfig):
     micro_batch_size: int = 1
     batch_size: int = 1
 
+    def __post_init__(self):
+        self.gradient_accumulation_steps = self.batch_size // self.micro_batch_size
+
 
 @LibraryTransform.register("phatgoose", PhatgooseConfig)
 class PhatgooseTransform(HiddenStateComputer):
@@ -643,7 +649,7 @@ class PhatgooseTransform(HiddenStateComputer):
         output = library.get_auxiliary_data(data_type=self.config.save_name)
 
         if len(output) != len(library):
-            logger.warn(
+            logger.warning(
                 "Found {} precomputed Phatgoose prototypes. Some experts might not have prototypes.".format(
                     len(output)
                 )
@@ -696,7 +702,7 @@ class PhatgooseTransform(HiddenStateComputer):
             training_config.train_batch_size = self.config.batch_size
             training_config.micro_batch_size = self.config.micro_batch_size
             training_config.gradient_accumulation_steps = (
-                self.config.batch_size // self.config.micro_batch_size
+                self.config.gradient_accumulation_steps
             )
             training_config.dataset = expert.expert_info.dataset
 
@@ -717,7 +723,7 @@ class PhatgooseTransform(HiddenStateComputer):
                         lora_merge_after=True,
                     ),
                 ),
-                precision="bf16",
+                precision=training_config.precision,
                 device_map="cuda",
             )
             model.add_expert_instance(expert, is_default=True)

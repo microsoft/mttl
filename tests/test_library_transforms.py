@@ -153,7 +153,6 @@ def test_phatgoose(tiny_flan, tmp_path, create_dummy_expert, monkeypatch):
 
     pg_config = PhatgooseConfig(n_steps=1, warmup_ratio=0.0, learning_rate=1e-2)
     phatgoose = PhatgooseTransform(pg_config)
-
     phatgoose.transform(library, persist=True, recompute=True, default_args=config)
 
     # now try to load a selector with the same config

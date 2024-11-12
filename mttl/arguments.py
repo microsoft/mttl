@@ -461,7 +461,10 @@ class TrainingArgs(DataArgs):
         self.train_batch_size = self.micro_batch_size
 
         if self.finetune_task_path is not None:
-            if not os.path.exists(self.finetune_task_path):
+            if (
+                not os.path.exists(self.finetune_task_path)
+                and self.finetune_task_name is None
+            ):
                 raise ValueError(f"Task path {self.finetune_task_path} does not exist!")
 
             # resolve task keys
@@ -479,6 +482,7 @@ class TrainingArgs(DataArgs):
                     task_names.append(task_name)
 
             self.finetune_task_name = ",".join(task_names)
+            self.finetune_task_path = None
 
         n_devices = torch.cuda.device_count()
         if n_devices > 1:
