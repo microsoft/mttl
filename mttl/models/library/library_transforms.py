@@ -36,7 +36,12 @@ from mttl.serializable import Serializable
 
 
 def train_phatgoose(args, model, datamodule):
+    """Mini-training loop for phatgoose."""
     import tqdm
+
+    torch.manual_seed(args.seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(args.seed)
 
     (optimizer, scheduler), _ = get_optimizer_and_scheduler(
         model, args, num_train_examples=len(datamodule.train_dataset)
@@ -631,8 +636,9 @@ class PhatgooseConfig(LibraryTransformConfig):
     n_steps: int = 100
     learning_rate: float = 1e-3
     warmup_ratio: float = 0.1
-    micro_batch_size: int = 1
-    batch_size: int = 1
+    micro_batch_size: int = 4
+    batch_size: int = 4
+    seed: int = 42
 
 
 @LibraryTransform.register("phatgoose", PhatgooseConfig)
@@ -702,9 +708,6 @@ class PhatgooseTransform(HiddenStateComputer):
             training_config.warmup_proportion = self.config.warmup_ratio
             training_config.train_batch_size = self.config.batch_size
             training_config.micro_batch_size = self.config.micro_batch_size
-            training_config.gradient_accumulation_steps = (
-                self.batch_size // self.micro_batch_size
-            )
             training_config.dataset = expert.expert_info.dataset
 
             if expert.expert_info.expert_task_name:
