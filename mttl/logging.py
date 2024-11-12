@@ -21,6 +21,11 @@ def warn_once(msg: str, **kwargs):
     logger.warning(msg, **kwargs)
 
 
+@lru_cache
+def debug_once(msg: str, **kwargs):
+    logger.debug(msg, **kwargs)
+
+
 def setup_logging(log_dir: str = None):
     logging.basicConfig(
         format="%(asctime)s %(levelname)s --> %(message)s",

@@ -266,6 +266,7 @@ class Selector(nn.Module, Registrable):
         self._task_to_expert_name = {}
         # dependency injection filled from ExpertContainer
         self.__layer_name__ = None
+        self.device = None
 
     @property
     def expert_names(self) -> list:
@@ -326,7 +327,6 @@ class Selector(nn.Module, Registrable):
 
     @property
     def routing_infos(self):
-
         info_container = self.info_container
         if not info_container:
             return None

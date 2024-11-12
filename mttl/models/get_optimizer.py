@@ -123,21 +123,19 @@ def get_optimizer_and_scheduler(model, args, num_train_examples, no_decay=None):
             math.ceil(num_train_examples / global_bs) * args.num_train_epochs
         )
 
-        if args.warmup_steps == -1 or args.warmup_proportion > 0.0:
-            logger.warning(
-                "Warmup proportion is set to {}, has priority over warmup_steps".format(
-                    args.warmup_proportion
-                )
+    if args.warmup_steps == -1 or args.warmup_proportion > 0.0:
+        logger.warning(
+            "Warmup proportion is set to {}, has priority over warmup_steps".format(
+                args.warmup_proportion
             )
+        )
 
-            args.warmup_steps = int(args.warmup_proportion * args.total_steps)
+        args.warmup_steps = int(args.warmup_proportion * args.total_steps)
 
-        logger.info("Optimizer setup:")
-        logger.info("Total steps: {}".format(args.total_steps))
-        logger.info("Warmup steps: {}".format(args.warmup_steps))
-        logger.info("Scheduler: {}".format(args.scheduler))
-
-        scheduler = get_scheduler(optimizer, args)
+    logger.info("Optimizer setup:")
+    logger.info("Total steps: {}".format(args.total_steps))
+    logger.info("Warmup steps: {}".format(args.warmup_steps))
+    logger.info("Scheduler: {}".format(args.scheduler))
 
     optimizer, trainable_param_names = get_optimizer(model, args, no_decay=no_decay)
     scheduler = get_scheduler(optimizer, args)
