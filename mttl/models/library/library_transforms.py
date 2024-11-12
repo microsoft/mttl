@@ -724,7 +724,7 @@ class PhatgooseTransform(HiddenStateComputer):
                     ),
                 ),
                 precision=training_config.precision,
-                device_map="cuda",
+                device_map="cuda" if torch.cuda.is_available() else "cpu",
             )
             model.add_expert_instance(expert, is_default=True)
 
