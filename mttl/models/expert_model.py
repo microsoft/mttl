@@ -251,7 +251,7 @@ class MultiExpertMixin:
     def add_experts_from_library(self, library):
         import concurrent.futures
 
-        import tqdm
+        from tqdm.auto import tqdm
 
         if type(library) == str:
             from mttl.models.library.expert_library import ExpertLibrary
@@ -269,7 +269,7 @@ class MultiExpertMixin:
                 futures.append(executor.submit(partial(add_module, self), element))
 
             # Progress bar setup
-            with tqdm.tqdm(
+            with tqdm(
                 total=len(library), desc="Adding experts...", unit="expert"
             ) as progress_bar:
                 for result in concurrent.futures.as_completed(futures):

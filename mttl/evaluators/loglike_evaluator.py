@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-import tqdm
+from tqdm.auto import tqdm
 
 from mttl.evaluators.base import Evaluator, switch_to_eval_mode
 from mttl.logging import logger
@@ -31,7 +31,7 @@ class LogLikeEvaluator(Evaluator):
         if self.use_vllm:
             return self.evaluate_with_vllm(model, dataloader, num_batches, verbose)
 
-        pbar = tqdm.tqdm(
+        pbar = tqdm(
             enumerate(dataloader),
             total=len(dataloader),
         )

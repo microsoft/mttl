@@ -277,7 +277,7 @@ class GPT:
         progress=True,
         **kwargs,
     ):
-        import tqdm
+        from tqdm.auto import tqdm
 
         if type(inputs) is not list:
             inputs = [inputs]
@@ -286,7 +286,7 @@ class GPT:
         generation_options = self.generation_options.copy()
         generation_options.update(**kwargs)
 
-        progress_bar = tqdm.tqdm(inputs, disable=not progress)
+        progress_bar = tqdm(inputs, disable=not progress)
 
         if self.engine in (
             "gpt-3.5-turbo",

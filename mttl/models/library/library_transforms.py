@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from pytorch_lightning import Trainer
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import logger
@@ -33,51 +33,7 @@ from mttl.models.monitors import get_monitors
 from mttl.models.utils import transfer_batch_to_device
 from mttl.registrable import Registrable
 from mttl.serializable import Serializable
-
-
-def train_phatgoose(args, model, datamodule):
-    import tqdm
-
-    (optimizer, scheduler), _ = get_optimizer_and_scheduler(
-        model, args, num_train_examples=len(datamodule.train_dataset)
-    )
-    iter_train = iter(datamodule.train_dataloader())
-
-    bar = tqdm.tqdm(range(args.total_steps))
-    running_loss = 0.0
-    for step in bar:
-        loss_accum = 0.0
-        model.train()
-        optimizer.zero_grad()
-
-        for micro_step in range(args.gradient_accumulation_steps):
-            try:
-                batch = next(iter_train)
-            except StopIteration:
-                iter_train = iter(datamodule.train_dataloader())
-                batch = next(iter_train)
-
-            with torch.autocast(
-                device_type=model.device.type,
-                dtype=model.dtype,
-            ):
-                batch = transfer_batch_to_device(batch, model.device)
-                loss = model.forward(**batch).loss
-                loss = loss / args.gradient_accumulation_steps
-                loss_accum += loss.detach()
-                loss.backward()
-
-        if loss_accum:
-            norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            running_loss += loss_accum.item()
-            optimizer.step()
-            scheduler.step()
-            if model.device.type == "cuda":
-                torch.cuda.synchronize()
-            bar.set_description_str(
-                f"Step {step + 1}/{args.total_steps}, Loss: {running_loss / (step + 1):.4f}, Lr: {scheduler.get_last_lr()[0]:.4f}"
-            )
-    return model
+from mttl.train_utils import train_model
 
 
 class LibraryTransform(abc.ABC, Registrable):
@@ -741,7 +697,7 @@ class PhatgooseTransform(HiddenStateComputer):
                     frozen_sum += value.sum()
                     value.requires_grad = False
 
-            train_phatgoose(training_config, model, dm)
+            train_model(training_config, model, dm)
 
             # for checksum
             frozen_sum_after, unfrozen_sum_after = 0, 0
