@@ -30,10 +30,10 @@ from mttl.models.lightning.callbacks import LiveCheckpointCallback
 from mttl.models.lightning.loggers import get_pl_loggers
 from mttl.models.modifiers.base import get_target_2_source_param_mapping
 from mttl.models.monitors import get_monitors
+from mttl.models.train_utils import train_model
 from mttl.models.utils import transfer_batch_to_device
 from mttl.registrable import Registrable
 from mttl.serializable import Serializable
-from mttl.train_utils import train_model
 
 
 class LibraryTransform(abc.ABC, Registrable):
