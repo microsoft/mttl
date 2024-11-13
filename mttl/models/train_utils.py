@@ -88,7 +88,7 @@ def train_model(
                 torch.cuda.synchronize()
 
             bar.set_description_str(
-                f"Step {step + 1}/{args.total_steps}, Loss: {running_loss / (step + 1):.4f}, Lr: {scheduler.get_last_lr()[0]:.4f}"
+                f"Step {step + 1}/{args.total_steps}, Loss: {running_loss / (step + 1):.4f}, Lr: {scheduler.get_last_lr()[0]:.4f}, Val: {best_val_loss:.4f}"
             )
 
         # eval and save best model
