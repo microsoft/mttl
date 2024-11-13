@@ -16,9 +16,12 @@ def compute_arrow_embeddings(
     add_base_proto=False,
     recompute_prototypes=False,
 ) -> str:
-    from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
+    from mttl.models.library.library_transforms import (
+        ArrowTransform,
+        ArrowTransformConfig,
+    )
 
-    cfg = ArrowConfig(
+    cfg = ArrowTransformConfig(
         name=selector_data_id,
         ab_only=ab_only,
         tie_params=tie_params or "default",
@@ -48,8 +51,6 @@ class ArrowSelector(PerTokenSelector):
     @artifacts_cache
     def load_from_library(cls, config):
         """Fetches prototypes from the library."""
-        from mttl.models.library.library_transforms import ArrowConfig, ArrowTransform
+        from mttl.models.library.library_transforms import ArrowTransform
 
-        return ArrowTransform(ArrowConfig(name=config.selector_data_id)).fetch(
-            config.library_id
-        )
+        return ArrowTransform.fetch(config.library_id, config.selector_data_id)

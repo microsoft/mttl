@@ -571,7 +571,7 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
             if isinstance(selector_config, LoadableSelectorConfig):
                 selector_config.library_id = repo_id
 
-            elif isinstance(selector_config, dict):
+            elif isinstance(selector_config, MultiSelectorConfig):
                 for modifier_name, cfg in selector_config.items():
                     # inject the library id if it is None
                     if (

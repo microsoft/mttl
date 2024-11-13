@@ -28,11 +28,11 @@ def compute_phatgoose_embeddings(
 ) -> str:
     """Computes Phatgoose embeddings for the given library."""
     from mttl.models.library.library_transforms import (
-        PhatgooseConfig,
         PhatgooseTransform,
+        PhatgooseTransformConfig,
     )
 
-    cfg = PhatgooseConfig(
+    cfg = PhatgooseTransformConfig(
         n_steps=n_steps_pg,
         learning_rate=learning_rate_pg,
         name=selector_data_id,
@@ -70,14 +70,9 @@ class PhatgooseSelector(PerTokenSelector):
     @artifacts_cache
     def load_from_library(cls, config):
         """Fetches prototypes from the library."""
-        from mttl.models.library.library_transforms import (
-            PhatgooseConfig,
-            PhatgooseTransform,
-        )
+        from mttl.models.library.library_transforms import PhatgooseTransform
 
-        return PhatgooseTransform(PhatgooseConfig(name=config.selector_data_id)).fetch(
-            config.library_id
-        )
+        return PhatgooseTransform.fetch(config.library_id, config.selector_data_id)
 
 
 @dataclass
