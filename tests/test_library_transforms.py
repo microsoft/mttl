@@ -129,7 +129,7 @@ def test_phatgoose(tiny_flan, tmp_path, create_dummy_expert, monkeypatch):
             "warmup_steps": 0,
             "modify_layers": "k_proj|v_proj|q_proj|o_proj",
             "trainable_param_names": ".*lora_[ab].*",
-            "output_dir": tmp_path,
+            "output_dir": str(tmp_path),
             "precision": "32",
             "model": "EleutherAI/gpt-neo-125m",
             "dataset": dataset_id,
