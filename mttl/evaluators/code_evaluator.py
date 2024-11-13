@@ -1,7 +1,7 @@
 import os
 
-import tqdm
 from evaluate import load
+from tqdm.auto import tqdm
 
 from mttl.evaluators.base import GenerativeEvaluator, switch_to_eval_mode
 from mttl.logging import logger
@@ -71,7 +71,7 @@ class CodeEvaluator(GenerativeEvaluator):
         if self.use_vllm:
             return self.evaluate_with_vllm(model, dataloader, num_batches, verbose)
 
-        pbar = tqdm.tqdm(
+        pbar = tqdm(
             enumerate(dataloader),
             total=len(dataloader),
         )

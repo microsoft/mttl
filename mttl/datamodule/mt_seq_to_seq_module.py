@@ -96,10 +96,10 @@ def augment_few_shot(
     dataset, num_samples, tokenizer=None, max_input_length=None, seed=42
 ):
     """Augment the dataset with few-shot examples."""
-    import tqdm
+    from tqdm.auto import tqdm
 
     augmented_dataset = []
-    for source in tqdm.tqdm(dataset.unique("task_name")):
+    for source in tqdm(dataset.unique("task_name")):
         augmented_dataset.append(
             Dataset.from_list(
                 augment_few_shot_task(

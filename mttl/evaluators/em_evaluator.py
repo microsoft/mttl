@@ -1,5 +1,5 @@
 import numpy as np
-import tqdm
+from tqdm.auto import tqdm
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import (
@@ -46,7 +46,7 @@ class EMEvaluator(GenerativeEvaluator):
         if self.use_vllm:
             return self.evaluate_with_vllm(model, dataloader, num_batches, verbose)
 
-        pbar = tqdm.tqdm(
+        pbar = tqdm(
             enumerate(dataloader),
             total=len(dataloader),
         )

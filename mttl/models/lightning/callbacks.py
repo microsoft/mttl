@@ -6,12 +6,12 @@ from abc import ABC, abstractmethod
 
 import pytorch_lightning as pl
 import torch
-import tqdm
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning import callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch.optim import Optimizer
+from tqdm.auto import tqdm
 from transformers.utils import ModelOutput
 
 import wandb
@@ -232,7 +232,7 @@ class LossCallback(cb.Callback):
 
         total_loss, deno = 0.0, 0.0
         with torch.no_grad():
-            for i, batch in tqdm.tqdm(
+            for i, batch in tqdm(
                 enumerate(self.dataloader),
                 total=len(self.dataloader),
                 desc=f"Test {self.name}",
