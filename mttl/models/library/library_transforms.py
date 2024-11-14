@@ -703,7 +703,6 @@ class PhatgooseTransform(HiddenStateComputer):
 
             train_model(training_config, model, dm)
 
-            breakpoint()
             # for checksum
             frozen_sum_after, unfrozen_sum_after = 0, 0
             for key, value in model.state_dict().items():

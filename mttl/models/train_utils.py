@@ -4,6 +4,7 @@ import torch
 from tqdm.auto import tqdm
 
 from mttl.datamodule.base import DataModule
+from mttl.logging import logger
 from mttl.models.base_model import WEIGHTS_NAME, BaseExpertModel
 from mttl.models.get_optimizer import get_optimizer_and_scheduler
 from mttl.models.utils import transfer_batch_to_device
@@ -34,6 +35,10 @@ def train_model(
     do_test=False,
 ) -> BaseExpertModel:
     """Mini-training loop."""
+    import copy
+
+    args = copy.deepcopy(args)
+
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(args.seed)
@@ -84,9 +89,9 @@ def train_model(
 
             bar.set_description_str(
                 f"Step {step + 1}/{args.total_steps},"
-                " Loss: {running_loss / (step + 1):.4f},"
-                " Lr: {scheduler.get_last_lr()[0]:.4f},"
-                " Val: {best_val_loss:.4f}"
+                f" Loss: {running_loss / (step + 1):.4f},"
+                f" Lr: {scheduler.get_last_lr()[0]:.4f},"
+                f" Val: {best_val_loss:.4f}"
             )
 
         # eval and save best model
@@ -106,6 +111,8 @@ def train_model(
     if args.output_dir and os.path.exists(
         args.output_dir + f"/best_model/{WEIGHTS_NAME}"
     ):
+        logger.info("Reloading best model!")
+
         model.load_state_dict(
             torch.load(
                 args.output_dir + f"/best_model/{WEIGHTS_NAME}", weights_only=True
@@ -116,6 +123,6 @@ def train_model(
     # do test evaluation
     if do_test and datamodule.test_dataset:
         test_loss = evaluate_model(datamodule.test_dataloader(), model)
-        print(f"Test loss: {test_loss:.4f}")
+        logger.info(f"Test loss: {test_loss:.4f}")
 
     return model
