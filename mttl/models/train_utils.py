@@ -45,11 +45,6 @@ def train_model(
     num_train_steps = len(dataloader)
     iter_train = iter(dataloader)
 
-    if args.total_steps == -1:
-        if args.num_train_epochs == -1:
-            raise ValueError("Either total_steps or num_train_epochs must be defined.")
-        args.total_steps = args.num_train_epochs * num_train_steps
-
     if args.eval_every_n_epoch != -1:
         args.eval_every = num_train_steps * args.eval_every_n_epoch
 
@@ -88,7 +83,10 @@ def train_model(
                 torch.cuda.synchronize()
 
             bar.set_description_str(
-                f"Step {step + 1}/{args.total_steps}, Loss: {running_loss / (step + 1):.4f}, Lr: {scheduler.get_last_lr()[0]:.4f}, Val: {best_val_loss:.4f}"
+                f"Step {step + 1}/{args.total_steps},"
+                " Loss: {running_loss / (step + 1):.4f},"
+                " Lr: {scheduler.get_last_lr()[0]:.4f},"
+                " Val: {best_val_loss:.4f}"
             )
 
         # eval and save best model
