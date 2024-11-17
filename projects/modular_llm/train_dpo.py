@@ -37,34 +37,6 @@ from projects.modular_llm.src.transfer_matrix import TransferMatrixConfig
 from projects.modular_llm.src.transfer_matrix import run_eval as produce_transfer_matrix
 
 
-def create_transfer_matrix(args, checkpoint):
-    ########################
-    # create transfer matrix
-    config = TransferMatrixConfig()
-    for k, v in vars(args).items():
-        if k in vars(config):
-            setattr(config, k, v)
-    config.eval_base = False
-    config.eval_metric = "rougeL"
-
-    expert: Expert = load_expert(checkpoint)
-    expert.expert_info.expert_name = str(args.finetune_task_name)
-    expert.expert_info.expert_task_name = str(args.finetune_task_name)
-    temp_dir = TemporaryDirectory()
-    destination = temp_dir.name
-    LocalExpertLibrary.from_expert_dict({"checkpoint": expert}, destination=destination)
-    config.library_id = destination
-    config.finetune_task_name = (
-        args.finetune_task_name.split(",")
-        if not isinstance(args.finetune_task_name, list)
-        else args.finetune_task_name
-    )
-    if len(config.finetune_task_name) < 50:
-        produce_transfer_matrix(config, debug=False)
-    ########################
-    temp_dir.cleanup()
-
-
 def run_multitask(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
 
@@ -231,9 +203,6 @@ def run_multitask(args: ExpertConfig):
                     raise ValueError("Model class not recognized")
 
         # upload_library(expert_library, module)
-
-        if args.create_transfer_matrix:
-            create_transfer_matrix(args, checkpoint)
 
 
 if __name__ == "__main__":
