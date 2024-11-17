@@ -9,18 +9,15 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from typing import Callable
 
-from mttl.callbacks import LiveCheckpointCallback, RougeCallback
-from mttl.models.expert_config import ExpertConfig
-from mttl.models.expert_model import ExpertModel as ExpertTrainer
-from mttl.models.expert_model import MoEModel as MoETrainer
-from mttl.models.expert_model import MultiExpertModel
+from mttl.arguments import FinetuneConfig
+from mttl.datamodule.base import get_datamodule
+from mttl.logging import logger, setup_logging
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import (
     ExpertLibrary,
     HFExpertLibrary,
     LocalExpertLibrary,
     VirtualLocalLibrary,
-    retry,
 )
 from mttl.models.library.library_transforms import (
     SVDEmbeddingTransform,
@@ -28,18 +25,18 @@ from mttl.models.library.library_transforms import (
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
 )
+from mttl.models.library.retrievers import RandomRetriever, SVDEmbeddingRetriever
+from mttl.models.lightning.callbacks import (
+    DownstreamEvalCallback,
+    LiveCheckpointCallback,
+    RougeCallback,
+)
+from mttl.models.lightning.expert_module import ExpertModule as ExpertModule
+from mttl.models.lightning.expert_module import MoEModule
+from mttl.models.lightning.loggers import get_pl_loggers
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.monitors import get_monitors
-from mttl.utils import (
-    get_checkpoint_path,
-    get_pl_loggers,
-    logger,
-    remote_login,
-    setup_logging,
-)
-from projects.modular_llm.src.callbacks import DownstreamEvalCallback
-from projects.modular_llm.src.retrievers import RandomRetriever, SVDEmbeddingRetriever
-from projects.modular_llm.utils import get_datamodule
+from mttl.utils import get_checkpoint_path, remote_login, retry
 
 FINETUNE_FUNCTIONS: dict[str, Callable] = {}
 
@@ -76,7 +73,7 @@ def get_task_expert(task, library):
 
 
 def load_expert_from_checkpoint(checkpoint):
-    ckpt = torch.load(checkpoint)
+    ckpt = torch.load(checkpoint, weights_only=False)
     if "expert_dumps" in ckpt:
         expert_dumps = ckpt["expert_dumps"]
         expert: Expert = Expert.fromdict(expert_dumps)
@@ -85,25 +82,23 @@ def load_expert_from_checkpoint(checkpoint):
     return expert
 
 
-def prepare_expert_lib(args: ExpertConfig, lib_location) -> LocalExpertLibrary:
+def prepare_expert_lib(args: FinetuneConfig, lib_location) -> LocalExpertLibrary:
     exclude_selection = (
         args.remove_experts.split(",") if args.remove_experts is not None else None
     )
-    library = LocalExpertLibrary.from_expert_library(
-        HFExpertLibrary(args.library_id, exclude_selection=exclude_selection),
-        repo_id=lib_location,
-    )
+    library = HFExpertLibrary(args.library_id, exclude_selection=exclude_selection)
+    library = library.clone(repo_id="local://" + lib_location)
     return library
 
 
-def create_mean_expert(args: ExpertConfig, library: ExpertLibrary = None) -> Expert:
+def create_mean_expert(args: FinetuneConfig, library: ExpertLibrary = None) -> Expert:
     if library is None:
         library = args.library_id
 
     return WeightedLinearMerge(WeightedLinearMergeConfig()).transform(library)
 
 
-def retrieve(args: ExpertConfig, task, k, retrieve_with="random"):
+def retrieve(args: FinetuneConfig, task, k, retrieve_with="random"):
     if retrieve_with == "random":
         k = args.sk
         retriever = RandomRetriever(args, sk=k)
@@ -154,7 +149,7 @@ def retrieve(args: ExpertConfig, task, k, retrieve_with="random"):
 
 
 @register_finetune_func("nevergrad_randretr")
-def finetune_with_nevergrad(args: ExpertConfig, dm):
+def finetune_with_nevergrad(args: FinetuneConfig, dm):
     """
     LoraHub baselines
     """
@@ -166,7 +161,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
         wandb.config.update(args)
 
     from mttl.evaluators.rouge_evaluator import RougeEvaluator
-    from projects.modular_llm.src.nevergrad_opt import NGRoutingOptimizer
+    from mttl.models.nevergrad_opt import NGRoutingOptimizer
 
     library = retrieve(args, args.finetune_task_name, args.sk, retrieve_with="random")
     assert (
@@ -200,7 +195,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
 
 
 @register_finetune_func("nevergrad")
-def finetune_with_nevergrad(args: ExpertConfig, dm):
+def finetune_with_nevergrad(args: FinetuneConfig, dm):
     """
     LoraHub baselines
     """
@@ -212,7 +207,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
         wandb.config.update(args)
 
     from mttl.evaluators.rouge_evaluator import RougeEvaluator
-    from projects.modular_llm.src.nevergrad_opt import NGRoutingOptimizer
+    from mttl.models.nevergrad_opt import NGRoutingOptimizer
 
     lib_location = f"/tmp/{args.library_id}"
     os.makedirs(lib_location, exist_ok=True)
@@ -248,7 +243,7 @@ def finetune_with_nevergrad(args: ExpertConfig, dm):
 
 
 @register_finetune_func("lib_mu")
-def finetune_lib_mu(args: ExpertConfig, dm):
+def finetune_lib_mu(args: FinetuneConfig, dm):
     """
     1. Averages the library to a single expert
     2. Fine-tunes this expert on the downstream task
@@ -265,7 +260,7 @@ def finetune_lib_mu(args: ExpertConfig, dm):
 
 
 @register_finetune_func("lib_mu_randretr")
-def finetune_lib_mu_with_rand_retrieval(args: ExpertConfig, dm):
+def finetune_lib_mu_with_rand_retrieval(args: FinetuneConfig, dm):
     """
     1. Retrieves randomly args.sk experts from the library
     2. Averages the library to a single expert
@@ -286,7 +281,7 @@ def finetune_lib_mu_with_rand_retrieval(args: ExpertConfig, dm):
 
 
 @register_finetune_func("lib_mu_svdretr")
-def finetune_lib_mu_with_svd_retrieval(args: ExpertConfig, dm):
+def finetune_lib_mu_with_svd_retrieval(args: FinetuneConfig, dm):
     """
     1. Retrieves randomly args.sk experts from the library using SVD embeddings
     2. Averages the library to a single expert
@@ -307,7 +302,7 @@ def finetune_lib_mu_with_svd_retrieval(args: ExpertConfig, dm):
 
 
 @register_finetune_func("polylib_full")
-def finetune_polylib_full(args: ExpertConfig, dm):
+def finetune_polylib_full(args: FinetuneConfig, dm):
     """
     Tunes selector and experts on downstream task.
 
@@ -320,7 +315,7 @@ def finetune_polylib_full(args: ExpertConfig, dm):
     )
     # args.router_selector = "poly_router"
     assert args.router_selector is not None
-    module = MoETrainer(**vars(args), device_map="auto")
+    module = MoEModule(**vars(args), device_map="auto")
 
     for n, p in module.named_parameters():
         if "selector" in n:
@@ -331,9 +326,9 @@ def finetune_polylib_full(args: ExpertConfig, dm):
 
 
 @register_finetune_func("polylib_uniform")
-def finetune_polylib_full(args: ExpertConfig, dm):
+def finetune_polylib_full(args: FinetuneConfig, dm):
     args.router_selector = "uniform"
-    module = MoETrainer(**vars(args), device_map="auto")
+    module = MoEModule(**vars(args), device_map="auto")
 
     # for n, p in module.named_parameters():
     #     if "selector" in n:
@@ -344,7 +339,7 @@ def finetune_polylib_full(args: ExpertConfig, dm):
 
 
 @register_finetune_func("polylib_selector")
-def finetune_polylib_sel(args: ExpertConfig, dm):
+def finetune_polylib_sel(args: FinetuneConfig, dm):
     """
     Only trains the selector on the downstream task.
     """
@@ -352,7 +347,7 @@ def finetune_polylib_sel(args: ExpertConfig, dm):
     args.trainable_param_names = "|.*module_logits.*|.*selector.*"
     assert args.router_selector is not None
 
-    module = MoETrainer(**vars(args), device_map="auto")
+    module = MoEModule(**vars(args), device_map="auto")
 
     for n, p in module.named_parameters():
         if "selector" in n:
@@ -363,7 +358,7 @@ def finetune_polylib_sel(args: ExpertConfig, dm):
 
 
 @register_finetune_func("polylib_full_randretr")
-def finetune_polylib_full_with_rand_retrieval(args: ExpertConfig, dm):
+def finetune_polylib_full_with_rand_retrieval(args: FinetuneConfig, dm):
     """
     Like polylib_full, but here we perform random expert selection before training.
     """
@@ -374,7 +369,7 @@ def finetune_polylib_full_with_rand_retrieval(args: ExpertConfig, dm):
 
     # assert args.router_selector == "poly_router"
     assert args.router_selector is not None
-    module = MoETrainer(**vars(args), device_map="auto", expert_library=library)
+    module = MoEModule(**vars(args), device_map="auto", expert_library=library)
 
     for n, p in module.named_parameters():
         if "selector" in n:
@@ -385,17 +380,17 @@ def finetune_polylib_full_with_rand_retrieval(args: ExpertConfig, dm):
 
 
 @register_finetune_func("private")
-def finetune_private(args: ExpertConfig, dm):
+def finetune_private(args: FinetuneConfig, dm):
     """
     Just train an expert from scratch
     """
 
-    module = ExpertTrainer(**vars(args)).to("cuda")
+    module = ExpertModule(**vars(args)).to("cuda")
     return train_module(args, module, dm)
 
 
 @register_finetune_func("polylib_full_svdretr")
-def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
+def finetune_polylib_full_with_svd_retrieval(args: FinetuneConfig, dm):
     """
     Like polylib_full, but here we perform expert selection with SVD embeddings before training.
     """
@@ -406,7 +401,7 @@ def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
 
     # args.router_selector = "poly_router"
     assert args.router_selector is not None
-    module = MoETrainer(**vars(args), device_map="auto", expert_library=library)
+    module = MoEModule(**vars(args), device_map="auto", expert_library=library)
 
     for n, p in module.named_parameters():
         if "selector" in n:
@@ -417,19 +412,19 @@ def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
 
 
 @register_finetune_func("pretrain_poly")
-def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
+def finetune_polylib_full_with_svd_retrieval(args: FinetuneConfig, dm):
     """
     Loads (the old) Poly / MHR pretrained checkoint, and fine-tunes it on the downstream task.
     """
     assert args.checkpoint is not None, "Please specify a checkpoint"
 
-    # Passing a checkpoint assumes the use of `ExpertTrainer`
+    # Passing a checkpoint assumes the use of `ExpertModule`
     # e.g. for poly-μ and MHR-μ
     ckpt_path = get_checkpoint_path(args.checkpoint)
     expert = load_expert(ckpt_path)
-    module = ExpertTrainer(**vars(expert.training_config))
+    module = ExpertModule(**vars(expert.training_config))
 
-    ckpt = torch.load(ckpt_path)
+    ckpt = torch.load(ckpt_path, weights_only=False)
     result = module.load_state_dict(ckpt["state_dict"], strict=False)
     assert len(result.unexpected_keys) == 0, result.unexpected_keys
 
@@ -445,7 +440,7 @@ def finetune_polylib_full_with_svd_retrieval(args: ExpertConfig, dm):
 
 
 @register_finetune_func("shared")
-def finetune_joint(args: ExpertConfig, dm):
+def finetune_joint(args: FinetuneConfig, dm):
     """
     Finetunes a pretrained shared model
     """
@@ -453,13 +448,13 @@ def finetune_joint(args: ExpertConfig, dm):
     library = HFExpertLibrary(args.library_id)
     expert: Expert = library[args.expert_selection]
     pretrain_args = expert.training_config
-    module = ExpertTrainer(**vars(pretrain_args))
+    module = ExpertModule(**vars(pretrain_args))
     module.load_state_dict(expert.expert_weights)
 
     return train_module(args, module, dm)
 
 
-def run_multitask(args: ExpertConfig):
+def run_multitask(args: FinetuneConfig):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
@@ -473,13 +468,13 @@ def run_multitask(args: ExpertConfig):
     args.n_tasks = len(dm._task_names)
 
     if args.checkpoint is not None:
-        # Passing a checkpoint assumes the use of `ExpertTrainer`
+        # Passing a checkpoint assumes the use of `ExpertModule`
         # e.g. for poly-μ and MHR-μ
         ckpt_path = get_checkpoint_path(args.checkpoint)
         expert = load_expert(ckpt_path)
-        module = ExpertTrainer(**vars(expert.training_config))
+        module = ExpertModule(**vars(expert.training_config))
 
-        ckpt = torch.load(ckpt_path)
+        ckpt = torch.load(ckpt_path, weights_only=False)
         result = module.load_state_dict(ckpt["state_dict"], strict=False)
         assert len(result.unexpected_keys) == 0, result.unexpected_keys
 
@@ -489,7 +484,6 @@ def run_multitask(args: ExpertConfig):
         elif expert.training_config.model_modifier == "poly":
             module.model.resize_module_logits(1)
         checkpoint = train_module(args, module, dm)
-
     else:
         # fine-tuning with expert library
         assert args.finetune_regime in FINETUNE_FUNCTIONS
@@ -498,7 +492,7 @@ def run_multitask(args: ExpertConfig):
 
 
 @register_finetune_func("poly_from_scratch")
-def finetune_polylib_full(args: ExpertConfig, dm):
+def finetune_polylib_full(args: FinetuneConfig, dm):
     """
     Trains poly from scratch, fine- or coarsegrained
     """
@@ -510,12 +504,12 @@ def finetune_polylib_full(args: ExpertConfig, dm):
         args.trainable_param_names += "|.*module_logits.*|.*selector.*"
     assert args.library_id is None
     args.router_selector = "poly_router"
-    module = MoETrainer(**vars(args), device_map="auto")
+    module = MoEModule(**vars(args), device_map="auto")
     module.to("cuda")
     return train_module(args, module, dm)
 
 
-def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
+def train_module(args: FinetuneConfig, module: ExpertModule, dm):
     loggers = get_pl_loggers(args)
     callbacks = get_monitors(args)
 
@@ -550,16 +544,6 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
         mode=mode,
     )
     callbacks.append(checkpoint_callback)
-
-    val_check_interval = args.eval_every
-    if val_check_interval == -1 or val_check_interval is None:
-        val_check_interval = None
-    else:
-        val_check_interval = args.gradient_accumulation_steps * args.eval_every
-        if val_check_interval > len(dm.train_dataloader()):
-            val_check_interval = len(dm.train_dataloader())
-        elif val_check_interval > args.total_steps and args.total_steps != -1:
-            val_check_interval = args.total_steps
 
     eval_callback = None
     if args.pipeline_eval_tasks:
@@ -612,7 +596,7 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
         checkpoint = (
             checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
         )
-        module.load_state_dict(torch.load(checkpoint)["state_dict"])
+        module.load_state_dict(torch.load(checkpoint, weights_only=False)["state_dict"])
     else:
         checkpoint = None
 
@@ -621,5 +605,5 @@ def train_module(args: ExpertConfig, module: ExpertTrainer, dm):
 
 
 if __name__ == "__main__":
-    args = ExpertConfig.parse()
+    args = FinetuneConfig.parse()
     run_multitask(args)

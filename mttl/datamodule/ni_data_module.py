@@ -8,14 +8,14 @@ from typing import Optional
 
 import numpy as np
 import torch
-import tqdm
 from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
 from transformers import AutoTokenizer
 
-from mttl.datamodule.base import DatasetConfig, DefaultCollator, DefaultDataModule
+from mttl.datamodule.base import DataModule, DatasetConfig, DefaultCollator
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
-from mttl.models.library.expert_library import DatasetLibrary
-from mttl.utils import logger
+from mttl.logging import logger
+from mttl.models.library.dataset_library import DatasetLibrary
 
 
 @dataclass
@@ -273,7 +273,8 @@ class DataCollatorForNI(DefaultCollator):
         return output_batch
 
 
-class NiDataModule(DefaultDataModule):
+@DataModule.register("ni", config_cls=NiDataConfig)
+class NiDataModule(DataModule):
     def test_dataloader(self, subsample=-1, shuffle=False):
         if subsample > 0:
             from mttl.datamodule import take_n_examples_per_task
@@ -323,7 +324,7 @@ class NiDataModule(DefaultDataModule):
                 eval_instances[instance["id"]] = instance
 
         eval_ids = list(eval_instances.keys())
-        for element in tqdm.tqdm(
+        for element in tqdm(
             self.test_dataset,
             desc="Checking test instances",
             total=len(self.test_dataset),

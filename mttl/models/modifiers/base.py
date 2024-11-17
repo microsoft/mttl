@@ -5,10 +5,19 @@ from typing import Dict, Iterable, Union
 
 from torch import nn
 
-from mttl.utils import logger
+from mttl.logging import logger
+from mttl.registrable import Registrable
+from mttl.serializable import AutoSerializable, Serializable
+from mttl.utils import deprecated
 
 
-class Adapter(nn.Module):
+class Modifier(nn.Module, Registrable):
+    # default modifier
+    default = "lora"
+
+    def __init__(self):
+        super().__init__()
+
     @property
     def layer_name(self):
         if not hasattr(self, "__layer_name__"):
@@ -18,79 +27,76 @@ class Adapter(nn.Module):
 
         return self.__layer_name__
 
+    @classmethod
+    def modify_transformer(cls, transformer, config):
+        return modify_with_adapter(transformer, config, cls)
 
-class MergeableAdapter(ABC, Adapter):
+
+class MergeableModifierMixin(ABC):
     @abstractmethod
     def merge_with_layer(self):
         pass
 
 
 @dataclass
-class ModifierConfig(object):
+class ModifierConfig(Serializable):
     modify_modules: str = ".*"
-    modify_layers: str = ".*"
+    modify_layers: str = (
+        None  # this is depriciated but still kept for backward compatibility
+    )
     tie_params: str = None
 
-    def __eq__(self, other):
-        # compare all the attributes
-        return self.__dict__ == other.__dict__
-
-    def asdict(self) -> Dict:
-        """Dump the config to a string."""
-        from dataclasses import asdict
-
-        from mttl.models.modifiers.modify_model import CONFIGS_TO_MODIFIERS
-
-        data = asdict(self)
-        # store the model modifier for easy loading
-        data["__model_modifier__"] = CONFIGS_TO_MODIFIERS[type(self)]
-        return data
+    @property
+    def modifier_name(self):
+        return Modifier.get_name_by_config_class(type(self))
 
     @classmethod
-    def fromdict(cls, dumped: Dict) -> "ModifierConfig":
-        from mttl.models.modifiers.modify_model import MODIFIERS_TO_CONFIGS
-
-        if "__model_modifier__" not in dumped:
-            raise ValueError(
-                "Cannot load config from dict, missing '__model_modifier__' key."
-            )
-        mod = dumped.pop("__model_modifier__")
-        return MODIFIERS_TO_CONFIGS[mod](**dumped)
-
-    @staticmethod
     def from_training_config(
-        training_config: Union["Config", "ModifierConfig"]
+        cls, training_config: Union["Args", "ModifierConfig"]
     ) -> Union["ModifierConfig", None]:
         """Build modifier config from the training config.
 
         Returns None if no modifier is set.
         """
-        from mttl.models.modifiers.modify_model import MODIFIERS_TO_CONFIGS
+        from mttl.arguments import create_config_class_from_args
 
         if isinstance(training_config, ModifierConfig):
             # nothing to do here
             return training_config
 
-        if training_config.model_modifier is None:
-            return None
+        if cls.__name__ == "ModifierConfig":
+            if training_config.model_modifier is None:
+                return None
 
-        if training_config.model_modifier not in MODIFIERS_TO_CONFIGS:
-            raise ValueError(
-                f"Model modifier '{training_config.model_modifier}' not found, has it been registered?"
+            if training_config.model_modifier not in Modifier.registered_names():
+                raise ValueError(
+                    f"Model modifier '{training_config.model_modifier}' not found, has it been registered?"
+                )
+
+            config_klass = Modifier.get_config_class_by_name(
+                training_config.model_modifier
             )
-
-        config_klass = MODIFIERS_TO_CONFIGS[training_config.model_modifier]
-        kwargs = {}
-        for key, _ in config_klass.__dataclass_fields__.items():
-            if hasattr(training_config, key):
-                kwargs[key] = getattr(training_config, key)
-        return config_klass(**kwargs)
+        else:
+            config_klass = cls
+        return create_config_class_from_args(config_klass, training_config)
 
 
-class ModifyMixin(nn.Module):
+class AutoModifierConfig(AutoSerializable):
     @classmethod
-    def modify_transformer(cls, transformer, config):
-        return modify_with_adapter(transformer, config, cls)
+    @deprecated(
+        message="The config appears to be a legacy config and will be discontinued in the next release."
+    )
+    def fromdict_legacy(cls, data) -> "ModifierConfig":
+        modifier_name = data.pop("__model_modifier__")
+        config_cls: ModifierConfig = Modifier.get_config_class_by_name(modifier_name)
+        return config_cls.fromdict(data)
+
+    @classmethod
+    def fromdict(cls, data: Dict) -> "ModifierConfig":
+        try:
+            return AutoSerializable.fromdict(data)
+        except ValueError:
+            return cls.fromdict_legacy(data)
 
 
 def get_target_2_source_param_mapping(

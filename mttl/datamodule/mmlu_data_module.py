@@ -11,9 +11,9 @@ from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
 
-from mttl.datamodule.base import DatasetConfig, DefaultCollator, DefaultDataModule
+from mttl.datamodule.base import DataModule, DatasetConfig, DefaultCollator
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.models.library.dataset_library import DatasetLibrary
 
 #################################################
 # Dataset aumgentation, implemented in the MMLU dataset
@@ -186,12 +186,13 @@ class MMLUDataConfig(DatasetConfig):
     augment_mmlu: bool = False
 
 
-class MMLUDataModule(DefaultDataModule):
+@DataModule.register("mmlu", config_cls=MMLUDataConfig)
+class MMLUDataModule(DataModule):
     DATA_ENV = "MMLU_DATA_DIR"
 
     def test_dataloader(self, subsample=None, shuffle=False):
         if subsample is not None and subsample > 0:
-            from mttl.datamodule import take_n_examples_per_task
+            from mttl.datamodule.base import take_n_examples_per_task
 
             indices = take_n_examples_per_task(
                 list(self.test_dataset["Task"]),

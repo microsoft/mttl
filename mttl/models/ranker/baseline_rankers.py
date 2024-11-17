@@ -11,9 +11,10 @@ from huggingface_hub import (
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.utils.extmath import safe_sparse_dot
 
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.logging import logger
+from mttl.models.library.dataset_library import DatasetLibrary
 from mttl.models.ranker.adapter_ranker import AdapterRanker
-from mttl.utils import logger, remote_login
+from mttl.utils import remote_login
 
 try:
     import faiss
@@ -23,7 +24,6 @@ except:
 
 
 def upload_checkpoint(repo_id, filename, path_in_repo):
-    import os
 
     remote_login()
     create_repo(repo_id, repo_type="model", exist_ok=True)
@@ -43,7 +43,7 @@ class TFIDFRanker(AdapterRanker):
         self.vectorizer = None
 
     def train(self):
-        import tqdm
+        from tqdm.auto import tqdm
 
         self.dataset = (
             DatasetLibrary.pull_dataset(self.dataset_name, split="train")
@@ -54,7 +54,7 @@ class TFIDFRanker(AdapterRanker):
             norm="l2", sublinear_tf=True, stop_words="english"
         )
         self.train_features = self.vectorizer.fit_transform(
-            tqdm.tqdm(self.dataset["source"])
+            tqdm(self.dataset["source"])
         )
         self.task_names = list(self.dataset["task_name"])
 
@@ -107,7 +107,7 @@ class TFIDFRanker(AdapterRanker):
         else:
             ckpt_file = repo_id + "/model.ckpt"
 
-        ckpt = torch.load(ckpt_file)
+        ckpt = torch.load(ckpt_file, weights_only=False)
 
         ranker = cls(**ckpt["config"])
         ranker.load_state_dict(ckpt["state_dict"])
@@ -233,7 +233,7 @@ class KATERanker(AdapterRanker):
             ckpt_file = path + "/model.ckpt"
             index_file = path + "/index.faiss"
 
-        ckpt = torch.load(ckpt_file)
+        ckpt = torch.load(ckpt_file, weights_only=False)
         index = read_index(index_file)
 
         ranker = cls(**ckpt["config"])

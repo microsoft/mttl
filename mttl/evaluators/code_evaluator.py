@@ -1,11 +1,10 @@
-import json
 import os
 
-import tqdm
 from evaluate import load
+from tqdm.auto import tqdm
 
 from mttl.evaluators.base import GenerativeEvaluator, switch_to_eval_mode
-from mttl.utils import logger
+from mttl.logging import logger
 
 
 # reference: https://github.com/declare-lab/instruct-eval/blob/main/human_eval/main.py#L35
@@ -72,7 +71,7 @@ class CodeEvaluator(GenerativeEvaluator):
         if self.use_vllm:
             return self.evaluate_with_vllm(model, dataloader, num_batches, verbose)
 
-        pbar = tqdm.tqdm(
+        pbar = tqdm(
             enumerate(dataloader),
             total=len(dataloader),
         )
@@ -82,8 +81,8 @@ class CodeEvaluator(GenerativeEvaluator):
         metric = load("code_eval")
         for num_batch, batch in pbar:
             # we assume code prefixes are available and these are "completion" tasks
-            sources_texts = batch["code_prefix"]
-            tests = batch["code_tests"]
+            sources_texts = batch.pop("code_prefix")
+            tests = batch.pop("code_tests")
 
             predictions = self.generate_for_batch(model, batch)
             generated = list(

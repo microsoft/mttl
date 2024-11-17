@@ -1,15 +1,11 @@
-import math
 from dataclasses import dataclass
 from typing import List
 
-import bitsandbytes as bnb
-import numpy as np
 import torch
 from torch import nn
 from transformers.activations import ACT2FN
 
-from mttl.models.modifiers import register_modifier
-from mttl.models.modifiers.base import ModifierConfig, ModifyMixin
+from mttl.models.modifiers.base import Modifier, ModifierConfig
 
 
 @dataclass
@@ -17,8 +13,8 @@ class MLPConfig(ModifierConfig):
     n_embd: int = 2560
 
 
-@register_modifier("mlp", config_cls=MLPConfig)
-class MLPModifier(ModifyMixin):
+@Modifier.register("mlp", config_cls=MLPConfig)
+class MLPModifier(Modifier):
     def __init__(
         self,
         config: MLPConfig,
@@ -73,3 +69,30 @@ class MLPModifier(ModifyMixin):
             hidden_states = mlp._modifier_forward(hidden_states)
             output.index_add_(0, indices, hidden_states.to(input.dtype))
         return mlps[0].layer(input) + output
+
+
+@dataclass
+class PEERConfig(ModifierConfig):
+    n_heads: int = 8
+    moe_num_experts: int = 100
+    emb_dim: int = 128
+    down_proj_layer: str = "fc1"
+    up_proj_layer: str = "fc2"
+
+
+@Modifier.register("peer", config_cls=PEERConfig)
+class PEERModifier(Modifier):
+    """
+    Peer modifier basically does nothing, the job is done in the container.
+    """
+
+    def __init__(
+        self,
+        config: PEERConfig,
+        **kwargs,
+    ):
+        super().__init__()
+        self.config = config
+
+    def __len__(self):
+        return self.config.moe_num_experts

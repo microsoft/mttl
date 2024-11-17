@@ -5,27 +5,38 @@ import re
 from abc import abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Union
 
 import numpy as np
 import sklearn.decomposition
 import torch
 import torch.nn.functional as F
+from pytorch_lightning import Trainer
 from sklearn.cluster import KMeans
 from sklearn.metrics.pairwise import cosine_similarity
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from mttl.datamodule.base import get_datamodule
-from mttl.models.containers.expert_containers import ExpertContainer
-from mttl.models.expert_config import ExpertConfig
+from mttl.logging import logger
+from mttl.models.containers.lora_containers import ExpertContainer
+from mttl.models.containers.selectors.phatgoose_selector import (
+    PhatgooseTrainerSelectorConfig,
+)
+from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
+from mttl.models.get_optimizer import get_optimizer_and_scheduler
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
+from mttl.models.lightning.callbacks import LiveCheckpointCallback
+from mttl.models.lightning.loggers import get_pl_loggers
 from mttl.models.modifiers.base import get_target_2_source_param_mapping
-from mttl.models.utils import EfficientCheckpointModule, transfer_batch_to_device
-from mttl.utils import logger
+from mttl.models.monitors import get_monitors
+from mttl.models.train_utils import train_model
+from mttl.models.utils import transfer_batch_to_device
+from mttl.registrable import Registrable
+from mttl.serializable import Serializable
 
 
-class LibraryTransform(abc.ABC):
+class LibraryTransform(abc.ABC, Registrable):
     """Defines a transformation of a library of experts."""
 
     def __init__(self, config):
@@ -50,21 +61,25 @@ def _hash_field(val):
         return val
 
 
-def param_hash(p):
+def param_hash(p, exclude_fields=None):
     # from facebookresearch / ReAgent
     import hashlib
 
     m = hashlib.md5()
     m.update(
         str(
-            tuple(_hash_field(getattr(p, f.name)) for f in dataclasses.fields(p))
+            tuple(
+                _hash_field(getattr(p, f.name))
+                for f in dataclasses.fields(p)
+                if not exclude_fields or f.name not in exclude_fields
+            )
         ).encode()
     )
     return m.hexdigest()
 
 
 @dataclass
-class LibraryTransformConfig:
+class LibraryTransformConfig(Serializable):
     name: str = None
 
     @property
@@ -77,8 +92,11 @@ class LibraryTransformConfig:
             return self.name
         else:
             # form auto name based on the arguments of the config
-            save_name = self.__class__.__name__.lower() + f"-{param_hash(self)}"
+            save_name = self.__class__.__name__.lower() + f"-{self.param_hash()}"
             return save_name
+
+    def param_hash(self):
+        return param_hash(self)
 
 
 @dataclass
@@ -87,6 +105,7 @@ class SVDEmbeddingTransformConfig(LibraryTransformConfig):
     sparsity_threshold: float = 0.8
 
 
+@LibraryTransform.register("svd_embedding", SVDEmbeddingTransformConfig)
 class SVDEmbeddingTransform(LibraryTransform):
     """Creates adapter embeddings by low-rank decomposition of a sparsified version
     of the adapter experts.
@@ -96,20 +115,37 @@ class SVDEmbeddingTransform(LibraryTransform):
         super().__init__(config)
         self.random_state = random_state
 
+    @classmethod
+    @torch.no_grad()
+    def fetch(cls, library: Union[str, ExpertLibrary], config_hash: str = None):
+        if isinstance(library, str):
+            library = ExpertLibrary.get_expert_library(library)
+
+        config_hash = config_hash or SVDEmbeddingTransformConfig().save_name
+
+        # try to fetch auxiliary data
+        output = library.get_auxiliary_data(data_type=config_hash)
+
+        if len(output) == len(library):
+            logger.info("Found {} precomputed SVD Embeddings".format(len(output)))
+            return output
+
+        raise ValueError(
+            "SVD embeddings are missing or corrupted, please recompute them."
+        )
+
     def transform(self, library, persist=True, recompute=False):
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
 
-        # try to fetch auxiliary data
-        output = library.get_auxiliary_data(data_type=self.config.save_name)
+        try:
+            output = self.fetch(library, self.config.save_name)
 
-        if len(output) > 0 and not recompute:
-            logger.info("Found {} precomputed SVD Embeddings".format(len(output)))
-
-            return (
-                np.stack([output[expert_name] for expert_name in library.keys()]),
-                None,
-            )
+            if not recompute:
+                logger.info("Found {} precomputed SVD Embeddings".format(len(output)))
+                return output
+        except ValueError:
+            pass
 
         logger.info("Computing SVD Embeddings for %s experts", len(library))
         logger.info("Saving to: %s", self.config.save_name)
@@ -166,7 +202,7 @@ class SVDEmbeddingTransform(LibraryTransform):
                         data=experts_embeddings[i],
                         force=True,  # make sure we overwrite
                     )
-        return dict(zip(names, experts_embeddings)), svd
+        return dict(zip(names, experts_embeddings))
 
 
 @dataclass
@@ -174,6 +210,7 @@ class WeightedLinearMergeConfig(LibraryTransformConfig):
     weights: dict = None
 
 
+@LibraryTransform.register("weighted_linear_merge", WeightedLinearMergeConfig)
 class WeightedLinearMerge(LibraryTransform):
     """
     Computes a uniform weight mixture across experts of a given library
@@ -241,6 +278,7 @@ class TiesMergeConfig(LibraryTransformConfig):
     only_sparsify: bool = False
 
 
+@LibraryTransform.register("ties_merge", TiesMergeConfig)
 class TiesMerge(LibraryTransform):
     """
     Computes a uniform weight mixture across experts of a given library
@@ -343,6 +381,7 @@ class HiddenStateComputerConfig(LibraryTransformConfig):
     pool: str = "last"  # last, or mean
 
 
+@LibraryTransform.register("hidden_state_computer", HiddenStateComputerConfig)
 class HiddenStateComputer(LibraryTransform):
     """
     Encodes a dataset and computes the average embedding
@@ -352,12 +391,12 @@ class HiddenStateComputer(LibraryTransform):
         super().__init__(config or HiddenStateComputerConfig())
 
     def _update_args(self, args, default_args):
-        # TODO: put in library utils
         for k, v in vars(default_args).items():
             if not hasattr(args, k):
                 setattr(args, k, v)
+
         # Also, overwrite the updated args even if already present
-        for k, v in default_args._updated_kwargs.items():
+        for k, v in default_args.updated_kwargs.items():
             setattr(args, k, v)
 
         for arg_name in [
@@ -372,25 +411,12 @@ class HiddenStateComputer(LibraryTransform):
             value = getattr(default_args, arg_name, None)
             setattr(args, arg_name, value)
 
-    def _get_parent_from_name(self, model, name):
-        parts = name.split(".")
-        for part in parts:
-            if part.isdigit():
-                new_model = model[int(part)]
-            else:
-                new_model = getattr(model, part, None)
-
-            if new_model is None:
-                return model
-
-            model = new_model
-
-        return model
-
     def _track_hidden_states(self, model, keys=None, device="cpu"):
         model.container = {}
+
         if model.model is None:
             raise ValueError("Model must have a model attribute")
+
         if self.config.track == "last_layer":
             # Add a hook to the last layer
             def fetch_input(module, input, output):
@@ -405,9 +431,8 @@ class HiddenStateComputer(LibraryTransform):
 
                 return retrieve_input
 
-            for key in keys:
-                module = self._get_parent_from_name(model.model, key)
-                module.register_forward_hook(build_hook(key))
+            for container in model.experts_containers:
+                container.register_forward_hook(build_hook(container.layer_name))
         else:
             raise NotImplementedError()
 
@@ -419,6 +444,25 @@ class HiddenStateComputer(LibraryTransform):
 
         return {k: v for k, v in zip(keys, values)}
 
+    @classmethod
+    @torch.no_grad()
+    def fetch(cls, library: Union[str, ExpertLibrary], config_hash: str = None):
+        if isinstance(library, str):
+            library = ExpertLibrary.get_expert_library(library)
+
+        config_hash = config_hash or HiddenStateComputerConfig().save_name
+
+        # try to fetch auxiliary data
+        output = library.get_auxiliary_data(data_type=config_hash)
+
+        if len(output) > 0:
+            logger.info("Found {} precomputed centroids".format(len(output)))
+            return output
+
+        raise ValueError(
+            "Hidden states are missing or corrupted, please recompute them."
+        )
+
     @torch.no_grad()
     def transform(
         self,
@@ -428,37 +472,44 @@ class HiddenStateComputer(LibraryTransform):
         default_args=None,
         device="cpu",
     ) -> Expert:
-        if type(library) == str:
+        from mttl.arguments import ExpertConfig
+        from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
+
+        if isinstance(library, str):
             library = ExpertLibrary.get_expert_library(library)
-        from mttl.models.expert_model import MultiExpertModel
 
-        logger.info(f"Hidden state computer dumps to: {self.config.save_name}")
+        try:
+            protos = self.fetch(library, self.config.save_name)
 
-        output = library.get_auxiliary_data(data_type=self.config.save_name)
-
-        if len(output) == len(library) and not recompute:
-            logger.info("Found {} precomputed centroids".format(len(output)))
-            return output
+            if not recompute:
+                logger.info("Found {} precomputed centroids".format(len(protos)))
+                return protos
+        except ValueError:
+            pass
 
         logger.info("Computing centroids for {} experts".format(len(library)))
         output = {}
 
         for _, (expert_name, expert) in enumerate(library.items()):
-            training_config = expert.training_config
+            training_config = ExpertConfig.from_dict(expert.training_config)
+
             if default_args is not None:
                 self._update_args(training_config, default_args)
 
             if self.config.use_base_model_only and self.config.model is not None:
                 training_config.model = self.config.model
-            training_config.device_map = "cuda"
-            model = MultiExpertModel(**vars(training_config))
 
+            model = MultiExpertModel(
+                MultiExpertModelConfig(
+                    base_model=training_config.model,
+                ),
+                device_map=training_config.device_map,
+            )
             if not self.config.use_base_model_only:
                 model.add_expert_instance(expert, is_default=True)
 
-            self._track_hidden_states(
-                model, keys=expert.expert_weights.keys(), device=device
-            )
+            self._track_hidden_states(model, device=device)
+
             training_config.dataset = expert.expert_info.dataset
             training_config.subsample_train = self.config.max_samples_per_task
             if expert.expert_info.expert_task_name:
@@ -483,14 +534,7 @@ class HiddenStateComputer(LibraryTransform):
 
             for _, batch in pbar:
                 batch = transfer_batch_to_device(batch, device_model)
-
-                if isinstance(model, EfficientCheckpointModule):
-                    model.forward(batch, reduction="none")
-                else:
-                    model.forward(
-                        input_ids=batch["input_ids"],
-                        attention_mask=batch["attention_mask"],
-                    )
+                model.forward(**batch)
 
                 bs = batch["input_ids"].size(0)
                 last_token_idx = batch["attention_mask"].sum(1).to(device) - 1
@@ -527,7 +571,6 @@ class HiddenStateComputer(LibraryTransform):
             output[expert_name] = centroids
 
             del model
-            torch.cuda.empty_cache()
 
         if persist:
             # add embeddings to the library
@@ -544,15 +587,39 @@ class HiddenStateComputer(LibraryTransform):
 
 
 @dataclass
-class PhatgooseConfig(LibraryTransformConfig):
-    n_steps: int = 1000
-    learning_rate: float = 3e-3
-    warmup_ratio: float = 0.1  # 0.9999999 # 0.1
+class PhatgooseTransformConfig(LibraryTransformConfig):
+    n_steps: int = 100
+    learning_rate: float = 1e-3
+    warmup_ratio: float = 0.1
+    micro_batch_size: int = 4
+    batch_size: int = 4
+    seed: int = 42
 
 
+@LibraryTransform.register("phatgoose", PhatgooseTransformConfig)
 class PhatgooseTransform(HiddenStateComputer):
-    def __init__(self, config: PhatgooseConfig = None):
-        super().__init__(config or PhatgooseConfig())
+    def __init__(self, config: PhatgooseTransformConfig = None):
+        super().__init__(config or PhatgooseTransformConfig())
+
+    @classmethod
+    @torch.no_grad()
+    def fetch(cls, library: Union[str, ExpertLibrary], config_hash: str):
+        if isinstance(library, str):
+            library = ExpertLibrary.get_expert_library(library)
+
+        config_hash = config_hash or PhatgooseTransformConfig().save_name
+
+        # try to fetch auxiliary data
+        output = library.get_auxiliary_data(data_type=config_hash)
+
+        if len(output) != len(library):
+            logger.warning(
+                "Found {} precomputed Phatgoose prototypes. Some experts might not have prototypes.".format(
+                    len(output)
+                )
+            )
+
+        return output
 
     def transform(
         self,
@@ -562,8 +629,8 @@ class PhatgooseTransform(HiddenStateComputer):
         expert_names: list = None,
         default_args=None,
     ):
-        from mttl.models.expert_model import MultiExpertModel
-        from mttl.models.library.utils import train_module
+        from mttl.arguments import ExpertConfig
+        from mttl.models.lightning.expert_module import MultiExpertModule
 
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
@@ -577,66 +644,49 @@ class PhatgooseTransform(HiddenStateComputer):
             expert: Expert = library[expert_name]
             logger.info("Phatgoose save name : {}".format(self.config.save_name))
 
-            if (
-                not recompute
-                and len(loaded_output) > 0
-                and expert_name
-                in loaded_output  # cause loaded_output loads all experts
-            ):
-                logger.info("Found {} precomputed gates".format(len(loaded_output)))
+            if not recompute and expert_name in loaded_output:
+                logger.info("Loading precomputed gates for {}".format(expert_name))
+
                 # format is dict[layer_name] = embedding, layer_name ends with selector.{task_name}.v
-                outputs[expert_name] = (
-                    loaded_output
-                    if not expert_name in loaded_output
-                    else loaded_output[expert_name]
-                )
+                outputs[expert_name] = loaded_output[expert_name]
                 continue
 
-            training_config: ExpertConfig = expert.training_config
-            training_config.router_selector = "phatgoose_trainer_selector"
+            training_config: ExpertConfig = ExpertConfig.from_dict(
+                expert.training_config
+            )
+
+            if default_args is not None:
+                self._update_args(training_config, default_args)
+
             training_config.trainable_param_names = ".*selector.*"
-            training_config.logging_prefix = expert_name + "/"
             training_config.weight_decay = 0.0
-
-            # for training, we set this to true even if there is just a single expert.
-            # This ensures that we do (gate * AB * x) instead of ((gate * A) * (gate * B) * x)
-            training_config.lora_merge_after = True
-
+            training_config.total_steps = self.config.n_steps
+            training_config.learning_rate = self.config.learning_rate
+            training_config.warmup_proportion = self.config.warmup_ratio
+            training_config.train_batch_size = self.config.batch_size
+            training_config.micro_batch_size = self.config.micro_batch_size
             training_config.dataset = expert.expert_info.dataset
+
             if expert.expert_info.expert_task_name:
                 train_tasks = expert.expert_info.expert_task_name.split(",")
                 training_config.finetune_task_name = ",".join(train_tasks)
             else:
                 train_tasks = None
 
-            if default_args is not None:
-                self._update_args(training_config, default_args)
-                training_config.include_task_source = default_args.include_task_source
-                training_config.output_dir = default_args.output_dir
-                training_config.wandb_project = default_args.wandb_project
-                # we set also train_batch_size, micro_batch_size, and gradient_accumulation_steps from default_args
-                # TODO: correct this in the future
-                # background: gradient_accumulation_steps is set in post_init of the mttl/config.py and hence not saved correctly in expert's config
-                training_config.gradient_accumulation_steps = (
-                    default_args.gradient_accumulation_steps
-                )
-                training_config.train_batch_size = default_args.train_batch_size
-                training_config.micro_batch_size = default_args.micro_batch_size
-            else:
-                raise ValueError(
-                    "batch size and gradient accumulation steps must be set from the cmd line args"
-                )
-
-            # get datamodule
             dm = get_datamodule(training_config)
-            training_config.eval_every = -1
-            training_config.total_steps = self.config.n_steps
-            training_config.learning_rate = self.config.learning_rate
-            training_config.warmup_proportion = self.config.warmup_ratio
 
             logger.info("Training config: {}".format(vars(training_config)))
 
-            model = MultiExpertModel(**vars(training_config)).to("cuda")
+            model = MultiExpertModel(
+                MultiExpertModelConfig(
+                    base_model=training_config.model,
+                    selector_config=PhatgooseTrainerSelectorConfig(
+                        lora_merge_after=True,
+                    ),
+                ),
+                precision=training_config.precision,
+                device_map="cuda" if torch.cuda.is_available() else "cpu",
+            )
             model.add_expert_instance(expert, is_default=True)
 
             # for checksum
@@ -651,36 +701,26 @@ class PhatgooseTransform(HiddenStateComputer):
                     frozen_sum += value.sum()
                     value.requires_grad = False
 
-            checkpoint = train_module(training_config, model, dm)
+            train_model(training_config, model, dm)
 
-            if (
-                training_config.compute_strategy
-                and training_config.compute_strategy != "deepspeed"
-            ):
-                from mttl.models.expert_model import MultiExpertModel
+            # for checksum
+            frozen_sum_after, unfrozen_sum_after = 0, 0
+            for key, value in model.state_dict().items():
+                if re.match(".*selector.gates.*.v", key):
+                    unfrozen_sum_after += value.sum()
+                else:
+                    frozen_sum_after += value.sum()
 
-                model_after = MultiExpertModel(**vars(training_config)).to("cuda")
-                model_after.add_expert_instance(expert, is_default=True)
-                model_after.load_state_dict(torch.load(checkpoint)["state_dict"])
-
-                # for checksum
-                frozen_sum_after, unfrozen_sum_after = 0, 0
-                for key, value in model_after.state_dict().items():
-                    if re.match(".*selector.gates.*.v", key):
-                        unfrozen_sum_after += value.sum()
-                    else:
-                        frozen_sum_after += value.sum()
-
-                assert (
-                    frozen_sum == frozen_sum_after
-                ), "Frozen params changed during training"
-                assert (
-                    unfrozen_sum != unfrozen_sum_after
-                ), "Unfrozen params did not change during training"
+            assert (
+                frozen_sum == frozen_sum_after
+            ), "Frozen params changed during training"
+            assert (
+                unfrozen_sum != unfrozen_sum_after
+            ), "Unfrozen params did not change during training"
 
             # extract prototypes
             prototypes = {}
-            for name, module in model.named_experts():
+            for name, module in model.model.named_modules():
                 if isinstance(module, ExpertContainer) and hasattr(
                     module.selector, "get_prototypes"
                 ):
@@ -703,12 +743,11 @@ class PhatgooseTransform(HiddenStateComputer):
                             force=True,  # make sure we overwrite
                         )
             del model
-            torch.cuda.empty_cache()
         return outputs
 
 
 @dataclass
-class ArrowConfig(LibraryTransformConfig):
+class ArrowTransformConfig(LibraryTransformConfig):
     ab_only: bool = True
     scale: bool = False  # If True, scale by eigenvalue
     tie_params: str = (
@@ -717,17 +756,20 @@ class ArrowConfig(LibraryTransformConfig):
     tie_op: str = "concat"  # or "sum"
 
 
+@LibraryTransform.register("arrow", ArrowTransformConfig)
 class ArrowTransform(LibraryTransform):
     """
     Given a library of experts, extract the input direction most affected by the linear transforms
     """
 
-    def __init__(self, config: ArrowConfig = None):
-        super().__init__(config or ArrowConfig())
+    def __init__(self, config: ArrowTransformConfig = None):
+        super().__init__(config or ArrowTransformConfig())
 
     def _maybe_scale(self, vectors, eigvals):
-        """Post Processing of the retrieved outputs,
-        scales the output by the eigenvalue if needed"""
+        """
+        Post Processing of the retrieved outputs,
+        scales the output by the eigenvalue if needed.
+        """
         output = {}
         for expert_name, expert_data in vectors.items():
             output[expert_name] = {}
@@ -735,7 +777,6 @@ class ArrowTransform(LibraryTransform):
                 if self.config.scale:
                     vector = vector * eigvals[expert_name][layer_name]
                 output[expert_name][layer_name] = torch.from_numpy(vector)
-
         return output
 
     def _low_rank_svd(self, A, B):
@@ -760,60 +801,9 @@ class ArrowTransform(LibraryTransform):
 
         diff_AB = (U_W.T @ U_A).abs().diag()
         if diff_AB[0] < 0.9:
-            logger.warning("The first singular vector of U_A and U_AB are not aligned")
+            logger.debug("The first singular vector of U_A and U_AB are not aligned")
 
         return U_W, Sigma_C, V_W_T
-
-    def _compute_base_proto(self, library, base_model=None, persist=True):
-        """Compute Arrow prototypes for base model weights"""
-
-        try:
-            base_vector = library.get_auxiliary_data(
-                data_type="vectors", expert_name="base_model"
-            )
-            base_eigval = library.get_auxiliary_data(
-                data_type="eigvals", expert_name="base_model"
-            )
-        except ValueError:
-            # `get_auxiliary_data` will throw a ValueError if the object is not found.
-            base_vector = base_eigval = {}
-
-        if len(base_vector) == len(base_eigval) > 0:
-            # TODO: should we perform some checks to see if the keys lineup
-            return base_vector, base_eigval
-
-        if base_model is None:
-            from mttl.models.expert_model import MultiExpertModel
-
-            an_expert = library[next(iter(library.keys()))]
-            training_config = an_expert.training_config
-            training_config.model_modifier = None
-            base_model = MultiExpertModel(**vars(training_config))
-
-        vectors, eigvals = {}, {}
-        for key, base_W in base_model.named_parameters():
-            if base_W.ndim != 2:  # Only compute base model for matrices
-                continue
-
-            logger.info(f"\tComputing SVD for base model parameter {key}")
-
-            base_W = base_W.float()
-            U, E, Vt = torch.linalg.svd(base_W)
-            vectors[key] = Vt[0].cpu().numpy()
-            eigvals[key] = E[0].item()
-
-        # Always persist
-        if persist:
-            for data_name, data in [("vectors", vectors), ("eigvals", eigvals)]:
-                library.add_auxiliary_data(
-                    data_type=data_name,
-                    expert_name="base_model",
-                    data=data,
-                    config=None,
-                    force=True,  # make sure we overwrite
-                )
-
-        return vectors, eigvals
 
     def _get_unique_parent_names(self, alist):
         """
@@ -823,36 +813,54 @@ class ArrowTransform(LibraryTransform):
         dict_keys = sorted(list(set(".".join(k.split(".")[:-1]) for k in alist)))
         return dict_keys
 
+    @classmethod
+    @torch.no_grad()
+    def fetch(cls, library: Union[str, ExpertLibrary], config_hash: str):
+        """Fetch arrow prototypes from the library, raises ValueError if they are not computed.
+
+        Args:
+            library (Union[str, ExpertLibrary]): ExpertLibrary object or its name
+            scale (bool): If True, scale the output by the eigenvalue
+        """
+        if not isinstance(library, ExpertLibrary):
+            library = ExpertLibrary.get_expert_library(library)
+
+        config_hash = config_hash or ArrowTransformConfig().save_name
+
+        # try to fetch auxiliary data
+        protos = library.get_auxiliary_data(data_type=config_hash + "_protos")
+        return protos
+
     @torch.no_grad()
     def transform(
-        self, library, persist=True, recompute=False, add_base_proto=False
+        self,
+        library,
+        persist=True,
+        recompute=False,
     ) -> Expert:
+        logger.info("Arrow save name : {}".format(self.config.save_name))
+
         if isinstance(library, str):
             library = ExpertLibrary.get_expert_library(library)
 
-        # try to fetch auxiliary data
-        vectors = library.get_auxiliary_data(
-            data_type=self.config.save_name + "_vectors"
-        )
-        eigvals = library.get_auxiliary_data(
-            data_type=self.config.save_name + "_eigvals"
-        )
-
-        logger.info("Arrow save name : {}".format(self.config.save_name))
-
-        if len(vectors) == len(eigvals) == len(library) and not recompute:
-            logger.info("Found {} precomputed centroids".format(len(vectors)))
-
-            if add_base_proto:
-                base_vec, base_val = self._compute_base_proto(library, persist=persist)
-                vectors.update({"base_model": base_vec})
-                eigvals.update({"base_model": base_val})
-
-            return self._maybe_scale(vectors, eigvals)
-
         base_model = None
-        vectors, eigvals = {}, {}
+
+        # Try to fetch the precomputed Arrow prototypes
+        protos = self.fetch(library, self.config.save_name)
+        already_computed = []
+
+        vectors = {}
+        eigvals = {}
         for expert_name, expert in library.items():
+            if expert_name in protos and not recompute:
+                logger.info(
+                    "Found precomputed Arrow prototypes for expert {}".format(
+                        expert_name
+                    )
+                )
+                already_computed.append(expert_name)
+                continue
+
             logger.info(f"Computing SVD for expert {expert_name}")
             vectors[expert_name] = {}
             eigvals[expert_name] = {}
@@ -860,16 +868,17 @@ class ArrowTransform(LibraryTransform):
             if base_model is None and not self.config.ab_only:
                 training_config = expert.training_config
                 training_config.model_modifier = None
-                from mttl.models.expert_model import MultiExpertModel
+                from mttl.models.lightning.expert_module import MultiExpertModule
 
-                base_model = MultiExpertModel(**vars(training_config))
+                base_model = MultiExpertModule(**vars(training_config))
 
             # get parameters tied during training
             param_map = get_target_2_source_param_mapping(
-                expert.expert_weights.items(), expert.training_config.tie_params
+                expert.expert_weights.items(),
+                expert.expert_info.expert_config.tie_params,
             )
             if self.config.tie_params != "default":
-                # get parameters we wish to tie during for Arrow
+                # get parameters we wish to tie for Arrow
                 _tied_params = get_target_2_source_param_mapping(
                     expert.expert_weights.items(), self.config.tie_params
                 )
@@ -980,7 +989,7 @@ class ArrowTransform(LibraryTransform):
                 torch.allclose(ratio, torch.ones_like(ratio), atol=1e-3)
 
                 # Check that top vector is indeed the top eigenvector
-                assert (WTW @ top_vector).pow(2).sum() > (WTW @ bottom_vector).pow(
+                assert (WTW @ top_vector).pow(2).sum() >= (WTW @ bottom_vector).pow(
                     2
                 ).sum()
 
@@ -990,16 +999,20 @@ class ArrowTransform(LibraryTransform):
                     vectors[expert_name][parent] = top_vector.real.cpu().numpy()
                     eigvals[expert_name][parent] = top_value.item()
 
-        if persist:
+        to_upload = [x for x in library.keys() if x not in already_computed]
+        new_protos = self._maybe_scale(vectors, eigvals)
+
+        if persist and len(to_upload) > 0:
             # add embeddings to the library
             with library.batched_commit():
-                for expert_name in library.keys():
+                for expert_name in to_upload:
                     logger.info(
                         f"Uploading centroids to the library for expert {expert_name}"
                     )
                     for data_name, data in [
                         ("vectors", vectors),
                         ("eigvals", eigvals),
+                        ("protos", new_protos),
                     ]:
                         library.add_auxiliary_data(
                             data_type=self.config.save_name + "_" + data_name,
@@ -1009,14 +1022,8 @@ class ArrowTransform(LibraryTransform):
                             force=True,  # make sure we overwrite
                         )
 
-        if add_base_proto:
-            base_vec, base_val = self._compute_base_proto(
-                library, base_model=base_model, persist=persist
-            )
-            vectors.update({"base_model": base_vec})
-            eigvals.update({"base_model": base_val})
-
-        return self._maybe_scale(vectors, eigvals)
+        protos.update(new_protos)
+        return protos
 
 
 @dataclass
@@ -1029,6 +1036,7 @@ class ExpertProjectorConfig:
     )
 
 
+@LibraryTransform.register("expert_projector", ExpertProjectorConfig)
 class ExpertProjector(LibraryTransform):
     """
     Given a library of clustered experts, project each one onto the basis generated
@@ -1117,6 +1125,7 @@ class CrossExpertNormComputerConfig:
     pass
 
 
+@LibraryTransform.register("cross_expert_norm_computer", CrossExpertNormComputerConfig)
 class CrossExpertNormComputer(HiddenStateComputer):
     """
     Given a library of experts, compute the norm of ABx for both in-dist and ood experts
@@ -1152,9 +1161,9 @@ class CrossExpertNormComputer(HiddenStateComputer):
         )
 
         from mttl.models.containers import ExpertContainer
-        from mttl.models.expert_model import MoEModel
+        from mttl.models.lightning.expert_module import ExpertModule, MoEModel
 
-        model = MoEModel(**vars(training_config)).to("cuda")
+        model = MoEModel(**vars(training_config))
 
         # build a hook to forward across other (ood) experts
         def build_hook(layer_name, container, task_id_container):
@@ -1213,7 +1222,7 @@ class CrossExpertNormComputer(HiddenStateComputer):
         for num_batch, batch in pbar:
             batch = transfer_batch_to_device(batch, device)
 
-            if isinstance(model, EfficientCheckpointModule):
+            if isinstance(model, ExpertModule):
                 model.forward(batch, reduction="none")
             else:
                 model.forward(
@@ -1243,6 +1252,7 @@ class MBClusteringTransformConfig(SVDEmbeddingTransformConfig):
     k: int = 10
 
 
+@LibraryTransform.register("mbc_with_cos_sim", MBClusteringTransformConfig)
 class MBCWithCosSimTransform(LibraryTransform):
     """
     Computes clusters based on the embedding similarity of the experts.
@@ -1269,15 +1279,15 @@ class MBCWithCosSimTransform(LibraryTransform):
                 svd_config,
                 random_state=self.config.random_state,
             )
-            embeddings, svd = svd_embedder.transform(library, persist=persist)
+            embeddings = svd_embedder.transform(library, persist=persist)
             del svd_embedder
-            return embeddings, svd
+            return embeddings
 
         embeddings = library.get_auxiliary_data(svd_config.save_name)
 
         if len(embeddings) != len(library) or recompute:
             logger.info("Recomputing embeddings for clustering.")
-            embeddings, _ = create_embeddings()
+            embeddings = create_embeddings()
 
         # Extract the embeddings as a numpy array
         expert_names, embeddings = zip(*sorted(embeddings.items()))
@@ -1296,5 +1306,5 @@ class MBCWithCosSimTransform(LibraryTransform):
         clusters = defaultdict(list)
 
         for key, label in zip(expert_names, cluster_labels):
-            clusters[label].append(key)
+            clusters[f"cluster_{label}"].append(key)
         return clusters

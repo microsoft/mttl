@@ -1,158 +1,54 @@
 import json
 import os
+from dataclasses import dataclass
+from typing import Any, Union
 
-import torch
+from huggingface_hub import hf_hub_download
 
-from mttl.config import Config
-from mttl.utils import logger, warn_once
+from mttl.logging import logger
+from mttl.serializable import AutoSerializable, Serializable
+
+CONFIG_NAME = "mttl_config.json"
 
 
-class ExpertConfig(Config):
-    def _set_defaults(self):
-        super()._set_defaults()
+@dataclass
+class BaseExpertModelConfig(Serializable):
+    base_model: str = None
 
-        self.device_map = "cpu"
-        self.load_in_4bit = False
-        self.load_in_8bit = False
-        self.wandb_project = None
-        self.tensorboard = False
-
-        self.remote_token = None
-        self.library_id = None
-        self.expert_selection = None  # if set, will try to only load expert with this name from the library when evaluating
-        self.destination_library_id = None
-
-        self.do_train = True
-
-        # just a lame flag to 0 out all adapter weights
-        self.baseline = False
-        # sparsify adapter weights to this sparsity level
-        self.sparsity = 0.0
-        # only use a very small portion of the available experts
-        self.subsample_library_experts = 0
-        # rank / retrieve top k experts
-        self.ranker_top_k = 1
-        self.ranker_path = None
-        self.ranker_model = None
-
-        self.expert_name = None
-        self.routing = "subject"
-        self.mmlu_test_split = "test"
-        self.load_module = None
-        self.micro_batch_size = None
-        self.validation_portion = 0.03
-
-        self.use_instruct_template = False
-        self.source_template = None
-        self.augment_few_shot = 0
-
-        self.subsample_train = None
-        self.subsample_dev = None
-
-        self.moe_num_experts = 8
-        self.moe_emb_dim = 128
-        self.moe_rkhs_dim = 512
-        self.moe_ent_reg = 0.0
-        self.moe_ent_free_bits = 0.0
-        self.moe_top_k = None
-
-        self.data_dir = os.getenv("AMLT_DATA_DIR", "~/data/")
-        self.output_dir = os.getenv("AMLT_OUTPUT_DIR", "tmp/instruction_learning/")
-
-        self.mmlu_use_hard_prompt = None  # use a hard prompt for mmlu
-
-        self.eval_mmlu_few_shot = True  # use few-shot for mmlu, default
-        self.eval_mmlu_flag = False  # eval mmlu performance during training
-        self.eval_rouge_flag = False  # eval rouge during training
-        self.pipeline_eval_tasks = None
-
-        self.eval_metric = "loss"
-        self.use_vllm = False
-
-        # for finetuning a library
-        self.hf_repo_query = (
-            None  # for retrieval, we take query expert from this library
-        )
-        self.sk = 5  # number of experts to retrieve from a library
-        self.finetune_regime = None  # polylib_full, lib_mu, polylib_selector
-        self.eval_before_training = True
-
-        # hidden state computation transform
-        self.use_base_model_only = False
-        self.max_samples_per_task = 100
-        self.track = "each_layer"
-        self.pool = "last"
-
-        # Ties Merging
-        self.transform_sparsity = 1.0
-
-        # Per Token Router [Arrow, Phatgoose, hidden]
-        self.router_temp = None
-        self.notes = None
-        self.proto_init = None  # also "arrow"
-        self.input_norm_fn = None
-        self.proto_norm_fn = None
-        self.ab_only = True
-        self.base_model_proto = False  # compute Arrow embeddings for the backbone
-        self.tie_op = "concat"  # or "sum"
-
-        # Eval Library
-        self.merge_or_route = None  # "uniform", "ties", "clown"
-        self.tasksets_path = None
-        self.remove_experts = None
-        self.create_transfer_matrix = False
-        self.es_metric = "loss"
-        self.n_ng_iterations = 30  # number of iterations for LoraHub
-        self.recompute_prototypes = False
-        self.expert_embeds_save_name = None
-        self.selector_logging = (
-            True  # If false, routing specific stats are not computed
-        )
-
-        self.phi_2_align_heads = False
-        self.lora_merge_after = False  # if True, tried to merge after the outer product, currently only applicable to LoRA
-
-        # phatgoose gate learning
-        self.n_steps_pg = 2000
-        self.learning_rate_pg = 0.01
-
-        self.save_if_loaded_from_ckpt = True
-        self.save_each_epoch = False
-        self.add_eos_to_downstream_targets = True
-        self.flan_tasks_path = "projects/wiki_experts/task_sets/flan_tasks.json"
-
-    def post_init(self, silent=False):
-        if self.micro_batch_size is None:
-            self.micro_batch_size = self.train_batch_size
-
-        self.gradient_accumulation_steps = (
-            self.train_batch_size // self.micro_batch_size
-        )
-        self.train_batch_size = self.micro_batch_size
-
-        n_devices = torch.cuda.device_count()
-        if n_devices > 1:
-            warn_once(
-                "You have multiple GPUs, but your device count is not being taken "
-                + "into account when computing `gradient_accumulation_steps`."
+    def save_pretrained(self, save_directory, **kwargs):
+        """Bare bone save pretrained function that saves the model and config."""
+        if os.path.isfile(save_directory):
+            logger.error(
+                f"Provided path ({save_directory}) should be a directory, not a file"
             )
+            return
 
-        if self.finetune_task_name is not None and isinstance(
-            self.finetune_task_name, str
-        ):
-            # resolve task keys
-            task_names = []
-            tasks = self.finetune_task_name.split(",")
-            if self.tasksets_path is not None and os.path.exists(self.tasksets_path):
-                # load task names from json file
-                task_sets = json.load(open(self.tasksets_path))
-                for task_name in tasks:
-                    # try to fetch task_names from the file
-                    if task_name in task_sets:
-                        task_names.extend(task_sets[task_name])
-                    else:
-                        task_names.append(task_name)
-            else:
-                task_names = tasks
+        os.makedirs(save_directory, exist_ok=True)
+        output_config_file = os.path.join(save_directory, CONFIG_NAME)
 
-            self.finetune_task_name = ",".join(task_names)
+        with open(output_config_file, "w") as f:
+            data = self.asdict()
+            f.write(json.dumps(data))
+        return output_config_file
+
+    @classmethod
+    def from_pretrained(
+        cls,
+        model_id: Union[str, os.PathLike],
+        **kwargs: Any,
+    ):
+        if os.path.isfile(os.path.join(model_id, CONFIG_NAME)):
+            config_file = os.path.join(model_id, CONFIG_NAME)
+        else:
+            try:
+                config_file = hf_hub_download(model_id, CONFIG_NAME)
+            except Exception as exc:
+                raise ValueError(f"Can't find {CONFIG_NAME} at '{model_id}'") from exc
+
+        with open(config_file, "r") as f:
+            config = cls.fromdict(json.load(f))
+        return config
+
+
+class AutoModelConfig(AutoSerializable, BaseExpertModelConfig):
+    pass

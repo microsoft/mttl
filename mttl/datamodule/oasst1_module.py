@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from mttl.dataloader.oasst1_readers import InverseOasst1Dataset, Oasst1Dataset
-from mttl.datamodule.base import DatasetConfig, DefaultDataModule
+from mttl.datamodule.base import DataModule, DatasetConfig
 
 
 @dataclass
@@ -9,7 +9,8 @@ class OA1Config(DatasetConfig):
     train_on_reverse: bool = False
 
 
-class OA1Module(DefaultDataModule):
+@DataModule.register("oasst1", config_cls=OA1Config)
+class OA1Module(DataModule):
     def setup_dataset(self):
         if getattr(self.config, "train_on_reverse", False):
             dataset = InverseOasst1Dataset(self.config.data_dir)

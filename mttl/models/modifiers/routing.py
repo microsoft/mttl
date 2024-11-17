@@ -1,28 +1,43 @@
-import re
 from dataclasses import dataclass, field, fields
-from types import MethodType
 from typing import Dict, List
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-from mttl.models.modifiers.base import Adapter, ModifyMixin
-from mttl.utils import logger
 
 
 @dataclass
 class RoutingInfo:
+    input_ids: torch.Tensor = None
+    labels: torch.Tensor = None
+    attention_mask: torch.Tensor = None
     task_ids: torch.Tensor = None
     task_names: List[str] = None
     task_sources: List[str] = None
     example_ids: List[int] = None
-    labels: torch.Tensor = None
-    input_ids: torch.Tensor = None
     sources_texts: List[str] = None
-    attention_mask: torch.Tensor = None
+    labels_texts: List[str] = None
     task_weights: torch.nn.ParameterDict = None
     aux_losses: Dict = field(default_factory=dict)
+    packed_seq_lens: List[int] = None
+    seq_lens: List[int] = None
+    packed_attn_mask: torch.Tensor = None
+
+    @classmethod
+    def pop_elements(cls, batch, keep=None):
+        """We don't want to pass these elements to the model."""
+        keep = keep or []
+        return [
+            batch.pop(k.name)
+            for k in fields(cls)
+            if k.name in batch and k.name not in keep
+        ]
+
+    @classmethod
+    def prepare_for_forward(cls, batch):
+        cls.pop_elements(batch, keep=["input_ids", "attention_mask", "labels"])
+
+    @classmethod
+    def prepare_for_generate(cls, batch):
+        cls.pop_elements(batch, keep=["input_ids", "attention_mask"])
 
     @classmethod
     def from_batch(cls, batch: dict, **kwargs):
@@ -41,6 +56,9 @@ class RoutingInfo:
             sources_texts=batch.get("sources_texts", None),
             labels=batch.get("labels", None),
             attention_mask=batch.get("attention_mask", None),
+            packed_seq_lens=batch.get("packed_seq_lens", None),
+            seq_lens=batch.get("seq_lens", None),
+            packed_attn_mask=batch.get("packed_attn_mask", None),
             **kwargs,
         )
         return ri

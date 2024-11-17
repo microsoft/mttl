@@ -3,15 +3,16 @@ from functools import partial
 
 import numpy
 
-from mttl.datamodule.base import DatasetConfig, DefaultDataModule
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.datamodule.base import DataModule, DatasetConfig
+from mttl.models.library.dataset_library import DatasetLibrary
 
 
 class CodexDataConfig(DatasetConfig):
     pass
 
 
-class CodexDataModule(DefaultDataModule):
+@DataModule.register("codex", config_cls=CodexDataConfig)
+class CodexDataModule(DataModule):
     def setup_dataset(self):
         dataset = DatasetLibrary.pull_dataset("jinaai/code_exercises", split="train")
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))

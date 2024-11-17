@@ -5,7 +5,7 @@ import os
 import click
 import numpy as np
 import torch
-import tqdm
+from tqdm.auto import tqdm
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import (
@@ -55,7 +55,7 @@ class MMLUEvaluator(GenerativeEvaluator):
             datamodule, use_vllm=use_vllm, generation_kwargs=generation_kwargs
         )
 
-    def eval_vllm(self, model, generation_config, subsample, shuffle):
+    def evaluate_with_vllm(self, model, generation_config, subsample, shuffle):
         model_hash = hashlib.sha256()
 
         if hasattr(model, "hparams"):
@@ -103,7 +103,7 @@ class MMLUEvaluator(GenerativeEvaluator):
         **kwargs,
     ):
         if self.use_vllm:
-            metrics = self.eval_vllm(
+            metrics = self.evaluate_with_vllm(
                 model,
                 generation_config=model.generation_config,
                 subsample=subsample,
@@ -117,7 +117,7 @@ class MMLUEvaluator(GenerativeEvaluator):
 
             dataloader = self.get_dataloader(split, subsample, shuffle)
 
-            pbar = tqdm.tqdm(
+            pbar = tqdm(
                 enumerate(dataloader),
                 total=len(dataloader),
             )

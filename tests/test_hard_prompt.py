@@ -3,14 +3,15 @@ import torch
 from datasets import Dataset
 from transformers import AutoModelForCausalLM
 
-from mttl.datamodule.base import DatasetConfig, DefaultDataModule
+from mttl.datamodule.base import DataModule, DatasetConfig
 from mttl.datamodule.utils import get_tokenizer_with_args
-from mttl.models.containers import add_expert_to_transformer
+from mttl.models.containers.hard_prompts_container import HardPromptExpertContainer
+from mttl.models.expert_context import InfoContainer
 from mttl.models.library.expert import Expert, ExpertInfo
 from mttl.models.modifiers.hard_prompts import HardPrompt, HardPromptConfig
 
 
-class DummyDataModule(DefaultDataModule):
+class DummyDataModule(DataModule):
     def setup_dataset(self):
         shared = {
             "target": ["a", "b"],
@@ -206,20 +207,21 @@ def test_hard_prompt_eval(dm_batch):
         ),
         expert_weights=weight,
     )
-    model = add_expert_to_transformer(
+    model = HardPromptExpertContainer.modify_transformer(
         model,
         expert,
         is_default=True,
     )
     assert model.expert_container.experts["prefix"].prompt == weight
 
-    outputs_with_prompt = model.generate(
-        inputs=flan_batch_for_generation["input_ids"],
-        attention_mask=flan_batch_for_generation["attention_mask"],
-        pad_token_id=tokenizer.pad_token_id,
-        max_length=flan_batch_for_generation["input_ids"].shape[1] + 20,
-    )
-    text_outputs_with_prompt = tokenizer.batch_decode(
-        outputs_with_prompt, skip_special_tokens=True
-    )
-    assert all(["I don't know" in o for o in text_outputs_with_prompt])
+    with InfoContainer(flan_batch_for_generation):
+        outputs_with_prompt = model.generate(
+            inputs=flan_batch_for_generation["input_ids"],
+            attention_mask=flan_batch_for_generation["attention_mask"],
+            pad_token_id=tokenizer.pad_token_id,
+            max_length=flan_batch_for_generation["input_ids"].shape[1] + 20,
+        )
+        text_outputs_with_prompt = tokenizer.batch_decode(
+            outputs_with_prompt, skip_special_tokens=True
+        )
+        assert all(["I don't know" in o for o in text_outputs_with_prompt])

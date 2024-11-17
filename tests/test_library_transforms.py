@@ -1,5 +1,6 @@
 # unit test for adapter_ranker
 import copy
+import logging
 from collections import OrderedDict
 
 import numpy as np
@@ -7,13 +8,20 @@ import pytest
 import torch
 from pytorch_lightning import seed_everything
 
-from mttl.models.expert_config import ExpertConfig
+from mttl.arguments import ExpertConfig
+from mttl.logging import logger
+from mttl.models.containers.selectors import PhatgooseSelector, PhatgooseSelectorConfig
+from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
 from mttl.models.library.expert_library import HFExpertLibrary, LocalExpertLibrary
 from mttl.models.library.library_transforms import (
-    ArrowConfig,
     ArrowTransform,
+    ArrowTransformConfig,
+    HiddenStateComputer,
+    HiddenStateComputerConfig,
     MBClusteringTransformConfig,
     MBCWithCosSimTransform,
+    PhatgooseTransform,
+    PhatgooseTransformConfig,
     TiesMerge,
     TiesMergeConfig,
     WeightedLinearMerge,
@@ -22,26 +30,20 @@ from mttl.models.library.library_transforms import (
 
 
 def test_config():
-    cfg = ArrowConfig(ab_only=True, scale=False)
-    assert cfg.save_name == "arrowconfig-a8327e21d374166ceeb94c40d2e7676f"
-
-    cfg2 = ArrowConfig(ab_only=True, scale=True)
+    cfg = ArrowTransformConfig(ab_only=True, scale=False)
+    cfg2 = ArrowTransformConfig(ab_only=True, scale=True)
     assert cfg2.save_name != cfg.save_name
 
-    cfg3 = ArrowConfig(ab_only=True, scale=False)
+    cfg3 = ArrowTransformConfig(ab_only=True, scale=False)
     assert cfg3.save_name == cfg.save_name
 
 
 def test_arrow():
-    import logging
-
-    from mttl.utils import logger
-
     logger.setLevel(logging.DEBUG)
 
     library = HFExpertLibrary("sordonia/new-test-library")
 
-    cfg = ArrowConfig(ab_only=True, scale=False)
+    cfg = ArrowTransformConfig(ab_only=True, scale=False)
     transform = ArrowTransform(cfg)
 
     protos = transform.transform(library, persist=False, recompute=True)
@@ -56,43 +58,53 @@ def test_arrow():
 
 
 def test_arrow_with_tiedlora(tmp_path, create_dummy_expert):
-    import logging
-
-    from mttl.utils import logger
-
     seed_everything(0)
-
     logger.setLevel(logging.DEBUG)
 
-    def patch_expert_weights(expert):
-        for k, v in expert.expert_weights.items():
+    def patch_expert_weights(expert, offset=0):
+        keys = sorted(expert.expert_weights.keys())
+        for idx, k in enumerate(keys):
+            v = expert.expert_weights[k]
             if "q_proj" in k or "k_proj" in k or "v_proj" in k or "o_proj" in k:
-                assert ".".join(k.split(".")[:-1]) + ".lora_a" in expert.expert_weights
-                assert ".".join(k.split(".")[:-1]) + ".lora_b" in expert.expert_weights
+                parent = ".".join(k.split(".")[:-1])
+                assert parent + ".lora_a" in expert.expert_weights
+                assert parent + ".lora_b" in expert.expert_weights
+            gen = torch.Generator()
             if "lora_b" in k:
-                expert.expert_weights[k] = torch.randn_like(v)
+                gen.manual_seed(idx + offset)
+            elif "lora_a" in k:
+                # map q_proj, k_proj, v_proj or o_proj to q_proj
+                base_name = parent = ".".join(k.split(".")[:-2] + ["k_proj.lora_a"])
+                logger.debug(f"from {k} to {base_name}")
+                gen.manual_seed(keys.index(base_name) + offset)
+
+            expert.expert_weights[k] = torch.randn(
+                size=v.size(), dtype=v.dtype, generator=gen
+            )
+
         return expert
 
     config = ExpertConfig(
-        kwargs={
+        **{
             "tie_params": "q_proj.*\\.lora_a|k_proj.*\\.lora_a|v_proj.*\\.lora_a",
             "model_modifier": "lora",
+            "lora_rank": 16,
+            "lora_alpha": 1.0,
             "modify_layers": "k_proj|v_proj|q_proj|o_proj",
             "modify_modules": ".*self_attn.*",
             "trainable_param_names": ".*lora_[ab].*",
             "output_dir": tmp_path,
-            "model": "",
         }
     )
     # create random Lora
-    expert1 = patch_expert_weights(create_dummy_expert(config, "module1"))
-    expert2 = patch_expert_weights(create_dummy_expert(config, "module2"))
+    expert1 = patch_expert_weights(create_dummy_expert(config, "module1"), offset=0)
+    expert2 = patch_expert_weights(create_dummy_expert(config, "module2"), offset=1_000)
 
     library = LocalExpertLibrary(tmp_path)
     library.add_expert(expert1, expert1.name)
     library.add_expert(expert2, expert2.name)
 
-    cfg = ArrowConfig(ab_only=True, scale=False)
+    cfg = ArrowTransformConfig(ab_only=True, scale=False)
     transform = ArrowTransform(cfg)
 
     protos = transform.transform(library, persist=False, recompute=True)
@@ -103,7 +115,122 @@ def test_arrow_with_tiedlora(tmp_path, create_dummy_expert):
             task_sum += protos[task_name][key].sum().item()
         sums.append(task_sum)
 
-    assert np.allclose(sums, [-3.8098, 13.9056], atol=1e-3)
+    assert np.allclose(sums, [-13.642, -7.734], atol=1e-3)
+
+
+def test_phatgoose(tiny_flan, tmp_path, create_dummy_expert, monkeypatch):
+    dataset, dataset_id = tiny_flan
+
+    config = ExpertConfig(
+        **{
+            "model_modifier": "lora",
+            "lora_rank": 4,
+            "lora_alpha": 1,
+            "warmup_steps": 0,
+            "modify_layers": "k_proj|v_proj|q_proj|o_proj",
+            "trainable_param_names": ".*lora_[ab].*",
+            "output_dir": str(tmp_path),
+            "precision": "32",
+            "model": "EleutherAI/gpt-neo-125m",
+            "dataset": dataset_id,
+            "device_map": "cpu",
+            "dataset_type": "flan",
+            "lora_init_b_random": True,  # this is important otw phatgoose gates are 0 given that the experts are not trained
+        }
+    )
+
+    config.finetune_task_name = "cot_creak"
+    expert1 = create_dummy_expert(config, "cot_creak")
+
+    config.finetune_task_name = "cot_creak_ii"
+    expert2 = create_dummy_expert(config, "cot_creak_ii")
+
+    library = LocalExpertLibrary(tmp_path)
+    library.add_expert(expert1)
+    library.add_expert(expert2)
+
+    pg_config = PhatgooseTransformConfig(
+        n_steps=1, warmup_ratio=0.0, learning_rate=1e-2
+    )
+    phatgoose = PhatgooseTransform(pg_config)
+    phatgoose.transform(library, persist=True, recompute=True, default_args=config)
+
+    # now try to load a selector with the same config
+    model = MultiExpertModel(
+        MultiExpertModelConfig(
+            base_model="EleutherAI/gpt-neo-125m",
+            selector_config=PhatgooseSelectorConfig(
+                library_id="local://" + str(tmp_path),
+                selector_data_id=pg_config.save_name,
+            ),
+        )
+    )
+
+    model.add_experts_from_library(library)
+    assert len(model.experts_names) == 2
+    assert model.selectors["lora"][0].prototypes.shape[0] == 2
+    assert model.selectors["lora"][0].prototypes.shape[1] == 768
+
+
+def test_hidden_state_transform(tiny_flan, tmp_path, create_dummy_expert, monkeypatch):
+    # disable wandb
+    monkeypatch.setenv("WANDB_MODE", "disabled")
+
+    dataset, dataset_id = tiny_flan
+
+    config = ExpertConfig(
+        **{
+            "model_modifier": "lora",
+            "lora_rank": 32,
+            "lora_alpha": 16,
+            "warmup_steps": 0,
+            "modify_layers": "k_proj|v_proj|q_proj|o_proj",
+            "trainable_param_names": ".*lora_[ab].*",
+            "output_dir": tmp_path,
+            "precision": "32",
+            "model": "EleutherAI/gpt-neo-125m",
+            "dataset": dataset_id,
+            "device_map": "cpu",
+            "dataset_type": "flan",
+            "lora_init_b_random": True,  # this is important otw phatgoose gates are 0 given that the experts are not trained
+        }
+    )
+
+    config.finetune_task_name = "cot_creak"
+    expert1 = create_dummy_expert(config, "cot_creak")
+
+    config.finetune_task_name = "cot_creak_ii"
+    expert2 = create_dummy_expert(config, "cot_creak_ii")
+
+    library = LocalExpertLibrary(tmp_path)
+    library.add_expert(expert1)
+    library.add_expert(expert2)
+
+    hc_config = HiddenStateComputerConfig(
+        max_samples_per_task=1,
+        track="each_layer",
+        pool="last",
+    )
+    hc = HiddenStateComputer(hc_config)
+    hc.transform(
+        library, persist=True, recompute=True, default_args=config, device="cpu"
+    )
+
+    # now try to load a selector with the same config
+    model = MultiExpertModel(
+        MultiExpertModelConfig(
+            base_model="EleutherAI/gpt-neo-125m",
+            selector_config=PhatgooseSelectorConfig(
+                library_id="local://" + str(tmp_path),
+                selector_data_id=hc_config.save_name,
+            ),
+        )
+    )
+
+    model.add_experts_from_library(library)
+    assert len(model.experts_names) == 2
+    assert model.selectors["lora"][0].prototypes.shape[0] == 2
+    assert model.selectors["lora"][0].prototypes.shape[1] == 768
 
 
 def test_compute_svd_embeddings():
@@ -113,7 +240,7 @@ def test_compute_svd_embeddings():
     )
 
     library = HFExpertLibrary("sordonia/new-test-library")
-    embeddings, svd = SVDEmbeddingTransform(
+    embeddings = SVDEmbeddingTransform(
         SVDEmbeddingTransformConfig(n_components=2)
     ).transform(library=library, persist=False)
 
@@ -168,10 +295,6 @@ def test_weighted_merge():
 
 
 def test_ties_merge():
-    import logging
-
-    from mttl.utils import logger
-
     logger.setLevel(logging.DEBUG)
 
     top_k = 0.2

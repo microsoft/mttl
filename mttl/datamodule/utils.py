@@ -2,7 +2,7 @@ import os
 
 from transformers import AutoTokenizer, LlamaTokenizer
 
-from mttl.utils import logger
+from mttl.logging import logger
 
 
 def maybe_filter_hf_dataset_by_task(
@@ -106,21 +106,14 @@ def get_tokenizer(config, for_generation=False):
 
 def get_tokenizer_with_args(
     model_name,
-    model_family,
+    model_family="gpt",
     padding_side="right",
     truncation_side="right",
     for_generation=False,
 ):
-    if model_family is None:
-        raise ValueError("model_family is None, please fix your config!")
-
     if "llama-2" in model_name:
         tokenizer = LlamaTokenizer.from_pretrained(model_name)
         tokenizer.pad_token_id = 0
-        if not model_family == "gpt":
-            raise ValueError(
-                "We detected a Llama model, but model_family != 'gpt', fix your config!"
-            )
     else:
         if "phi-2" == model_name:
             # local phi-2 version. use `microsoft/phi-2 for the official hf version`
@@ -129,32 +122,29 @@ def get_tokenizer_with_args(
         tokenizer.model_max_length = int(1e9)
 
     tokenizer.padding_side = padding_side
-    logger.warning("Padding side is {}".format(tokenizer.padding_side))
+    logger.info("Padding side is {}".format(tokenizer.padding_side))
 
     tokenizer.truncation_side = truncation_side
-    logger.warning("Truncation side is {}".format(tokenizer.truncation_side))
+    logger.info("Truncation side is {}".format(tokenizer.truncation_side))
 
     if model_family == "gpt":
         if for_generation:
             if padding_side == "right":
-                logger.warning(
-                    "Padding side is 'right', but we are in generation mode!"
-                )
+                logger.info("Padding side is 'right', but we are in generation mode!")
 
-            logger.warning(
+            logger.info(
                 "for_generation is True, setting padding_side for tokenizer to 'left'."
             )
-
             tokenizer.padding_side = "left"
 
         # do not add eos token, we will add it accordingly *if* needed.
         tokenizer.add_eos_token = False
 
-        if tokenizer.pad_token_id is None:
-            logger.warning(
-                "!!! Setting pad_token_id to eos_token_id, given that pad_token_id was not detected !!!"
-            )
-            tokenizer.pad_token_id = tokenizer.eos_token_id
+    if tokenizer.pad_token_id is None:
+        logger.info(
+            "Setting pad_token_id to eos_token_id, given that pad_token_id was not detected."
+        )
+        tokenizer.pad_token_id = tokenizer.eos_token_id
 
     tokenizer.mttl_merges_space = tokenizer_merges_space(tokenizer)
     tokenizer.mttl_enforces_eos = tokenizer_enforces_eos(tokenizer)
