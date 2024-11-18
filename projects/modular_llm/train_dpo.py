@@ -71,15 +71,8 @@ def run_multitask(args: ExpertConfig):
     else:
         dm = Preferencemodule(config)
 
-    # dm = get_datamodule(args)
-    # args.n_tasks = len(dm._task_names)
-    # args.task_names = dm._task_names
-
-    args.tokenizer = dm.tokenizer
     model_config = ExpertModelConfig(
         base_model=args.model,
-        task_name=args.finetune_task_name,
-        expert_name=args.expert_name,
         modifier_config=args.modifier_config,
     )
 
