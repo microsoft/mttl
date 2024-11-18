@@ -32,6 +32,8 @@ from mttl.models.modifiers.base import (
     Modifier,
 )
 from mttl.models.modifiers.modify_model import modify_transformer
+from mttl.models.lightning.base_module import LightningEfficientCheckpoint
+import torch.nn.functional as F
 
 
 @contextlib.contextmanager
@@ -64,7 +66,6 @@ class ExpertModel(BaseExpertModel):
         **loading_kwargs,
     ):
         super().__init__(config, model_object=model_object, **loading_kwargs)
-
         if config.modifier_config is not None:
             modify_transformer(self.model, config.modifier_config)
 
@@ -591,7 +592,7 @@ def get_log_prob(logits, labels):
     return torch.gather(log_probs, -1, labels.unsqueeze(-1)).squeeze(-1).mean(-1)
 
 
-class ExpertModelSimPO(EfficientCheckpointModule):
+class ExpertModelSimPO(LightningEfficientCheckpoint):
     def __init__(self, preference_model, **kwargs):
         super().__init__(**kwargs)
         self.preference_model = preference_model
@@ -782,7 +783,7 @@ def gpu_memory_usage_decorator(func):
     return wrapper
 
 
-class ExpertModelDPO(EfficientCheckpointModule):
+class ExpertModelDPO(LightningEfficientCheckpoint):
 
     def __init__(self, preference_model, ref_expert_model, **kwargs):
         super().__init__(**kwargs)

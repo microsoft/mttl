@@ -2,8 +2,8 @@ from dataclasses import dataclass
 
 import torch
 
-from mttl.datamodule.base import DatasetConfig, DefaultCollator, DefaultDataModule
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.datamodule.base import DatasetConfig, DefaultCollator, DataModule
+from mttl.models.library.dataset_library import DatasetLibrary
 
 
 @dataclass
@@ -64,7 +64,7 @@ class DataCollatorForDPO(DefaultCollator):
 
 
 @dataclass
-class Preferencemodule(DefaultDataModule):
+class Preferencemodule(DataModule):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

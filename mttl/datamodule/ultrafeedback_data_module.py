@@ -2,8 +2,8 @@ from dataclasses import dataclass
 from typing import Any
 import torch
 
-from mttl.datamodule.base import DatasetConfig, DefaultCollator, DefaultDataModule
-from mttl.models.library.expert_library import DatasetLibrary
+from mttl.datamodule.base import DatasetConfig, DefaultCollator, DataModule
+from mttl.models.library.dataset_library import DatasetLibrary
 
 
 def is_openai_format(messages: Any) -> bool:
@@ -102,7 +102,7 @@ class UltrafeedbackDPOCollator(DefaultCollator):
 
 
 @dataclass
-class UltrafeedbackDPOmodule(DefaultDataModule):
+class UltrafeedbackDPOmodule(DataModule):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -155,7 +155,7 @@ class UltrafeedbackSFTCollator(DefaultCollator):
 
 
 @dataclass
-class UltrafeedbackSFTmodule(DefaultDataModule):
+class UltrafeedbackSFTmodule(DataModule):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
