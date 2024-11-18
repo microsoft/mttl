@@ -72,7 +72,13 @@ def create_datamodule(training_args, dataset_path):
 
 
 def create_synthetic_data_for_epoch(
-    model, dataset, epoch, output_dir, use_only_type, use_last_km=True
+    model,
+    dataset,
+    epoch,
+    output_dir,
+    use_only_type,
+    use_last_km=True,
+    num_generations=4,
 ):
     dataset_path = output_dir + f"/gen__epoch_{epoch}"
 
@@ -105,7 +111,7 @@ def create_synthetic_data_for_epoch(
             model_name_or_path,
             block_size=2048,
             max_continuation_length=768,
-            num_generations=4,
+            num_generations=num_generations,
             generation_top_p=0.95,
             num_devices=1,
             model_type="local",
@@ -141,6 +147,7 @@ class KMIterArguments(ExpertConfig):
     loss_function: str = "dcd"
     use_last_km: bool = True
     generate_every_n_epochs: int = 1
+    num_generations: int = 4
     # set the following if you want to enable the NQA callback during training
     text_dataset: str = "sordonia/narrativeqa_sanitized"
     nqa_dataset: str = "sordonia/narrativeqa_sanitized"
@@ -185,7 +192,13 @@ def train_km(training_args: KMIterArguments):
 
     text_dataset = get_text_dataset(training_args)
     synth_dataset_path = create_synthetic_data_for_epoch(
-        model, text_dataset, 0, training_args.output_dir, training_args.use_only_type
+        model,
+        text_dataset,
+        0,
+        training_args.output_dir,
+        training_args.use_only_type,
+        use_last_km=False,
+        num_generations=training_args.num_generations,
     )
     synth_datamodule = create_datamodule(training_args, synth_dataset_path)
 
@@ -280,6 +293,7 @@ def train_km(training_args: KMIterArguments):
                 training_args.output_dir,
                 training_args.use_only_type,
                 training_args.use_last_km,
+                training_args.num_generations,
             )
             synth_datamodule = create_datamodule(training_args, synth_dataset_path)
 
