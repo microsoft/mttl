@@ -479,13 +479,7 @@ class TrainingArgs(DataArgs):
                     task_names.append(task_name)
 
             self.finetune_task_name = ",".join(task_names)
-
-        n_devices = torch.cuda.device_count()
-        if n_devices > 1:
-            warn_once(
-                "You have multiple GPUs, but your device count is not being taken "
-                + "into account when computing `gradient_accumulation_steps`."
-            )
+            self.finetune_task_path = None
 
     def to_hf_training_args(self) -> "TrainingArguments":
         from transformers import TrainingArguments

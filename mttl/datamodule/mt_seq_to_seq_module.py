@@ -96,10 +96,10 @@ def augment_few_shot(
     dataset, num_samples, tokenizer=None, max_input_length=None, seed=42
 ):
     """Augment the dataset with few-shot examples."""
-    import tqdm
+    from tqdm.auto import tqdm
 
     augmented_dataset = []
-    for source in tqdm.tqdm(dataset.unique("task_name")):
+    for source in tqdm(dataset.unique("task_name")):
         augmented_dataset.append(
             Dataset.from_list(
                 augment_few_shot_task(
@@ -138,7 +138,9 @@ def apply_source_template(dataset, source_template):
 class FlatMultiTaskModule(DataModule):
     def setup_dataset(self):
         self.dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
-        num_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
+        n_proc = min(
+            len(self.dataset), int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
+        )
 
         if "split" not in self.dataset.column_names["train"]:
             logger.warning(
@@ -150,7 +152,7 @@ class FlatMultiTaskModule(DataModule):
 
             self.dataset = self.dataset.map(
                 partial(create_split, numpy.random.RandomState(42)),
-                num_proc=num_proc,
+                num_proc=n_proc,
                 desc="Creating split column.",
             )
 
@@ -163,7 +165,7 @@ class FlatMultiTaskModule(DataModule):
             dev_dataset,
             test_dataset,
         ) = maybe_filter_hf_dataset_by_task(
-            self.dataset, "task_name", self.config.finetune_task_name, num_proc=num_proc
+            self.dataset, "task_name", self.config.finetune_task_name, num_proc=n_proc
         )
 
         if self.config.augment_few_shot > 0:

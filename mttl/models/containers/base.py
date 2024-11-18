@@ -54,6 +54,10 @@ class ExpertContainer(nn.Module, Container):
         self._enabled = True
         self.config = config
         self.layer = layer
+        if isinstance(layer, nn.Module):
+            self.device = next(layer.parameters()).device
+        else:
+            self.device = None
         self.selector = selector or TaskNameSelector()
         self._default_expert_name = None
         self.expert_infos = {}
@@ -89,6 +93,7 @@ class ExpertContainer(nn.Module, Container):
         self.selector = selector
         # dependency injection on layer name
         self.selector.__layer_name__ = self.layer_name + ".selector"
+        self.selector.device = self.device
 
         for expert_name, expert_info in self.expert_infos.items():
             self.selector.add_expert(

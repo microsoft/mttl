@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-import tqdm
+from tqdm.auto import tqdm
 
 from mttl.dist_utils import distributed_mean, is_main_process
 from mttl.evaluators.base import Evaluator, switch_to_eval_mode
@@ -32,7 +32,7 @@ class LogLikeEvaluator(Evaluator):
         if self.use_vllm:
             return self.evaluate_with_vllm(model, dataloader, num_batches, verbose)
 
-        pbar = tqdm.tqdm(
+        pbar = tqdm(
             enumerate(dataloader),
             total=len(dataloader),
             disable=not is_main_process(),

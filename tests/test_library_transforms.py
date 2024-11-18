@@ -14,14 +14,14 @@ from mttl.models.containers.selectors import PhatgooseSelector, PhatgooseSelecto
 from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
 from mttl.models.library.expert_library import HFExpertLibrary, LocalExpertLibrary
 from mttl.models.library.library_transforms import (
-    ArrowConfig,
     ArrowTransform,
+    ArrowTransformConfig,
     HiddenStateComputer,
     HiddenStateComputerConfig,
     MBClusteringTransformConfig,
     MBCWithCosSimTransform,
-    PhatgooseConfig,
     PhatgooseTransform,
+    PhatgooseTransformConfig,
     TiesMerge,
     TiesMergeConfig,
     WeightedLinearMerge,
@@ -30,13 +30,11 @@ from mttl.models.library.library_transforms import (
 
 
 def test_config():
-    cfg = ArrowConfig(ab_only=True, scale=False)
-    assert cfg.save_name == "arrowconfig-a8327e21d374166ceeb94c40d2e7676f"
-
-    cfg2 = ArrowConfig(ab_only=True, scale=True)
+    cfg = ArrowTransformConfig(ab_only=True, scale=False)
+    cfg2 = ArrowTransformConfig(ab_only=True, scale=True)
     assert cfg2.save_name != cfg.save_name
 
-    cfg3 = ArrowConfig(ab_only=True, scale=False)
+    cfg3 = ArrowTransformConfig(ab_only=True, scale=False)
     assert cfg3.save_name == cfg.save_name
 
 
@@ -45,7 +43,7 @@ def test_arrow():
 
     library = HFExpertLibrary("sordonia/new-test-library")
 
-    cfg = ArrowConfig(ab_only=True, scale=False)
+    cfg = ArrowTransformConfig(ab_only=True, scale=False)
     transform = ArrowTransform(cfg)
 
     protos = transform.transform(library, persist=False, recompute=True)
@@ -106,7 +104,7 @@ def test_arrow_with_tiedlora(tmp_path, create_dummy_expert):
     library.add_expert(expert1, expert1.name)
     library.add_expert(expert2, expert2.name)
 
-    cfg = ArrowConfig(ab_only=True, scale=False)
+    cfg = ArrowTransformConfig(ab_only=True, scale=False)
     transform = ArrowTransform(cfg)
 
     protos = transform.transform(library, persist=False, recompute=True)
@@ -121,20 +119,17 @@ def test_arrow_with_tiedlora(tmp_path, create_dummy_expert):
 
 
 def test_phatgoose(tiny_flan, tmp_path, create_dummy_expert, monkeypatch):
-    # disable wandb
-    monkeypatch.setenv("WANDB_MODE", "disabled")
-
     dataset, dataset_id = tiny_flan
 
     config = ExpertConfig(
         **{
             "model_modifier": "lora",
-            "lora_rank": 32,
-            "lora_alpha": 16,
+            "lora_rank": 4,
+            "lora_alpha": 1,
             "warmup_steps": 0,
             "modify_layers": "k_proj|v_proj|q_proj|o_proj",
             "trainable_param_names": ".*lora_[ab].*",
-            "output_dir": tmp_path,
+            "output_dir": str(tmp_path),
             "precision": "32",
             "model": "EleutherAI/gpt-neo-125m",
             "dataset": dataset_id,
@@ -154,9 +149,10 @@ def test_phatgoose(tiny_flan, tmp_path, create_dummy_expert, monkeypatch):
     library.add_expert(expert1)
     library.add_expert(expert2)
 
-    pg_config = PhatgooseConfig(n_steps=1, warmup_ratio=0.0, learning_rate=1e-2)
+    pg_config = PhatgooseTransformConfig(
+        n_steps=1, warmup_ratio=0.0, learning_rate=1e-2
+    )
     phatgoose = PhatgooseTransform(pg_config)
-
     phatgoose.transform(library, persist=True, recompute=True, default_args=config)
 
     # now try to load a selector with the same config

@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 import torch.distributed as dist
-import tqdm
+from tqdm.auto import tqdm
 
 from mttl.dist_utils import (
     distributed_mean,
@@ -55,7 +55,7 @@ class RougeEvaluator(GenerativeEvaluator):
         if self.use_vllm:
             return self.evaluate_with_vllm(model, dataloader, num_batches, verbose)
 
-        pbar = tqdm.tqdm(
+        pbar = tqdm(
             enumerate(dataloader),
             total=len(dataloader),
             disable=not is_main_process(),

@@ -1,10 +1,10 @@
-transformers>=4.42.0
+transformers>=4.44.2
 torch>=2.3.1
 datasets>=2.20.0
 pytorch-lightning>=2.3.3
 accelerate
 deepspeed
-huggingface_hub
+huggingface_hub>=0.26.2
 click
 wandb
 rouge
@@ -24,6 +24,7 @@ seaborn
 azure-storage-blob
 azure-identity
 einops
+triton
 nltk
 # spops @ git+https://github.com/IST-DASLab/spops.git@main
 prettytable
