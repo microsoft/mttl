@@ -8,13 +8,14 @@ import torch
 from pytorch_lightning import Trainer, seed_everything
 
 
-from mttl.callbacks import LiveCheckpointCallback
+from mttl.models.lightning.callbacks import LiveCheckpointCallback
 from mttl.datamodule.base import DatasetConfig
 from mttl.datamodule.preference_data_module import Preferencemodule
 from mttl.datamodule.ultrafeedback_data_module import UltrafeedbackDPOmodule
 
 # from mttl.datamodule.base import get_datamodule
-from mttl.models.expert_config import ExpertConfig
+from mttl.arguments import ExpertConfig, MultiExpertConfig
+from mttl.models.expert_model import ExpertModelConfig
 from mttl.models.expert_model import (
     ExpertModel,
     ExpertModelDPO,
@@ -24,17 +25,9 @@ from mttl.models.expert_model import (
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 from mttl.models.monitors import get_monitors
-from mttl.utils import (
-    generate_random_string,
-    get_pl_loggers,
-    logger,
-    rank_zero_only_and_wait,
-    remote_login,
-    setup_logging,
-)
-from projects.modular_llm.eval_library import patch_prototypes
-from projects.modular_llm.src.transfer_matrix import TransferMatrixConfig
-from projects.modular_llm.src.transfer_matrix import run_eval as produce_transfer_matrix
+from mttl.models.lightning.loggers import get_pl_loggers
+from mttl.logging import logger, setup_logging
+from mttl.utils import generate_random_string, rank_zero_only_and_wait, remote_login
 
 
 def run_multitask(args: ExpertConfig):
@@ -81,13 +74,26 @@ def run_multitask(args: ExpertConfig):
     # dm = get_datamodule(args)
     # args.n_tasks = len(dm._task_names)
     # args.task_names = dm._task_names
+
+    args.tokenizer = dm.tokenizer
+    model_config = ExpertModelConfig(
+        base_model=args.model,
+        task_name=args.finetune_task_name,
+        expert_name=args.expert_name,
+        modifier_config=args.modifier_config,
+    )
+
     model = model_class(
-        **vars(args), tokenizer=dm.tokenizer, expert_library=expert_library
+        config=model_config,
+        expert_library=expert_library,
+        **vars(args),
     )
     if args.rl_training == "dpo":
-        args.trainable_param_names = "^(?=.*preference_model)(?=.*prototypes).*"
+        # args.trainable_param_names = "^(?=.*preference_model)(?=.*prototypes).*"
         ref_model = model_class(
-            **vars(args), tokenizer=dm.tokenizer, expert_library=expert_library
+            config=model_config,
+            expert_library=expert_library,
+            **vars(args),
         )
         # eval mode
         ref_model.eval()
@@ -95,7 +101,7 @@ def run_multitask(args: ExpertConfig):
             **vars(args), preference_model=model, ref_expert_model=ref_model
         )
     elif args.rl_training == "simpo":
-        args.trainable_param_names = "^(?=.*preference_model)(?=.*prototypes).*"
+        # args.trainable_param_names = "^(?=.*preference_model)(?=.*prototypes).*"
         module = ExpertModelSimPO(**vars(args), preference_model=model)
     else:
         module = model
@@ -206,5 +212,5 @@ def run_multitask(args: ExpertConfig):
 
 
 if __name__ == "__main__":
-    args = ExpertConfig.parse()
+    args = MultiExpertConfig.parse()  ## in case we only train the routing
     run_multitask(args)
