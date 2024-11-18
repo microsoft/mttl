@@ -8,20 +8,26 @@ import ast
 @dataclass
 class OrcaDataModuleCollator(DefaultCollator):
     def __call__(self, batch):
-        source_texts = []
-        target_texts = []
+        sources = []
+        labels = []
         for item in batch:
             if type(item["messages"]) == str:
                 item["messages"] = ast.literal_eval(item["messages"])
-            source_texts.append("You are a helpful assistant.")
-            target_texts.append(
+
+            sources.append("You are a helpful assistant.")
+            labels.append(
                 self.tokenizer.apply_chat_template(item["messages"], tokenize=False)
             )
+        output_batch = (
+            self.prepare_inputs_for_gpt_family(sources, labels)
+            if self.model_family == "gpt"
+            else self.prepare_inputs_for_seq2seq_family(sources, labels)
+        )
 
-        return {
-            "source_texts": source_texts,
-            "target_texts": target_texts,
-        }
+        output_batch["sources_texts"] = sources
+        output_batch["labels_texts"] = labels
+
+        return output_batch
 
 
 @dataclass
