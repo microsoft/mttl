@@ -39,8 +39,8 @@ class OrcaDataModule(DataModule):
         train_dataset = DatasetLibrary.pull_dataset_with_retry(
             "zhan1993/orca_sqs_dataset"
         )["train"]
-
-        train_dataset = train_dataset.filter(lambda example: example["task_name"] == self.config.finetune_task_name)
+        if self.config.finetune_task_name:
+            train_dataset = train_dataset.filter(lambda example: example["task_name"] == self.config.finetune_task_name)
 
         self.train_dataset, self.dev_dataset = self.create_train_valid_split(
             train_dataset, 0.1
