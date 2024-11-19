@@ -298,11 +298,11 @@ def load_expert_from_hf_checkpoint(
     mttl_args_file = os.path.join(expert_path, MTTL_ARGS_NAME)
 
     if not os.path.exists(mttl_args_file):
-        from huggingface_hub.errors import EntryNotFoundError
+        from huggingface_hub.errors import EntryNotFoundError, HFValidationError
 
         try:
             mttl_args_file = hf_hub_download(expert_path, MTTL_ARGS_NAME)
-        except EntryNotFoundError:
+        except (HFValidationError, EntryNotFoundError):
             logger.debug("No MTTL args file found in the expert checkpoint!")
 
             mttl_args_file = None

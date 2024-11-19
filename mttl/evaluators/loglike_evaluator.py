@@ -1,7 +1,8 @@
 import numpy as np
 import torch
-import tqdm
+from tqdm.auto import tqdm
 
+from mttl.dist_utils import distributed_mean, is_main_process
 from mttl.evaluators.base import Evaluator, switch_to_eval_mode
 from mttl.logging import logger
 from mttl.models.utils import compute_loglike_loss
@@ -31,9 +32,10 @@ class LogLikeEvaluator(Evaluator):
         if self.use_vllm:
             return self.evaluate_with_vllm(model, dataloader, num_batches, verbose)
 
-        pbar = tqdm.tqdm(
+        pbar = tqdm(
             enumerate(dataloader),
             total=len(dataloader),
+            disable=not is_main_process(),
         )
 
         all_losses = []
@@ -68,7 +70,11 @@ class LogLikeEvaluator(Evaluator):
                 loss_per_option = compute_loglike_loss(
                     logits, batch["labels"], reduction="none"
                 )
-                loss_per_option = loss_per_option.cpu().numpy()
+                loss_per_option = loss_per_option.cpu()
+
+                if loss_per_option.dtype in [torch.bfloat16, torch.float16]:
+                    loss_per_option = loss_per_option.float().numpy()
+
                 loss_per_example = [
                     loss_per_option[
                         int(np.sum(num_options[:i])) : int(np.sum(num_options[: i + 1]))
@@ -95,11 +101,16 @@ class LogLikeEvaluator(Evaluator):
             if all_accuracies:
                 pbar.set_description("Accuracy: {:.4f}".format(np.mean(all_accuracies)))
 
+        loss = distributed_mean(all_losses, device)
+        all_accuracies = (
+            distributed_mean(all_accuracies, device) if all_accuracies else None
+        )
+
         metrics = {
-            "loss": float(np.mean(all_losses)),
-            "loglike": -float(np.mean(all_losses)),
+            "loss": loss,
+            "loglike": -loss,
             "predictions": all_predictions,
-            "accuracy": float(np.mean(all_accuracies)) if all_accuracies else None,
+            "accuracy": all_accuracies,
         }
 
         self.save_metrics(metrics, output_path)

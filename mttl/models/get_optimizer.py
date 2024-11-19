@@ -1,3 +1,4 @@
+import math
 import re
 from collections import defaultdict
 
@@ -118,10 +119,15 @@ def get_optimizer_and_scheduler(model, args, num_train_examples, no_decay=None):
     )
 
     if args.total_steps == -1:
-        args.total_steps = (num_train_examples // global_bs) * args.num_train_epochs
+        if args.num_train_epochs == -1:
+            raise ValueError("Either total_steps or num_train_epochs must be set")
+
+        args.total_steps = (
+            math.ceil(num_train_examples / global_bs) * args.num_train_epochs
+        )
 
     if args.warmup_steps == -1 or args.warmup_proportion > 0.0:
-        logger.warning(
+        logger.info(
             "Warmup proportion is set to {}, has priority over warmup_steps".format(
                 args.warmup_proportion
             )

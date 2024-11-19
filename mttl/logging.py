@@ -7,7 +7,10 @@ import pandas as pd
 import prettytable
 import wandb
 
+from mttl.dist_utils import is_main_process
+
 logger = logging.getLogger("mttl")
+logging.getLogger("datasets.arrow_dataset").setLevel(logging.CRITICAL + 1)
 
 
 def maybe_wandb_log(logs: dict):
@@ -20,6 +23,11 @@ def warn_once(msg: str, **kwargs):
     logger.warning(msg, **kwargs)
 
 
+@lru_cache
+def debug_once(msg: str, **kwargs):
+    logger.debug(msg, **kwargs)
+
+
 def setup_logging(log_dir: str = None):
     logging.basicConfig(
         format="%(asctime)s %(levelname)s --> %(message)s",
@@ -29,7 +37,7 @@ def setup_logging(log_dir: str = None):
     logger.setLevel(logging.INFO)
     logging.getLogger("openai").setLevel(logging.WARNING)
 
-    if log_dir:
+    if log_dir and is_main_process():
         log_file_path = os.path.join(log_dir, "log.txt")
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
@@ -46,6 +54,9 @@ def setup_logging(log_dir: str = None):
                 "New experiment, log will be at %s",
                 log_file_path,
             )
+
+    if not is_main_process():
+        logger.setLevel(logging.ERROR)
 
 
 class TableLogger:

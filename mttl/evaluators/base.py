@@ -10,6 +10,7 @@ import numpy as np
 import torch
 from transformers import StoppingCriteria, StoppingCriteriaList
 
+from mttl.dist_utils import is_main_process
 from mttl.logging import logger
 
 
@@ -132,7 +133,7 @@ class Evaluator(ABC):
 
         self._last_metrics = metrics
 
-        if output_path is None:
+        if output_path is None or not is_main_process():
             return
 
         if not os.path.exists(output_path):

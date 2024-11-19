@@ -11,11 +11,6 @@ from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task, split_on_spli
 from mttl.logging import logger
 from mttl.models.library.dataset_library import DatasetLibrary
 
-AVAILABLE_PROMPTS = {
-    "summary": "Summarize the preceding passage.",
-    "qa": "Generate a question-answer pair given the preceding passage.",
-}
-
 
 @dataclass
 class KMDatasetConfig(DatasetConfig):
@@ -77,17 +72,9 @@ class KMDatasetModule(DataModule):
                 num_proc=20,
             )
 
-        if self.config.use_only_type:
-            # filter types (e.g. use only summary, or use only qas)
-            def filter_types(example, types):
-                return example["type"] in types.split(",")
-
-            dataset = dataset.filter(
-                partial(filter_types, types=self.config.use_only_type), num_proc=20
-            )
-
         def expand_targets_and_chat(example):
             return_dict = defaultdict(list)
+            allowed_types = self.config.use_only_type.split(",")
 
             for i in range(len(example["input"])):
                 input = example["input"][i]
@@ -95,18 +82,34 @@ class KMDatasetModule(DataModule):
                 type_ = example["type"][i]
                 subject = example[self.config.task_name_field][i]
 
+                if type_ not in allowed_types:
+                    if type_ == "qa" and "q" in allowed_types:
+                        type_ = "q"
+                    elif type_ == "qa" and "a" in allowed_types:
+                        type_ = "a"
+                    else:
+                        continue
+
                 for i, output in enumerate(outputs):
                     # for QA, we want to show the question as well as the prompt
                     if type(output) == dict:
                         if type_ == "qa":
-                            prompt_str = AVAILABLE_PROMPTS[type_]
+                            prompt_str = "Generate a question-answer pair given the preceding passage."
                             output_str = f"\nQuestion: {output['question']}\nAnswer: {output['answer']}"
+                        elif type_ == "q":
+                            prompt_str = (
+                                "Generate a question given the preceding passage."
+                            )
+                            output_str = f"{output['question']}"
+                        elif type_ == "a":
+                            prompt_str = f"Answer the following question given the preceding passage.\nQuestion: {output['question']}"
+                            output_str = f"{output['answer']}"
                         elif type_ == "summary":
-                            prompt_str = AVAILABLE_PROMPTS[type_]
+                            prompt_str = "Summarize the preceding passage."
                             output_str = output["summary"]
                     else:
-                        # fallback to default prompt (both q and a are treated as targets)
-                        prompt_str = AVAILABLE_PROMPTS[type_]
+                        # fallback to default prompt
+                        prompt_str = "Summarize the preceding passage."
                         output_str = output
 
                     prompt_str = self.tokenizer.apply_chat_template(

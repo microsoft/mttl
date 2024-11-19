@@ -110,8 +110,10 @@ class GenerationTask(Registrable):
         try:
             scores = re.findall(r"Score:\s(\d+)", text, re.DOTALL | re.IGNORECASE)
         except:
-            return
-        return scores[0]
+            return -1
+        if scores:
+            return scores[0]
+        return -1
 
     def get_filter_prompt(self, prompt, text):
         return None
@@ -268,8 +270,11 @@ class DatasetAugmenter:
         num_generations,
         generation_top_p,
         model_type="oai",
+        num_devices=-1,
         do_filtering=True,
     ):
+        import os
+
         self.tasks = {}
         self.model = model
         self.block_size = block_size
@@ -280,6 +285,9 @@ class DatasetAugmenter:
 
         self.oai = model_type in ["oai", "azure_oai"]
         if not self.oai:
+            # Set the multiprocessing method to spawn to avoid issues with torch.multiprocessing
+            os.environ["VLLM_WORKER_MULTIPROC_METHOD"] = "spawn"
+
             self.tokenizer = AutoTokenizer.from_pretrained(model)
             self.sampling_params = SamplingParams(
                 n=num_generations,
@@ -292,7 +300,9 @@ class DatasetAugmenter:
                 trust_remote_code=True,
                 gpu_memory_utilization=0.9,
                 dtype="bfloat16",
-                tensor_parallel_size=torch.cuda.device_count(),
+                tensor_parallel_size=(
+                    torch.cuda.device_count() if num_devices == -1 else num_devices
+                ),
                 max_num_seqs=64,
                 max_model_len=min(4096, self.tokenizer.model_max_length),
             )
