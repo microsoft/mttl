@@ -4,30 +4,29 @@ from mttl.datamodule.base import DatasetConfig, DefaultCollator, DataModule
 from mttl.models.library.dataset_library import DatasetLibrary
 import ast
 
+# @dataclass
+# class OrcaDataModuleCollator(DefaultCollator):
+#     def __call__(self, batch):
+#         sources = []
+#         labels = []
+#         for item in batch:
+#             if type(item["messages"]) == str:
+#                 item["messages"] = ast.literal_eval(item["messages"])
 
-@dataclass
-class OrcaDataModuleCollator(DefaultCollator):
-    def __call__(self, batch):
-        sources = []
-        labels = []
-        for item in batch:
-            if type(item["messages"]) == str:
-                item["messages"] = ast.literal_eval(item["messages"])
+#             sources.append("You are a helpful assistant.")
+#             labels.append(
+#                 self.tokenizer.apply_chat_template(item["messages"], tokenize=False)
+#             )
+#         output_batch = (
+#             self.prepare_inputs_for_gpt_family(sources, labels)
+#             if self.model_family == "gpt"
+#             else self.prepare_inputs_for_seq2seq_family(sources, labels)
+#         )
 
-            sources.append("You are a helpful assistant.")
-            labels.append(
-                self.tokenizer.apply_chat_template(item["messages"], tokenize=False)
-            )
-        output_batch = (
-            self.prepare_inputs_for_gpt_family(sources, labels)
-            if self.model_family == "gpt"
-            else self.prepare_inputs_for_seq2seq_family(sources, labels)
-        )
+#         output_batch["sources_texts"] = sources
+#         output_batch["labels_texts"] = labels
 
-        output_batch["sources_texts"] = sources
-        output_batch["labels_texts"] = labels
-
-        return output_batch
+#         return output_batch
 
 
 @dataclass
@@ -38,8 +37,10 @@ class OrcaDataModule(DataModule):
 
     def setup_dataset(self):
         train_dataset = DatasetLibrary.pull_dataset_with_retry(
-            "microsoft/orca-agentinstruct-1M-v1"
-        )[self.config.finetune_task_name]
+            "zhan1993/orca_sqs_dataset"
+        )["train"]
+
+        train_dataset = train_dataset.filter(lambda example: example["task_name"] == self.config.finetune_task_name)
 
         self.train_dataset, self.dev_dataset = self.create_train_valid_split(
             train_dataset, 0.1
@@ -50,7 +51,7 @@ class OrcaDataModule(DataModule):
 
     @property
     def collate_fn(self):
-        return OrcaDataModuleCollator(
+        return DefaultCollator(
             tokenizer=self.tokenizer,
             padding="longest",
             max_input_length=self.config.max_input_length,
@@ -66,24 +67,20 @@ if __name__ == "__main__":
         model="microsoft/Phi-3-mini-4k-instruct", finetune_task_name="creative_content"
     )
     from transformers import AutoTokenizer
-
+    #<|assistant|>
     tokenizer = AutoTokenizer.from_pretrained("microsoft/Phi-3-mini-4k-instruct")
-    message = [
-        {"role": "system", "content": ""},
-        {
-            "role": "user",
-            "content": '\n# Adapted CMake code snippet for finding a library, its include directories, and checking for a specific version\n# Additionally, handle different library names based on the platform and check for multiple components of the library\n\n```cmake\n# Define a function to check the version of the library\nfunction(check_mylib_version)\n # Assume MYLIB_VERSION_STRING is set by some mechanism after finding the library\n if (MYLIB_VERSION_STRING VERSION_LESS "2.0")\n message(WARNING "MyLib version is too old, at least version 2.0 is required.")\n set(MYLIB_VERSION_OK FALSE PARENT_SCOPE)\n else()\n set(MYLIB_VERSION_OK TRUE PARENT_SCOPE)\n endif()\nendfunction()\n\n# Potential names of the library based on the platform\nif (WIN32)\n set(MYLIB_POSSIBLE_NAMES mylib_win)\nelseif (UNIX)\n set(MYLIB_POSSIBLE_NAMES mylib_unix mylib_unix_alt)\nelse()\n set(MYLIB_POSSIBLE_NAMES mylib)\nendif()\n\n# Find the include directory and the library\nfind_path(MYLIB_INCLUDE_DIRS NAMES mylib.h)\nfind_library(MYLIB_LIBRARIES NAMES ${MYLIB_POSSIBLE_NAMES})\n\n# Handle multiple components of the library\nfind_library(MYLIB_EXTRA_LIBRARIES NAMES mylib_extra)\n\ninclude(FindPackageHandleStandardArgs)\nfind_package_handle_standard_args(MyLib DEFAULT_MSG\n MYLIB_LIBRARIES MYLIB_INCLUDE_DIRS MYLIB_EXTRA_LIBRARIES)\n\n# After finding the library, check its version\ncheck_mylib_version()\n\nif (MYLIB_INCLUDE_DIRS AND MYLIB_LIBRARIES AND MYLIB_EXTRA_LIBRARIES AND MYLIB_VERSION_OK)\n set(MYLIB_FOUND TRUE)\nendif()\n\nmark_as_advanced(MYLIB_INCLUDE_DIRS MYLIB_LIBRARIES MYLIB_EXTRA_LIBRARIES)\n\n# Output should include:\n# - Comments explaining the code execution for the scenario where mylib.h is not found,\n# but the mylib library and its extra component are found in non-standard locations.\n# - Indicate whether `MYLIB_FOUND` would be set to `TRUE` or not.\n# - Explain the version checking logic and its impact on `MYLIB_FOUND`.\n# - Discuss the handling of different library names based on the platform.\n# - Explain the importance of finding all components of the library.\n```\n\nInput:\n# Scenario where mylib.h is not found, but the mylib library and its extra component are found in non-standard locations, and the version found is 2.1.\n',
-        },
-        {
-            "role": "assistant",
-            "content": "Output:\n\nIn the given scenario, the `find_path` command is used to search for the `mylib.h` header file. Since `mylib.h` is not found, `MYLIB_INCLUDE_DIRS` will not be set, and this will be a critical failure for the `find_package_handle_standard_args` function, which expects `MYLIB_INCLUDE_DIRS` to be set to a valid path.\n\nThe `find_library` command is used to locate the `mylib` library and its extra component. The library names are determined based on the platform. For Windows, it looks for `mylib_win`, for Unix-like systems, it looks for `mylib_unix` or `mylib_unix_alt`, and for other platforms, it defaults to `mylib`. Since the libraries are found in non-standard locations, `MYLIB_LIBRARIES` and `MYLIB_EXTRA_LIBRARIES` will be set to those locations.\n\nThe `find_package_handle_standard_args` function is called to handle the results of the find commands. It checks if the required variables (`MYLIB_LIBRARIES`, `MYLIB_INCLUDE_DIRS`, `MYLIB_EXTRA_LIBRARIES`) are set. If any of these are not found, it will print a standard error message, and `MYLIB_FOUND` will not be set to `TRUE`.\n\nAfter the find commands, the `check_mylib_version` function is called to check the version of the library. Since the version found is 2.1, which is not less than 2.0, `MYLIB_VERSION_OK` will be set to `TRUE`.\n\nHowever, despite the library and its extra component being found and the version being acceptable, `MYLIB_FOUND` will not be set to `TRUE` because `MYLIB_INCLUDE_DIRS` is not set (the header file was not found). The `MYLIB_FOUND` variable is only set to `TRUE` if all components (include directories, libraries, extra libraries) are found and the version is okay.\n\nThe version checking logic is important because it ensures that the library version meets the minimum requirements for compatibility with the project. If the version is too old, it may lack necessary features or bug fixes, and the `MYLIB_VERSION_OK` variable will be set to `FALSE`, which would prevent `MYLIB_FOUND` from being set to `TRUE`.\n\nHandling different library names based on the platform is crucial because libraries can have different naming conventions on different operating systems. This flexibility allows the CMake script to find the correct library files regardless of the platform it is running on.\n\nFinding all components of the library is important because a library typically consists of both binary files (the library itself) and header files (for including in the source code). If any component is missing, the library cannot be fully utilized, and the build process may fail. Therefore, it is essential to ensure that all parts of the library are present before proceeding with the build.",
-        },
-    ]
+    message = [ { "content": "Create an outline for a presentation that includes five engaging and informative slides to test the audience's understanding of the concepts discussed in your talk, such as p-value functions, compatibility intervals, and the misconceptions about p-values. Each slide should present a multiple-choice question related to these topics. Prepare talking points that explain the correct answers and why they are correct, ensuring the explanations are clear and suitable for an educational presentation.", "role": "user" }, { "content": "Title: Understanding P-Values and Statistical Inference\n\nSlide 1: Introduction to P-Values\n- Multiple-Choice Question: What does a p-value indicate in hypothesis testing?\n A) The probability that the null hypothesis is true\n B) The probability of observing the data, or something more extreme, if the null hypothesis is true\n C) The probability that the alternative hypothesis is true\n D) The likelihood of making a Type I error\n\nTalking Points:\n- The correct answer is B. The p-value is the probability of observing the data, or something more extreme, if the null hypothesis is true. It is not a direct statement about the truth of the null or alternative hypothesis (A and C are incorrect). While it is related to the risk of a Type I error, it is not the likelihood of making this error (D is incorrect), but rather a measure of evidence against the null hypothesis given the data.\n\nSlide 2: Understanding Compatibility Intervals\n- Multiple-Choice Question: What does a 95% compatibility interval (CI) for a parameter estimate indicate?\n A) 95% of the data falls within this interval\n B) There is a 95% chance that the interval contains the true parameter value\n C) If we were to repeat the experiment many times, 95% of the calculated intervals would contain the true parameter value\n D) The parameter has a 95% probability of being within this interval\n\nTalking Points:\n- The correct answer is C. A 95% compatibility interval means that if we were to repeat the experiment many times, we would expect 95% of the calculated intervals to contain the true parameter value. It does not mean that 95% of the data falls within this interval (A is incorrect), nor does it imply a probability statement about the parameter itself (B and D are incorrect), as frequentist intervals do not assign probabilities to fixed parameters.\n\nSlide 3: Misconceptions About P-Values\n- Multiple-Choice Question: Which of the following is a common misconception about p-values?\n A) A low p-value confirms the research hypothesis\n B) A high p-value proves the null hypothesis is true\n C) P-values can indicate the size of an effect\n D) All of the above\n\nTalking Points:\n- The correct answer is D. All of the options listed are common misconceptions about p-values. A low p-value does not confirm the research hypothesis (A is incorrect); it simply suggests that the data are unlikely under the null hypothesis. A high p-value does not prove the null hypothesis is true (B is incorrect); it suggests that the data are not sufficiently unusual under the null hypothesis. P-values do not provide information about the size or importance of an effect (C is incorrect); they only indicate how incompatible the data are with the null hypothesis.\n\nSlide 4: P-Value Functions\n- Multiple-Choice Question: What information does a p-value function provide that a single p-value does not?\n A) The probability that the null hypothesis is true for different parameter values\n B) The p-values for a range of different alternative hypotheses\n C) The likelihood of the data under various parameter values\n D) The confidence level of the compatibility interval\n\nTalking Points:\n- The correct answer is B. A p-value function provides the p-values for a range of different alternative hypotheses, not just a single point alternative. It does not give the probability that the null hypothesis is true for different parameter values (A is incorrect), nor does it directly provide the likelihood of the data (C is incorrect). The confidence level of the compatibility interval is a separate concept (D is incorrect).\n\nSlide 5: Interpreting P-Values and Compatibility Intervals Together\n- Multiple-Choice Question: How should p-values and compatibility intervals be used together to interpret statistical results?\n A) To determine the probability that the null hypothesis is true\n B) To assess the evidence against the null hypothesis and the range of parameter values that are compatible with the data\n C) To calculate the effect size and its significance\n D) To prove the research hypothesis\n\nTalking Points:\n- The correct answer is B. P-values and compatibility intervals should be used together to assess the evidence against the null hypothesis (provided by the p-value) and to understand the range of parameter values that are compatible with the data (provided by the compatibility interval). They do not determine the probability that the null hypothesis is true (A is incorrect), nor do they prove the research hypothesis (D is incorrect). While they can help contextualize the effect size, they do not calculate it (C is incorrect).", "role": "assistant" } ]
+    output = tokenizer.apply_chat_template(message, tokenize=False)
 
-    dataset = DatasetLibrary.pull_dataset_with_retry(
-        "microsoft/orca-agentinstruct-1M-v1"
-    )
-    # output = tokenizer.apply_chat_template(message, tokenize=False)
+    # dataset = DatasetLibrary.pull_dataset_with_retry(
+    #     "zhan1993/orca_sqs_dataset"
+    # )
+
+    # dataset = dataset.filter(lambda example: example["task_name"] == config.finetune_task_name)
+    # splited_dataset = dataset.map(get_source_target,remove_columns=["messages","split"])
+    # breakpoint()
+
+    
     datamodule = OrcaDataModule(config)
     train_dataloader = datamodule.train_dataloader()
     val_dataloder = datamodule.val_dataloader()
