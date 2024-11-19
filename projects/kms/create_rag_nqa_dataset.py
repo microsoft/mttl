@@ -80,9 +80,14 @@ def main():
 
             # first, we chunk the text into blocks
             for chunk_idx, chunk in enumerate(
-                chunk_text(document, tokenizer, args.block_size, args.token_overlap)
+                chunk_text(
+                    document,
+                    tokenizer,
+                    args.block_size,
+                    int(args.token_overlap * args.block_size),
+                )
             ):
-                _, text = chunk
+                text = chunk
                 chunked_dataset += [text]
 
             # second, we preprocess the questions
