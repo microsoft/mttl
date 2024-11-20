@@ -14,20 +14,6 @@ Check out our papers on ArXiv:
 
 Navigate here for a quick tutorial on how to use MTTL to route and merge adapters: [MTTL tutorial](https://github.com/sordonia/pg_mbc_arrow_tutorial)
 
-To load an Arrow Phi-3 model:
-
-```python
-from mttl.models.expert_model import MultiExpertModel
-
-model = MultiExpertModel.from_pretrained(
-  "sordonia/Phi-3.5-mini-instruct-arrowed-28Aug",
-  device_map="cuda",
-  precision="32"
-)
-model.forward(...)
-model.generate(...)
-```
-
 ## About the papers
 
 ### Towards Modular LLMs by Building and Reusing a Library of LoRAs (aka Arrow & MBC)
