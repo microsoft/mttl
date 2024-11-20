@@ -16,8 +16,14 @@ Navigate here for a quick tutorial on how to use MTTL to route and merge adapter
 
 To load an Arrow Phi-3 model:
 
-```
-model = MultiExpertModel.from_pretrained("sordonia/Phi-3.5-mini-instruct-arrowed-28Aug", device_map="cuda", precision="32")
+```python
+model = MultiExpertModel.from_pretrained(
+  "sordonia/Phi-3.5-mini-instruct-arrowed-28Aug",
+  device_map="cuda",
+  precision="32"
+)
+model.forward(...)
+model.generate(...)
 ```
 
 ## About the papers
