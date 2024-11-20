@@ -10,13 +10,23 @@ Check out our papers on ArXiv:
 - [MHR](https://arxiv.org/abs/2211.03831)
 - [Polytropon](https://arxiv.org/abs/2202.13914)
 
-### About the papers
+## Tutorial
 
-#### Towards Modular LLMs by Building and Reusing a Library of LoRAs (aka Arrow & MBC)
+Navigate here for a quick tutorial on how to use MTTL to route and merge adapters: [MTTL tutorial](https://github.com/sordonia/pg_mbc_arrow_tutorial)
+
+To load an Arrow Phi-3 model:
+
+```
+model = MultiExpertModel.from_pretrained("sordonia/Phi-3.5-mini-instruct-arrowed-28Aug", device_map="cuda", precision="32")
+```
+
+## About the papers
+
+### Towards Modular LLMs by Building and Reusing a Library of LoRAs (aka Arrow & MBC)
 
 For the code that accompanies the paper _Towards Modular LLMs by Building and Reusing a Library of LoRAs_, please refer to the [Expert Library README](projects/modular_llm/README.md). This contains details on training and evaluating experts with Arrow.
 
-#### Multi-Head Adapter Routing for Cross-Task Generalization (aka MHR)
+### Multi-Head Adapter Routing for Cross-Task Generalization (aka MHR)
 
 For the code that accompanies the paper _Multi-Head Adapter Routing for Cross-Task Generalization_, please refer to [MHR-camera-ready](https://github.com/microsoft/mttl/tree/mhr-camera-ready).
 
