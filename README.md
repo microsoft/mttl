@@ -6,21 +6,21 @@ MTTL is a repository focusing on building LLMs that focus on model reusability, 
 
 Check out our papers on ArXiv:
 
-- [Arrow + MBC](https://arxiv.org/abs/2405.11157)
-- [MHR](https://arxiv.org/abs/2211.03831)
-- [Polytropon](https://arxiv.org/abs/2202.13914)
+:point_right: [Arrow + MBC](https://arxiv.org/abs/2405.11157) \
+:point_right: [MHR](https://arxiv.org/abs/2211.03831) \
+:point_right: [Polytropon](https://arxiv.org/abs/2202.13914)
 
 ## Tutorial
 
-Navigate here for a quick tutorial on how to use MTTL to route and merge adapters: [MTTL tutorial](https://github.com/sordonia/pg_mbc_arrow_tutorial)
+:point_right: Navigate [here](https://github.com/sordonia/pg_mbc_arrow_tutorial) for a quick tutorial on how to use MTTL to route and merge adapters with [Arrow](https://arxiv.org/abs/2405.11157) or [PhatGOOSE](https://arxiv.org/abs/2402.05859)! We also support different adapter merging methods and we welcome contributions!
 
 ## About the papers
 
-### Towards Modular LLMs by Building and Reusing a Library of LoRAs (aka Arrow & MBC)
+:point_right: Towards Modular LLMs by Building and Reusing a Library of LoRAs (aka Arrow & MBC)
 
 For the code that accompanies the paper _Towards Modular LLMs by Building and Reusing a Library of LoRAs_, please refer to the [Expert Library README](projects/modular_llm/README.md). This contains details on training and evaluating experts with Arrow.
 
-### Multi-Head Adapter Routing for Cross-Task Generalization (aka MHR)
+:point_right: Multi-Head Adapter Routing for Cross-Task Generalization (aka MHR)
 
 For the code that accompanies the paper _Multi-Head Adapter Routing for Cross-Task Generalization_, please refer to [MHR-camera-ready](https://github.com/microsoft/mttl/tree/mhr-camera-ready).
 
