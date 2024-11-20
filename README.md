@@ -17,6 +17,8 @@ Navigate here for a quick tutorial on how to use MTTL to route and merge adapter
 To load an Arrow Phi-3 model:
 
 ```python
+from mttl.models.expert_model import MultiExpertModel
+
 model = MultiExpertModel.from_pretrained(
   "sordonia/Phi-3.5-mini-instruct-arrowed-28Aug",
   device_map="cuda",
