@@ -258,9 +258,9 @@ class MultiExpertMixin:
 
             library = ExpertLibrary.get_expert_library(library)
 
-        def add_module(module_name):
+        def add_module(model, module_name):
             expert_dump = library[module_name]
-            self.add_expert_instance(expert_dump)
+            model.add_expert_instance(expert_dump)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
             # Create a list to hold the futures
