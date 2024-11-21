@@ -122,8 +122,10 @@ class Args(Serializable):
     @classmethod
     def process_kwargs(cls, kwargs, eval=True, raise_error=True, silent=False):
         overwrites_log = []
+        kwargs_keys = list(kwargs.keys())
 
-        for k, v in kwargs.items():
+        for k in kwargs_keys:
+            v = kwargs[k]
             if eval:
                 try:
                     v = ast.literal_eval(v)
@@ -132,8 +134,13 @@ class Args(Serializable):
             else:
                 v = v
 
-            if not hasattr(cls, k) and raise_error:
-                raise ValueError(f"{k} is not in the config")
+            if not hasattr(cls, k):
+                if raise_error:
+                    raise ValueError(f"{k} is not in the config")
+                else:
+                    # if the key is not found, but we are fault tolerant, we remove it
+                    del kwargs[k]
+                    continue
 
             if eval and not silent:
                 overwrites_log.append(f"Overwriting {k} to {v}")

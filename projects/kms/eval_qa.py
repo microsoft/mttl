@@ -73,7 +73,7 @@ def eval_qa(training_args):
 
 
 if __name__ == "__main__":
-    args = QAEvalArguments.parse()
+    args = QAEvalArguments.parse(raise_error=False)
 
     if args.nqa_dataset is None:
         logger.info(f"Setting callback dataset to {args.dataset}")

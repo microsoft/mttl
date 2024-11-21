@@ -117,7 +117,7 @@ def train_ke(training_args):
 
 
 if __name__ == "__main__":
-    args = KEArguments.parse()
+    args = KEArguments.parse(raise_error=False)
     assert args.dataset_config
 
     if args.nqa_dataset is None:
