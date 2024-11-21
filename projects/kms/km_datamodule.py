@@ -246,7 +246,10 @@ class DocumentDataset(torch.utils.data.Dataset):
         else:
             start_idx = torch.randint(
                 0,
-                len(self.docs[doc_idx]["input_ids"]) - self.config.max_input_length,
+                max(
+                    1,
+                    len(self.docs[doc_idx]["input_ids"]) - self.config.max_input_length,
+                ),
                 (1,),
                 generator=self.rng,
             ).item()
