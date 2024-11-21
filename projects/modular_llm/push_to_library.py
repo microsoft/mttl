@@ -3,7 +3,7 @@ from mttl.models.library.expert import load_expert
 import glob
 import huggingface_hub
 
-huggingface_token = "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"
+huggingface_token = "your_token"
 huggingface_hub.login(token=huggingface_token)
 
 
