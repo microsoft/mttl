@@ -119,7 +119,7 @@ def model_loader_helper(
 
     bnb_config = None
     if bnb:
-        import BitsAndBytesConfig
+        from transformers import BitsAndBytesConfig
 
         if load_in_8bit:
             bnb_config = BitsAndBytesConfig(load_in_8bit=True)
