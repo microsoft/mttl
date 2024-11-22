@@ -2,13 +2,13 @@ import math
 from dataclasses import dataclass
 from typing import List, Union
 
-import bitsandbytes as bnb
 import numpy as np
 import torch
 from torch import nn
 
 from mttl.logging import debug_once, warn_once
 from mttl.models.modifiers.base import MergeableModifierMixin, Modifier, ModifierConfig
+from mttl.models.utils import bnb
 
 
 @dataclass
@@ -29,7 +29,9 @@ class LoRA(Modifier, MergeableModifierMixin):
     ):
         super().__init__()
 
-        if type(layer) not in [nn.Linear, bnb.nn.Linear8bitLt]:
+        if isinstance(layer, nn.Linear) or (
+            bnb and isinstance(layer, bnb.nn.Linear8bitLt)
+        ):
             raise ValueError("LoRA can only be applied to torch.nn.Linear layers.")
 
         # assign self variables
@@ -90,7 +92,7 @@ class LoRA(Modifier, MergeableModifierMixin):
             to_merge = (self.lora_a.data @ self.lora_b.data).T
         to_merge = to_merge * self.scaling
 
-        if isinstance(self.layer, bnb.nn.Linear8bitLt):
+        if bnb and isinstance(self.layer, bnb.nn.Linear8bitLt):
             if self.layer.state.SCB is None:
                 self.layer.state.SCB = self.layer.weight.SCB
 

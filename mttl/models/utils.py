@@ -7,6 +7,12 @@ import torch
 
 from mttl.logging import logger
 
+bnb = None
+try:
+    import bitsandbytes as bnb
+except ImportError:
+    logger.debug("bitsandbytes not available.")
+
 
 def compute_loglike_loss(logits, labels, reduction="none"):
     bs = logits.size(0)
@@ -108,22 +114,22 @@ def model_loader_helper(
     from transformers import (
         AutoModelForCausalLM,
         AutoModelForSeq2SeqLM,
-        BitsAndBytesConfig,
-        LlamaForCausalLM,
         PreTrainedModel,
     )
 
-    if load_in_8bit:
-        bnb_config = BitsAndBytesConfig(load_in_8bit=True)
-    elif load_in_4bit:
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_use_double_quant=True,
-        )
-    else:
-        bnb_config = None
+    bnb_config = None
+    if bnb:
+        import BitsAndBytesConfig
+
+        if load_in_8bit:
+            bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+        elif load_in_4bit:
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,
+            )
 
     logger.info(f"Attention Implementation: {attn_implementation}")
 
