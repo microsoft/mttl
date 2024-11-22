@@ -1,16 +1,13 @@
 import copy
 from dataclasses import dataclass
-from functools import partial
 
-import numpy as np
 import torch
-import torch.distributed as dist
-import torch.nn.functional as F
+from icv_utils import PCA
 
 # register this datamodule!
 from km_datamodule import KMDatasetModule
 from lightning_fabric import seed_everything
-from simple_utils import SimpleLogger, dcd_loss, do_evaluation
+from simple_utils import dcd_loss, do_evaluation
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm import tqdm
 
@@ -23,68 +20,25 @@ from mttl.dist_utils import (
     is_main_process,
 )
 from mttl.logging import logger, setup_logging
-from mttl.models.expert_model import ExpertModel, ExpertModelConfig, disable_modifiers
-from mttl.models.get_optimizer import get_optimizer_and_scheduler
+from mttl.models.expert_model import ExpertModel, ExpertModelConfig
 from mttl.models.modifiers.base import Modifier
 from mttl.models.utils import transfer_batch_to_device
-from mttl.utils import create_library, remote_login, upload_library
+from mttl.utils import remote_login
 
 torch.set_float32_matmul_precision("high")
 
 import torch
 
 
-def closed_form_low_rank_solution(X, Y, k, lambda_reg=1e-5):
-    """
-    Finds W = AB where A and B minimize || Y - XAB ||_F^2 with rank k.
-
-    :param X: Input tensor of shape (n, d)
-    :param Y: Output tensor of shape (n, p)
-    :param k: Desired rank (k < min(d, p))
-    :param lambda_reg: Regularization parameter to ensure numerical stability
-    :return: A (d, k), B (k, p)
-    """
-    n, d = X.shape
-    _, p = Y.shape
-
-    # Compute (X^T X) and its regularized inverse to prevent singularity
-    XtX = X.T @ X  # Shape: (d, d)
-    XtX_reg = XtX + lambda_reg * torch.eye(d, device=X.device)  # Regularization
-    XtX_inv = torch.inverse(XtX_reg)  # Shape: (d, d)
-
-    # Compute W_OLS (Ordinary Least Squares solution)
-    W_OLS = XtX_inv @ X.T @ Y  # Shape: (d, p)
-
-    # Project Y onto the column space of X
-    Y_proj = X @ W_OLS  # Shape: (n, p)
-
-    # Compute the SVD of the projected Y
-    U_Y, S_Y, Vh_Y = torch.linalg.svd(Y_proj, full_matrices=False)
-    V_Y = Vh_Y.T  # Convert V^H to V for real-valued data
-
-    # Truncate to rank k
-    U_k = U_Y[:, :k]  # Shape: (n, k)
-    S_k = S_Y[:k]  # Shape: (k,)
-    V_k = V_Y[:, :k]  # Shape: (p, k)
-
-    # Compute the square roots of the singular values
-    sqrt_S_k = torch.sqrt(S_k)  # Shape: (k,)
-
-    # Compute A and B without forming large diagonal matrices
-    A = XtX_inv @ X.T @ (U_k * sqrt_S_k)  # Shape: (d, k)
-    B = sqrt_S_k.unsqueeze(1) * V_k.T  # Shape: (k, p)
-
-    return A, B
-
-
 @dataclass
-class KMArguments(ExpertConfig):
+class ICVKMArguments(ExpertConfig):
     loss_function: str = "dcd"
     # set the following if you want to enable the NQA callback during training
     nqa_dataset: str = "sordonia/narrativeqa_sanitized"
+    aggregation: str = "last"  # or "mean"
 
 
-def train_km(training_args: KMArguments):
+def train_km(training_args: ICVKMArguments):
     seed_everything(training_args.seed, workers=True)
 
     # get directory of the current file
@@ -129,46 +83,17 @@ def train_km(training_args: KMArguments):
         raise ValueError(f"Loss function {training_args.loss_function} not supported")
 
     datamodule = get_datamodule(training_args)
-    val_loss, rougeL = do_evaluation(datamodule, model, loss_function, evaluator)
-
-    # For every LoRA layer, let's set up a hook to fetch both the input and outputs of a forward pass
-    # This is useful for computing the loss function
-    def setup_hooks(model, info_container):
-        def hook_fn(name, module, input, output):
-            labels, nc_labels = info_container["labels"], info_container["nc_labels"]
-            use_context = info_container["use_context"]
-
-            if use_context:  # store the input
-                module.output += [output[labels != -100].detach().cpu()]
-            else:
-                module.input += [input[0][nc_labels != -100].detach().cpu()]
-
-            assert abs(len(module.input) - len(module.output)) <= 1
-
-        hooks = []
-        breakpoint()
-        for name, module in model.named_modules():
-            if isinstance(module, Modifier):
-                logger.info(f"Setting up hook for {name}")
-                module.input = []
-                module.output = []
-                hook = module.register_forward_hook(partial(hook_fn, name))
-                hooks.append(hook)
-
-        return hooks
-
-    def remove_hooks(hooks):
-        for hook in hooks:
-            hook.remove()
+    # val_loss, rougeL = do_evaluation(datamodule, model, loss_function, evaluator)
 
     info_container = {}
     for it in range(10):
-        hooks = setup_hooks(model, info_container)
+        # hooks = setup_hooks(model, info_container)
 
         # without grad, do a pass over the training dataset
         with torch.no_grad():
             datamodule = get_datamodule(training_args)
             pbar = tqdm(datamodule.train_dataloader())
+            deltas = []
             for batch_idx, batch in enumerate(pbar):
                 if batch_idx == 16:
                     break
@@ -178,6 +103,10 @@ def train_km(training_args: KMArguments):
                 input_ids = inputs["input_ids"]
                 labels = inputs["labels"]
                 attention_mask = inputs["attention_mask"]
+
+                assert (
+                    input_ids.size(0) == 1
+                ), "TODO: change aggregation to handle multiple inputs"
 
                 # small task prompt + task output (e.g. summary, or question and answer)
                 nc_input_ids = inputs["nc_input_ids"]
@@ -191,17 +120,57 @@ def train_km(training_args: KMArguments):
                 outputs = model(
                     input_ids=input_ids,
                     attention_mask=attention_mask,
+                    output_hidden_states=True,
+                    return_dict=True,
+                )
+                hidden_states = torch.stack(
+                    [
+                        hidden_state[labels != -100, ...]
+                        for hidden_state in outputs.hidden_states
+                    ]
                 )
 
                 # Context forward pass
                 info_container["use_context"] = False
-                outputs = model(
+                nc_outputs = model(
                     input_ids=nc_input_ids,
                     attention_mask=nc_attention_mask,
+                    output_hidden_states=True,
+                    return_dict=True,
                 )
 
+                nc_hidden_states = torch.stack(
+                    [
+                        hidden_state[nc_labels != -100, ...]
+                        for hidden_state in nc_outputs.hidden_states
+                    ]
+                )
+
+                # How to aggregate the sequence dimension ?
+                # hidden_states are (num_layers, seq_len, hidden_size)
+                if training_args.aggregation == "last":
+                    hidden_states = hidden_states[:, -1]
+                    nc_hidden_states = nc_hidden_states[:, -1]
+                elif training_args.aggregation == "mean":
+                    hidden_states = hidden_states.mean(dim=1)
+                    nc_hidden_states = nc_hidden_states.mean(dim=1)
+                else:
+                    raise ValueError(
+                        f"Aggregation {training_args.aggregation} not supported"
+                    )
+
+                # in ICV, delta = pos - neg, or target - pred
+                deltas += [hidden_states - nc_hidden_states]
                 # Compute DCD loss between inputs and outputs
                 # and check whether iterating over time helps
+
+            # Now, we have all the deltas, we can compute PCA
+            breakpoint()
+            n_layers, dim = deltas[0].shape
+            deltas = torch.stack(deltas).flatten(-2)
+            pca = PCA(n_components=1).to(deltas.device).fit(deltas.float())
+            direction = (pca.components_.sum(dim=0, keepdim=True) + pca.mean_).mean(0)
+            direction = direction.reshape(n_layers, dim)
 
             # Now, we iterate over the layers, and solve closed form LoRA values
             for name, module in model.named_modules():
@@ -238,5 +207,5 @@ def train_km(training_args: KMArguments):
 
 
 if __name__ == "__main__":
-    args = KMArguments.parse(raise_error=False)
+    args = ICVKMArguments.parse(raise_error=False)
     train_km(args)
