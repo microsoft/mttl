@@ -29,10 +29,13 @@ class LoRA(Modifier, MergeableModifierMixin):
     ):
         super().__init__()
 
-        if isinstance(layer, nn.Linear) or (
-            bnb and isinstance(layer, bnb.nn.Linear8bitLt)
+        if not (
+            isinstance(layer, nn.Linear)
+            or (bnb and isinstance(layer, bnb.nn.Linear8bitLt))
         ):
-            raise ValueError("LoRA can only be applied to torch.nn.Linear layers.")
+            raise ValueError(
+                "LoRA can only be applied to torch.nn.Linear layers. Got: ", layer
+            )
 
         # assign self variables
         self.config = config
