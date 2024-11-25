@@ -15,7 +15,7 @@ from mttl.models.library.dataset_library import DatasetLibrary
 @dataclass
 class KMDatasetConfig(DatasetConfig):
     # there might be multiple types, i.e. "qa", "summary", or maybe else in the future
-    use_only_type: str = None
+    use_only_type: str = "summary"
     # for each input example, we could have several outputs (e.g. several summaries or QA pairs), we can only use N of these
     num_outputs_per_chunk: int = -1
     # field in the dataset that contains the task name

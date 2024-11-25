@@ -41,7 +41,9 @@ def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0):
     )
     position_ids = context_length.unsqueeze(1) + position_ids.unsqueeze(0)
     raw_model = (
-        model.module if isinstance(model, torch.nn.parallel.DataParallel) else model
+        model.module
+        if isinstance(model, torch.nn.parallel.DistributedDataParallel)
+        else model
     )
 
     # for the context-aware pass, we need to disable the adapter
