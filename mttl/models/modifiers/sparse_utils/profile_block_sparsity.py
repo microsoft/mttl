@@ -7,7 +7,6 @@ import torch
 import torch.nn.functional as F
 import triton as tn
 from spops import csr_add, sddmm
-from triton.ops.blocksparse import matmul
 
 from mttl.models.modifiers.sparse_mask import SparseMaskConfig, SparseWeights
 from mttl.models.modifiers.sparse_utils.utils import init_sparse_weights
@@ -75,6 +74,8 @@ def prepare_triton_bs_op(X, W):
 
     layout = to_block_sparse_layout(W, BLOCK_SIZE).unsqueeze(0)
     # creat inputs
+    from triton.ops.blocksparse import matmul
+
     op = matmul(layout, BLOCK_SIZE, op_mode, trans_a=AT, trans_b=BT, device="cuda")
     return op
 

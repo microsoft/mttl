@@ -1,28 +1,14 @@
-from abc import ABC, abstractmethod
-from collections import namedtuple
 from dataclasses import dataclass
-from typing import Union
 
-import numpy as np
-import torch
-from scipy.sparse import csr_matrix
 from torch import nn
 
-from mttl.logging import logger
-from mttl.models.modifiers.base import Modifier, ModifierConfig
+from mttl.models.modifiers.base import Modifier
 from mttl.models.modifiers.sm_config import SparseMaskConfig
 from mttl.models.modifiers.sm_updater import MaskUpdater
 from mttl.models.modifiers.sparse_utils.sparse_linear import (
     MaskedLinear,
     ScatteredSparseLinearModule,
     SparseLinear,
-    SparseLinearConfig,
-)
-from mttl.models.modifiers.sparse_utils.utils import (
-    get_2d_indices_from_csr_matrix,
-    get_top_k_sparcity,
-    scipy_csr_to_torch_csr,
-    torch_csr_to_scipy_csr,
 )
 
 
