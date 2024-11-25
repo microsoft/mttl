@@ -279,6 +279,7 @@ def train_km(training_args: KMIterArguments):
         if val_loss < best_val:
             best_val = val_loss
             model.save_pretrained(training_args.output_dir + "/best_model")
+            training_args.save_config(training_args.output_dir + "/best_model")
             logger.info(f"Saving model to {training_args.output_dir}")
 
         if (

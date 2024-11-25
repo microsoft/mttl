@@ -162,6 +162,7 @@ def train_km(training_args: KMArguments):
         if val_loss < best_val and is_main_process():
             best_val = val_loss
             raw_model.save_pretrained(training_args.output_dir + "/best_model")
+            training_args.save_config(training_args.output_dir + "/best_model")
             logger.info(f"Saving model to {training_args.output_dir}")
 
 
