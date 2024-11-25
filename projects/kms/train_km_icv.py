@@ -2,7 +2,8 @@ import copy
 from dataclasses import dataclass
 
 import torch
-from icv_utils import PCA
+import torch.nn as nn
+from icv_utils import PCA, ICVLayer
 
 # register this datamodule!
 from km_datamodule import KMDatasetModule
@@ -36,6 +37,34 @@ class ICVKMArguments(ExpertConfig):
     # set the following if you want to enable the NQA callback during training
     nqa_dataset: str = "sordonia/narrativeqa_sanitized"
     aggregation: str = "last"  # or "mean"
+    icv_lambda: float = 0.01
+
+
+class JointLayer(nn.Module):
+    def __init__(self, decoder_layer, icv_layer):
+        super(JointLayer, self).__init__()
+        self.decoder_layer = decoder_layer
+        self.icv_layer = icv_layer
+
+    def forward(self, *args, **kwargs):
+        out, cache = self.decoder_layer(*args, **kwargs)
+        out = self.icv_layer(out)
+        return (out, cache)
+
+
+def patch_model(layers_parent, icv_layers, layer_list_name="layers"):
+    # Patch the model with the ICV layers
+    decoder_layers = getattr(layers_parent, layer_list_name)
+    for i, (decoder_layer, icv_layer) in enumerate(zip(decoder_layers, icv_layers)):
+        new_layer = JointLayer(decoder_layer, icv_layer)
+        decoder_layers[i] = new_layer
+
+
+def unpatch_model(layers_parent, layer_list_name="layers"):
+    # Remove the ICV layers
+    for i in range(len(layers_parent)):
+        decoder_layer, icv_layer = getattr(layers_parent, layer_list_name)[i]
+        getattr(layers_parent, layer_list_name)[i] = decoder_layer
 
 
 def train_km(training_args: ICVKMArguments):
@@ -83,7 +112,7 @@ def train_km(training_args: ICVKMArguments):
         raise ValueError(f"Loss function {training_args.loss_function} not supported")
 
     datamodule = get_datamodule(training_args)
-    # val_loss, rougeL = do_evaluation(datamodule, model, loss_function, evaluator)
+    val_loss, rougeL = do_evaluation(datamodule, model, loss_function, evaluator)
 
     info_container = {}
     for it in range(10):
@@ -95,7 +124,7 @@ def train_km(training_args: ICVKMArguments):
             pbar = tqdm(datamodule.train_dataloader())
             deltas = []
             for batch_idx, batch in enumerate(pbar):
-                if batch_idx == 16:
+                if batch_idx == training_args.total_steps:
                     break
 
                 inputs = transfer_batch_to_device(batch, device)
@@ -164,45 +193,34 @@ def train_km(training_args: ICVKMArguments):
                 # Compute DCD loss between inputs and outputs
                 # and check whether iterating over time helps
 
-            # Now, we have all the deltas, we can compute PCA
-            breakpoint()
-            n_layers, dim = deltas[0].shape
-            deltas = torch.stack(deltas).flatten(-2)
+            # (num_ex, n_layers + 1, hidden_size)
+            deltas = torch.stack(deltas)
+
+            # we remove the first entry, which are the embeddings themselves
+            assert torch.all(deltas[:, 0] == 0.0)
+            deltas = deltas[:, 1:]
+
+            num_ex, n_layers, dim = deltas.size()
+            assert n_layers == len(model.model.model.layers)
+
+            deltas = deltas.flatten(-2)
             pca = PCA(n_components=1).to(deltas.device).fit(deltas.float())
             direction = (pca.components_.sum(dim=0, keepdim=True) + pca.mean_).mean(0)
             direction = direction.reshape(n_layers, dim)
 
-            # Now, we iterate over the layers, and solve closed form LoRA values
-            for name, module in model.named_modules():
-                if isinstance(module, Modifier):
-                    logger.info(f"Computing closed form LoRA values for {name}")
-                    # compute the closed form LoRA values
-                    # As, Bs = [], []
-                    # for input, output in zip(module.input, module.output):
-                    #     A, B = closed_form_low_rank_solution(
-                    #         input[::5].float(), output[::5].float(), module.config.lora_rank, lambda_reg=100
-                    #     )
-                    #     As.append(A)
-                    #     Bs.append(B)
-                    #
-                    # A = torch.stack(As).mean(dim=0)
-                    # B = torch.stack(Bs).mean(dim=0)
-                    input = torch.cat(module.input, dim=0)
-                    output = torch.cat(module.output, dim=0)
-                    A, B = closed_form_low_rank_solution(
-                        input.float()[::20],
-                        output.float()[::20],
-                        module.config.lora_rank,
-                        lambda_reg=100,
-                    )
+            # TESTTT
+            # (Pdb) torch.where(pca.mean_ == 0.)[1][:10]
+            # tensor([ 0,  3,  6,  8,  9, 13, 15, 17, 19, 20], device='cuda:0')
 
-                    module.lora_a.data.copy_(A.data)
-                    module.lora_b.data.copy_(B.data)
-
-            remove_hooks(hooks)
+            icv_layers = [
+                ICVLayer(direction[i], training_args.icv_lambda)
+                for i in range(n_layers)
+            ]
+            patch_model(model.model.model, icv_layers)
             val_loss, rougeL = do_evaluation(
                 datamodule, model, loss_function, evaluator
             )
+            breakpoint()
             xx = 1
 
 
