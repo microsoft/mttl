@@ -167,5 +167,5 @@ def train_km(training_args: KMArguments):
 
 
 if __name__ == "__main__":
-    args = KMArguments.parse()
+    args = KMArguments.parse(raise_error=False)
     train_km(args)
