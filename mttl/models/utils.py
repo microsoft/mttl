@@ -108,14 +108,15 @@ def model_loader_helper(
     load_in_8bit=False,
     attn_implementation=None,
 ):
-    if load_in_4bit and load_in_8bit:
-        raise ValueError("Specify either 'load_in_4bit' or 'load_in_8bit' or neither.")
 
     from transformers import (
         AutoModelForCausalLM,
         AutoModelForSeq2SeqLM,
         PreTrainedModel,
     )
+
+    if load_in_4bit and load_in_8bit:
+        raise ValueError("Specify either 'load_in_4bit' or 'load_in_8bit' or neither.")
 
     bnb_config = None
     if bnb:
@@ -130,6 +131,11 @@ def model_loader_helper(
                 bnb_4bit_compute_dtype=torch.bfloat16,
                 bnb_4bit_use_double_quant=True,
             )
+    elif load_in_4bit or load_in_8bit:
+        raise ValueError(
+            "Quantization was requested, but bitsandbytes is not available. "
+            "Please install bitsandbytes with `pip install -e '.[bitsandbytes]'`."
+        )
 
     logger.info(f"Attention Implementation: {attn_implementation}")
 
