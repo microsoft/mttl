@@ -7,6 +7,12 @@ import torch
 
 from mttl.logging import logger
 
+bnb = None
+try:
+    import bitsandbytes as bnb
+except ImportError:
+    logger.debug("bitsandbytes not available.")
+
 
 def compute_loglike_loss(logits, labels, reduction="none"):
     bs = logits.size(0)
@@ -102,28 +108,34 @@ def model_loader_helper(
     load_in_8bit=False,
     attn_implementation=None,
 ):
-    if load_in_4bit and load_in_8bit:
-        raise ValueError("Specify either 'load_in_4bit' or 'load_in_8bit' or neither.")
 
     from transformers import (
         AutoModelForCausalLM,
         AutoModelForSeq2SeqLM,
-        BitsAndBytesConfig,
-        LlamaForCausalLM,
         PreTrainedModel,
     )
 
-    if load_in_8bit:
-        bnb_config = BitsAndBytesConfig(load_in_8bit=True)
-    elif load_in_4bit:
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_use_double_quant=True,
+    if load_in_4bit and load_in_8bit:
+        raise ValueError("Specify either 'load_in_4bit' or 'load_in_8bit' or neither.")
+
+    bnb_config = None
+    if bnb:
+        from transformers import BitsAndBytesConfig
+
+        if load_in_8bit:
+            bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+        elif load_in_4bit:
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,
+            )
+    elif load_in_4bit or load_in_8bit:
+        raise ValueError(
+            "Quantization was requested, but bitsandbytes is not available. "
+            "Please install bitsandbytes with `pip install -e '.[bitsandbytes]'`."
         )
-    else:
-        bnb_config = None
 
     logger.info(f"Attention Implementation: {attn_implementation}")
 

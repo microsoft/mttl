@@ -41,6 +41,10 @@ vllm = [
     "vllm",
 ]
 
+bitsandbytes = [
+    "bitsandbytes",
+]
+
 [project.urls]
 "Homepage" = "https://github.com/microsoft/mttl"
 "Bug Tracker" = "https://github.com/microsoft/mttl/issues"
