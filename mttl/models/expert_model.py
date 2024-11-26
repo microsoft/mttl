@@ -7,6 +7,7 @@ from typing import Dict, List, Union
 
 import torch
 
+from mttl.dist_utils import is_dist_avail_and_initialized
 from mttl.logging import logger
 from mttl.models.base_model import BaseExpertModel
 from mttl.models.containers.base import (
@@ -41,6 +42,9 @@ def disable_modifiers(model):
     Args:
         model (BaseExpertModel): The model to disable adapters in.
     """
+    if is_dist_avail_and_initialized():
+        model = model.module
+
     model.disable_modifiers()
 
     yield
