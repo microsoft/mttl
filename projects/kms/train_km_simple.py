@@ -90,6 +90,7 @@ def train_km(training_args: KMArguments):
     (optimizer, scheduler), trainable_param_names = get_optimizer_and_scheduler(
         model, training_args, num_train_examples=len(datamodule.train_dataset)
     )
+
     # compute number of trainable parameters
     num_trainable_params = sum(
         p.numel() for name, p in model.named_parameters() if p.requires_grad
@@ -100,7 +101,7 @@ def train_km(training_args: KMArguments):
     # args.total_steps = math.ceil(num_train_examples / global_bs) * args.num_train_epochs
 
     pbar = tqdm(
-        total=training_args.total_steps * args.gradient_accumulation_steps,
+        total=training_args.total_steps,
     )
 
     global_step = 0
@@ -120,15 +121,13 @@ def train_km(training_args: KMArguments):
     assert (
         training_args.eval_every is None or training_args.eval_every > 0
     ), "`eval_every` should be None or > 0"
-    eval_every = (
-        training_args.eval_every
-        or len(datamodule.train_dataloader())
-        // training_args.gradient_accumulation_steps
-    )
 
     epoch = 0
+    finished = False
     iter_train = iter(datamodule.train_dataloader())
-    while True:
+
+    while not finished:
+        epoch_finished = False
         loss_accum = 0.0
         model.train()
         optimizer.zero_grad()
@@ -138,6 +137,7 @@ def train_km(training_args: KMArguments):
                 batch = next(iter_train)
             except StopIteration:
                 iter_train = iter(datamodule.train_dataloader())
+                epoch_finished = True
                 epoch += 1
 
             with torch.autocast(
@@ -169,7 +169,13 @@ def train_km(training_args: KMArguments):
 
         global_step += 1
 
-        if global_step % eval_every == 0:
+        do_eval_on_step = (
+            training_args.eval_every and global_step % training_args.eval_every == 0
+        )
+        do_eval_on_epoch = (
+            epoch_finished and epoch % training_args.eval_every_n_epoch == 0
+        )
+        if do_eval_on_step or do_eval_on_epoch:
             val_loss, rougeL = do_evaluation(
                 datamodule, model, loss_function, evaluator
             )
@@ -188,6 +194,7 @@ def train_km(training_args: KMArguments):
 
     # Also save last model
     raw_model.save_pretrained(training_args.output_dir + "/last_model")
+    training_args.save_config(training_args.output_dir + "/last_model")
 
 
 if __name__ == "__main__":
