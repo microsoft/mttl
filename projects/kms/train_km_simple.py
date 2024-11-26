@@ -96,74 +96,98 @@ def train_km(training_args: KMArguments):
     )
     logger.info(f"Number of trainable parameters: {num_trainable_params // 1e6:.2f}M")
 
+    # in `get_optimizer_and_scheduler`, we compute
+    # args.total_steps = math.ceil(num_train_examples / global_bs) * args.num_train_epochs
+
     pbar = tqdm(
-        total=len(datamodule.train_dataloader())
-        * training_args.num_train_epochs
-        // args.gradient_accumulation_steps
+        total=training_args.total_steps * args.gradient_accumulation_steps,
     )
 
     global_step = 0
     best_val = float("inf")
     met_logger = SimpleLogger(training_args.output_dir)
 
-    val_loss, rougeL = do_evaluation(datamodule, model, loss_function, evaluator)
-    met_logger.log_metrics({"val_loss": val_loss, "rougeL": rougeL}, step=global_step)
-
-    for epoch in range(args.num_train_epochs):
-        epoch_end = False
-
-        iter_train = iter(datamodule.train_dataloader())
-        while not epoch_end:
-            loss_accum = 0.0
-            model.train()
-            optimizer.zero_grad()
-
-            for step in range(args.gradient_accumulation_steps):
-                try:
-                    batch = next(iter_train)
-                except StopIteration:
-                    epoch_end = True
-                    break
-
-                with torch.autocast(
-                    device_type="cuda",
-                    dtype=torch.bfloat16,
-                ):
-                    batch = transfer_batch_to_device(batch, device)
-
-                loss = loss_function(model, batch)
-                loss = loss / args.gradient_accumulation_steps
-                loss_accum += loss.detach()
-                loss.backward()
-
-            if loss_accum:
-                norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                scheduler.step()
-                optimizer.step()
-                torch.cuda.synchronize()  # wait for the GPU to finish work
-                pbar.update(1)
-
-                lr = optimizer.param_groups[0]["lr"]
-                met_logger.log_metrics(
-                    {"train_loss": loss_accum.item(), "grad_norm": norm, "lr": lr},
-                    step=global_step,
-                )
-                logger.info(
-                    f"Epoch {epoch}, Loss: {loss_accum.item():.5f}, Grad Norm: {norm:.5f}, LR: {lr:.6f}"
-                )
-
-            global_step += 1
-
+    if training_args.eval_before_training:
         val_loss, rougeL = do_evaluation(datamodule, model, loss_function, evaluator)
         met_logger.log_metrics(
             {"val_loss": val_loss, "rougeL": rougeL}, step=global_step
         )
 
-        if val_loss < best_val and is_main_process():
-            best_val = val_loss
-            raw_model.save_pretrained(training_args.output_dir + "/best_model")
-            training_args.save_config(training_args.output_dir + "/best_model")
-            logger.info(f"Saving model to {training_args.output_dir}")
+    # Handle "step" vs "epoch" logic for training and testing
+    assert (
+        training_args.total_steps > 0
+    ), "`training_steps` should have been computed in `get_optimizer_and_scheduler`"
+    assert (
+        training_args.eval_every is None or training_args.eval_every > 0
+    ), "`eval_every` should be None or > 0"
+    eval_every = (
+        training_args.eval_every
+        or len(datamodule.train_dataloader())
+        // training_args.gradient_accumulation_steps
+    )
+
+    epoch = 0
+    iter_train = iter(datamodule.train_dataloader())
+    while True:
+        loss_accum = 0.0
+        model.train()
+        optimizer.zero_grad()
+
+        for step in range(args.gradient_accumulation_steps):
+            try:
+                batch = next(iter_train)
+            except StopIteration:
+                iter_train = iter(datamodule.train_dataloader())
+                epoch += 1
+
+            with torch.autocast(
+                device_type="cuda",
+                dtype=torch.bfloat16,
+            ):
+                batch = transfer_batch_to_device(batch, device)
+
+            loss = loss_function(model, batch)
+            loss = loss / args.gradient_accumulation_steps
+            loss_accum += loss.detach()
+            loss.backward()
+
+        if loss_accum:
+            norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            scheduler.step()
+            optimizer.step()
+            torch.cuda.synchronize()  # wait for the GPU to finish work
+            pbar.update(1)
+
+            lr = optimizer.param_groups[0]["lr"]
+            met_logger.log_metrics(
+                {"train_loss": loss_accum.item(), "grad_norm": norm, "lr": lr},
+                step=global_step,
+            )
+            logger.info(
+                f"Epoch {epoch}, Loss: {loss_accum.item():.5f}, Grad Norm: {norm:.5f}, LR: {lr:.6f}"
+            )
+
+        global_step += 1
+
+        if global_step % eval_every == 0:
+            val_loss, rougeL = do_evaluation(
+                datamodule, model, loss_function, evaluator
+            )
+            met_logger.log_metrics(
+                {"val_loss": val_loss, "rougeL": rougeL}, step=global_step
+            )
+
+            if val_loss < best_val and is_main_process():
+                best_val = val_loss
+                raw_model.save_pretrained(training_args.output_dir + "/best_model")
+                training_args.save_config(training_args.output_dir + "/best_model")
+                logger.info(f"Saving model to {training_args.output_dir}")
+
+        if global_step >= training_args.total_steps:
+            break
+
+    # Also save last model
+    raw_model.save_pretrained(training_args.output_dir + "/last_model")
 
 
 if __name__ == "__main__":
