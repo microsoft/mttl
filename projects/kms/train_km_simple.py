@@ -102,6 +102,7 @@ def train_km(training_args: KMArguments):
 
     pbar = tqdm(
         total=training_args.total_steps,
+        disable=not is_main_process(),
     )
 
     global_step = 0
