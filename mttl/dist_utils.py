@@ -6,7 +6,10 @@ import torch
 import torch.distributed as dist
 
 # assuming nccl here
-if int(os.environ.get("RANK", -1)) != -1:
+if (
+    int(os.environ.get("RANK", -1)) != -1
+    and int(os.environ.get("LOCAL_RANK", -1)) != -1
+):
     dist.init_process_group(backend="nccl")
 
     ddp = True
