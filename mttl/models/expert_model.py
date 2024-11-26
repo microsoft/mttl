@@ -42,7 +42,7 @@ def disable_modifiers(model):
     Args:
         model (BaseExpertModel): The model to disable adapters in.
     """
-    if is_dist_avail_and_initialized():
+    if is_dist_avail_and_initialized() and hasattr(model, "module"):
         model = model.module
 
     model.disable_modifiers()
