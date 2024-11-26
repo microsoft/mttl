@@ -1,6 +1,5 @@
-import bitsandbytes as bnb
-
 from mttl.models.modifiers.base import Modifier, ModifierConfig
+from mttl.models.utils import bnb
 
 
 def get_modifier_name(config, model_modifier=None):
@@ -27,7 +26,7 @@ def modify_transformer(
     ):
         # set all params to require grad
         for param in transformer.parameters():
-            if not (
+            if not bnb or not (
                 isinstance(param, bnb.nn.modules.Params4bit)
                 or isinstance(param, bnb.nn.Int8Params)
             ):

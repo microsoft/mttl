@@ -7,15 +7,14 @@ import torch.nn.functional as F
 from scipy.sparse import csr_matrix
 
 from mttl.logging import logger
+from mttl.models.utils import bnb
 
 try:
     import linear_sd
 except ImportError:
-
     logger.info(
         "linear_sd not available, LinearWithSparseDelta will not work. You can install it from https://github.com/AlanAnsell/peft"
     )
-
 
 try:
     from spops import csr_add, sddmm
@@ -525,7 +524,6 @@ class BlcokSparseLinearFunction_SP_ADD(Function):
         dX = grad_output @ weights
         grad_output = grad_output.contiguous()
         input = input.contiguous()
-
         dsW = _matmul.fn["sdd"](
             grad_output.unsqueeze(1),
             input.unsqueeze(1),
@@ -592,7 +590,6 @@ class BlcokSparseLinearFunction_SP_SCATTER(Function):
         dX = grad_output @ weights
         grad_output = grad_output.contiguous()
         input = input.contiguous()
-
         dsW = _matmul.fn["sdd"](
             grad_output.unsqueeze(1),
             input.unsqueeze(1),
@@ -622,7 +619,7 @@ class LinearWithSparseDelta(torch.autograd.Function):
         ctx.save_for_backward(input, weight, dv, di, bias)
         ctx.weight_grad_hook = weight_grad_hook
         ctx.compute_dtype = compute_dtype
-        # if BNB_AVAILABLE and isinstance(weight, bnb.nn.Params4bit):
+        # if bnb and isinstance(weight, bnb.nn.Params4bit):
         #     weight = bnb.functional.dequantize_4bit(
         #         weight,
         #         quant_state=weight.quant_state,
@@ -633,7 +630,7 @@ class LinearWithSparseDelta(torch.autograd.Function):
     @staticmethod
     def backward(ctx, output_grad):
         input, weight, dv, di, bias = ctx.saved_tensors
-        if BNB_AVAILABLE and isinstance(weight, bnb.nn.Params4bit):
+        if bnb and isinstance(weight, bnb.nn.Params4bit):
             weight = bnb.functional.dequantize_4bit(
                 weight,
                 quant_state=weight.quant_state,
