@@ -378,7 +378,7 @@ class TrainingArgs(DataArgs):
     save_every: int = None
     save_each_epoch: bool = False
     eval_every: int = None
-    eval_every_n_epoch: int = 1
+    eval_every_n_epoch: int = None
     seed: int = 42
     debug: bool = False
 
