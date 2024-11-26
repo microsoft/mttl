@@ -164,8 +164,13 @@ def train_km(training_args: KMArguments):
                 {"train_loss": loss_accum.item(), "grad_norm": norm, "lr": lr},
                 step=global_step,
             )
+
             logger.info(
-                f"Epoch {epoch}, Loss: {loss_accum.item():.5f}, Grad Norm: {norm:.5f}, LR: {lr:.6f}"
+                f"Epoch {epoch + 1},"
+                f" Loss: {loss_accum:.4f},"
+                f" Norm: {norm:.4f},"
+                f" Lr: {scheduler.get_last_lr()[0]:.4f},"
+                f" Val: {best_val:.4f}"
             )
 
         global_step += 1

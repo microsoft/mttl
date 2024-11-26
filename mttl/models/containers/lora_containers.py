@@ -214,7 +214,6 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
                         ]
                     )
                 ]
-                self._skilled_loras = skilled_loras
 
                 module_output = SkilledLoRA.parallel_linear_weighted_forward(
                     input,

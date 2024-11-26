@@ -128,7 +128,6 @@ def lm_loss(model, inputs):
 
 
 def do_evaluation(datamodule, model, loss_function, evaluator) -> bool:
-    # validation
     val_loss = []
     for batch in tqdm(datamodule.val_dataloader(), disable=not is_main_process()):
         with torch.no_grad():
