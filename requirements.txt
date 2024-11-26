@@ -14,7 +14,6 @@ sentence-transformers
 fsspec[adl]
 prettytable
 rich
-bitsandbytes
 matplotlib
 openai
 ray
