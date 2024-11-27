@@ -150,8 +150,10 @@ class PackedMixin:
             if isinstance(value[0], torch.Tensor):
                 pad_token = {
                     "input_ids": self.tokenizer.pad_token_id,
+                    "nc_input_ids": self.tokenizer.pad_token_id,
                     "labels": self.label_pad_token_id,
-                }.get(key, 0)
+                    "nc_labels": self.label_pad_token_id,
+                }.get(key, self.tokenizer.pad_token_id)
 
                 value = self.pad_sequence_wrapper(
                     value,
