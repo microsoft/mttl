@@ -24,11 +24,13 @@ def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0):
     input_ids = inputs["input_ids"]
     labels = inputs["labels"]
     attention_mask = inputs["attention_mask"]
+    valid_idx = (labels != -100) & (attention_mask == 1)
 
     # small task prompt + task output (e.g. summary, or question and answer)
     nc_input_ids = inputs["nc_input_ids"]
     nc_labels = inputs["nc_labels"]
     nc_attention_mask = inputs["nc_attention_mask"]
+    nc_valid_idx = (nc_labels != -100) & (nc_attention_mask == 1)
 
     # length of the context!
     all_length = attention_mask.sum(1)
@@ -56,10 +58,9 @@ def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0):
                 return_dict=True,
             )
             target_hidden_states = [
-                hidden_state[labels != -100, ...]
-                for hidden_state in outputs.hidden_states
+                hidden_state[valid_idx] for hidden_state in outputs.hidden_states
             ]
-            target_logits = outputs.logits[labels != -100, :]
+            target_logits = outputs.logits[valid_idx]
 
     outputs = model(
         input_ids=nc_input_ids,
@@ -75,10 +76,13 @@ def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0):
         for layer_id, (actual_states, target_states) in enumerate(
             zip(outputs.hidden_states, target_hidden_states)
         ):
-            actual_states = actual_states[nc_labels != -100, :]
+            # actual_states = actual_states[nc_labels != -100, :]
+            actual_states = actual_states[nc_valid_idx, :]
 
             if actual_states.size(0) != target_states.size(0):
                 # this shouldn't happen, but sometimes it does probably due to weird tokenization issues
+                if layer_id == 0:
+                    breakpoint()
                 logger.warning("Skipping batch due to mismatch in shape")
                 break
 
@@ -98,7 +102,7 @@ def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0):
 
     # Add KL divergence between target and predicted output distributions to loss
     target_probs = F.softmax(target_logits, dim=-1)
-    preds = F.log_softmax(outputs.logits[nc_labels != -100, ...], dim=-1)
+    preds = F.log_softmax(outputs.logits[nc_valid_idx, ...], dim=-1)
     kl_loss = kl_loss(preds, target_probs).sum(dim=-1).mean()
 
     loss = loss + logit_factor * kl_loss
