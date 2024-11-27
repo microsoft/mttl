@@ -14,7 +14,7 @@ except ImportError:
     logger.debug("bitsandbytes not available.")
 
 
-def compute_loglike_loss(logits, labels, reduction="none"):
+def compute_loglike_loss(logits, labels, reduction="none", normalize_length=True):
     bs = logits.size(0)
     vocab_size = logits.size(-1)
     labels = labels.squeeze(-1)
@@ -35,7 +35,10 @@ def compute_loglike_loss(logits, labels, reduction="none"):
         # mean only non-zero
         non_zero_loss = (loss != 0).sum(dim=-1)
         non_zero_loss[non_zero_loss == 0] = 1
-        loss = loss.sum(dim=-1) / non_zero_loss
+        if normalize_length:
+            loss = loss.sum(dim=-1) / non_zero_loss
+        else:
+            loss = loss.sum(dim=-1)
     return loss
 
 

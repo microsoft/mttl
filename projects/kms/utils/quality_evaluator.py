@@ -19,9 +19,12 @@ class QualityEvaluator(LogLikeEvaluator):
 
         dataset_args.dataset_type = "quality"
         dataset_args.dataset = "sordonia/quality_sanitized"
+        dataset_args.add_eos_to_targets = False
 
         datamodule = get_datamodule(dataset_args, for_generation=False)
-        super().__init__(datamodule, generation_kwargs=generation_kwargs)
+        super().__init__(
+            datamodule, generation_kwargs=generation_kwargs, length_normalization=True
+        )
 
     def evaluate(self, model, split=None, **kwargs):
         # splits in order of preference
