@@ -139,6 +139,9 @@ class Args(Serializable):
                     raise ValueError(f"{k} is not in the config")
                 else:
                     # if the key is not found, but we are fault tolerant, we remove it
+                    logger.warning(
+                        f"{k} is not in the config, skipping it, make sure this is intended!"
+                    )
                     del kwargs[k]
                     continue
 
