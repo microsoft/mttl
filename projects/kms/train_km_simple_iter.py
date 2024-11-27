@@ -8,13 +8,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from datasets import DatasetDict
-
-# register this datamodule!
-from km_datamodule import KMDatasetModule
 from lightning_fabric import seed_everything
-from nqa_datamodule import NQADatamodule  # noqa: F401
-from nqa_evaluator import NQAZeroShotEvaluator
-from simple_utils import SimpleLogger, dcd_loss, do_evaluation
 from tqdm import tqdm
 
 from mttl.arguments import ExpertConfig
@@ -25,6 +19,12 @@ from mttl.models.expert_model import ExpertModel, ExpertModelConfig, disable_mod
 from mttl.models.get_optimizer import get_optimizer_and_scheduler
 from mttl.models.utils import transfer_batch_to_device
 from mttl.utils import create_library, remote_login, upload_library
+
+# register this datamodule!
+from projects.kms.utils.km_datamodule import KMDatasetModule
+from projects.kms.utils.nqa_datamodule import NQADatamodule  # noqa: F401
+from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator
+from projects.kms.utils.simple_utils import SimpleLogger, dcd_loss, do_evaluation
 
 
 @dataclass
@@ -90,9 +90,8 @@ def create_synthetic_data_for_epoch(
     import shutil
     import tempfile
 
-    from dataset_augmenter import DatasetAugmenter
-
     from mttl.models.utils import model_loader_helper
+    from projects.kms.utils.dataset_augmenter import DatasetAugmenter
 
     with tempfile.TemporaryDirectory() as temp_directory:
         device = model.device
