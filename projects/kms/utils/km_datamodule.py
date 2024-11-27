@@ -209,6 +209,7 @@ class DocumentDatasetTwo(torch.utils.data.Dataset):
             for doc_idx, doc in enumerate(self.documents):
                 chunk = 0
                 start_position = 0
+                doc = doc_data["input_ids"]
 
                 while chunk < math.ceil(len(doc) / self.chunk_length):
                     self.chunk_document.append(doc_idx)
