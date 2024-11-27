@@ -261,7 +261,7 @@ class DocumentDataset(torch.utils.data.Dataset):
             start_idx += offset
 
         end_idx = min(start_idx + self.config.max_input_length, len_doc)
-        print(f"worker_id: {worker_id}, rank: {self.rank},  start_idx: {start_idx}")
+        # print(f"worker_id: {worker_id}, rank: {self.rank},  start_idx: {start_idx}")
 
         output = {
             "input_ids": self.docs[doc_idx]["input_ids"][start_idx:end_idx],
