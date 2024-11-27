@@ -568,7 +568,7 @@ class DataModule(LightningDataModule, Registrable):
             sampler=train_sampler,
             num_workers=self.config.dataloader_num_workers,
             pin_memory=True,
-            persistent_workers=False,
+            persistent_workers=True,
             collate_fn=self.collate_fn,
         )
 
