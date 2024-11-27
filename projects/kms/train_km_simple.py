@@ -79,8 +79,10 @@ def train_km(training_args: KMArguments):
     # build evaluator
     data_args = copy.deepcopy(training_args)
     if training_args.evaluate_on == "nqa":
+        eval_metric = "rougeL"
         evaluator = NQAZeroShotEvaluator(data_args)
     elif training_args.evaluate_on == "quality":
+        eval_metric = "accuracy"
         evaluator = QualityEvaluator(data_args)
 
     if training_args.loss_function == "dcd":
@@ -112,9 +114,12 @@ def train_km(training_args: KMArguments):
     met_logger = SimpleLogger(training_args.output_dir)
 
     if training_args.eval_before_training:
-        val_loss, rougeL = do_evaluation(datamodule, model, loss_function, evaluator)
+        val_loss, eval_score = do_evaluation(
+            datamodule, model, loss_function, evaluator
+        )
+        logger.info(f"Validation Loss: {val_loss}, {eval_metric}: {eval_score}")
         met_logger.log_metrics(
-            {"val_loss": val_loss, "rougeL": rougeL}, step=global_step
+            {"val_loss": val_loss, eval_metric: eval_score}, step=global_step
         )
 
     # Handle "step" vs "epoch" logic for training and testing
@@ -186,11 +191,12 @@ def train_km(training_args: KMArguments):
             and epoch % training_args.eval_every_n_epoch == 0
         )
         if do_eval_on_step or do_eval_on_epoch:
-            val_loss, rougeL = do_evaluation(
+            val_loss, eval_score = do_evaluation(
                 datamodule, model, loss_function, evaluator
             )
+            logger.info(f"Validation Loss: {val_loss}, {eval_metric}: {eval_score}")
             met_logger.log_metrics(
-                {"val_loss": val_loss, "rougeL": rougeL}, step=global_step
+                {"val_loss": val_loss, eval_metric: eval_score}, step=global_step
             )
 
             if val_loss < best_val and is_main_process():
@@ -208,5 +214,5 @@ def train_km(training_args: KMArguments):
 
 
 if __name__ == "__main__":
-    args = KMArguments.parse()
+    args = KMArguments.parse(raise_error=False)
     train_km(args)

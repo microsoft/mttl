@@ -135,9 +135,8 @@ def do_evaluation(datamodule, model, loss_function, evaluator) -> bool:
             val_loss.append(loss_function(model, batch).item())
 
     val_loss = distributed_mean(val_loss, model.device)
-    rougeL = evaluator.evaluate(model, "dev")
-    logger.info(f"Validation Loss: {val_loss}, ROUGE-L: {rougeL}")
-    return val_loss, rougeL
+    eval_score = evaluator.evaluate(model, "dev")
+    return val_loss, eval_score
 
 
 class SimpleLogger:
