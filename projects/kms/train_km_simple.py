@@ -179,7 +179,9 @@ def train_km(training_args: KMArguments):
             training_args.eval_every and global_step % training_args.eval_every == 0
         )
         do_eval_on_epoch = (
-            epoch_finished and epoch % training_args.eval_every_n_epoch == 0
+            training_args.eval_every_n_epoch
+            and epoch_finished
+            and epoch % training_args.eval_every_n_epoch == 0
         )
         if do_eval_on_step or do_eval_on_epoch:
             val_loss, rougeL = do_evaluation(
@@ -204,5 +206,5 @@ def train_km(training_args: KMArguments):
 
 
 if __name__ == "__main__":
-    args = KMArguments.parse(raise_error=False)
+    args = KMArguments.parse()
     train_km(args)
