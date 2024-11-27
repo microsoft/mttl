@@ -24,13 +24,13 @@ def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0):
     input_ids = inputs["input_ids"]
     labels = inputs["labels"]
     attention_mask = inputs["attention_mask"]
-    valid_idx = (labels != -100) & (attention_mask == 1)
+    valid_idx = labels != -100
 
     # small task prompt + task output (e.g. summary, or question and answer)
     nc_input_ids = inputs["nc_input_ids"]
     nc_labels = inputs["nc_labels"]
     nc_attention_mask = inputs["nc_attention_mask"]
-    nc_valid_idx = (nc_labels != -100) & (nc_attention_mask == 1)
+    nc_valid_idx = nc_labels != -100
 
     # length of the context!
     all_length = attention_mask.sum(1)
