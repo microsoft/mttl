@@ -204,7 +204,7 @@ class DocumentDataset(torch.utils.data.Dataset):
         if deterministic:
             # we always want to pick the first index of every chunk
             self.chunks_per_doc = torch.LongTensor(
-                [max(1, len(doc["input_ids"]) // chunk_size) for doc in self.docs]
+                [int(np.ceil(len(doc["input_ids"]) / chunk_size)) for doc in self.docs]
             )
             self.cum_chunks_per_doc = torch.cumsum(self.chunks_per_doc, 0).long()
 
@@ -268,9 +268,6 @@ class DocumentDataset(torch.utils.data.Dataset):
 
         worker_id = getattr(get_worker_info(), "id", -1)
         end_idx = start_idx + self.config.max_input_length
-
-        # The following assert will be executed for a document with a single chunk smaller than max_input_length
-        assert end_idx < len(self.docs[doc_idx]["input_ids"])
         # print(f"rank {self.rank}, worker id {worker_id}, det {self.deterministic}",start_idx)
 
         output = {
