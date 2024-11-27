@@ -24,10 +24,9 @@ def maybe_filter_hf_dataset_by_task(
         if isinstance(task_names, str):
             task_names = sorted(task_names.split(","))
         elif isinstance(task_names, Iterable):
-            task_names = sorted(task_names)
+            task_names = sorted(map(str, task_names))
         else:
-            # e.g. task_name is an integer, sorted() will raise an error
-            task_names = [task_names]
+            task_names = [str(task_names)]
 
         if not set(task_names).issubset(all_tasks):
             raise ValueError(
