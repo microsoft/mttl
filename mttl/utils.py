@@ -9,11 +9,19 @@ from functools import wraps
 from time import sleep
 from typing import Optional
 
+import numpy as np
 import torch
 import torch.nn as nn
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 
 from mttl.logging import logger, warn_once
+
+
+def seed_everything(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 
 def retry(max_retries=10, wait_seconds=60):
