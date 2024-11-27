@@ -2,18 +2,14 @@ import copy
 import json
 import logging
 import os
+import random
 from dataclasses import dataclass
 
 import numpy as np
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
-
-# register this datamodule!
-from km_datamodule import KMDatasetModule
 from lightning_fabric import seed_everything
-from nqa_datamodule import NQADatamodule  # noqa: F401
-from simple_utils import SimpleLogger, dcd_loss, do_evaluation
 from torch.distributed import destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm import tqdm
@@ -30,7 +26,14 @@ from mttl.logging import logger, setup_logging
 from mttl.models.expert_model import ExpertModel, ExpertModelConfig, disable_modifiers
 from mttl.models.get_optimizer import get_optimizer_and_scheduler
 from mttl.models.utils import transfer_batch_to_device
-from mttl.utils import create_library, remote_login, upload_library
+from mttl.utils import create_library, remote_login, seed_everything, upload_library
+
+# register this datamodule!
+from projects.kms.utils.km_datamodule import KMDatasetModule
+from projects.kms.utils.nqa_datamodule import NQADatamodule  # noqa: F401
+from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator
+from projects.kms.utils.quality_evaluator import QualityEvaluator
+from projects.kms.utils.simple_utils import SimpleLogger, dcd_loss, do_evaluation
 
 torch.set_float32_matmul_precision("high")
 
@@ -38,12 +41,11 @@ torch.set_float32_matmul_precision("high")
 @dataclass
 class KMArguments(ExpertConfig):
     loss_function: str = "dcd"
-    # set the following if you want to enable the NQA callback during training
-    nqa_dataset: str = "sordonia/narrativeqa_sanitized"
+    evaluate_on: str = "nqa"
 
 
 def train_km(training_args: KMArguments):
-    seed_everything(training_args.seed, workers=True)
+    seed_everything(training_args.seed)
 
     # get directory of the current file
     setup_logging(training_args.output_dir)
@@ -74,12 +76,12 @@ def train_km(training_args: KMArguments):
     if is_dist_avail_and_initialized():
         model = DDP(model, device_ids=[get_local_rank()])
 
-    # load the NQA callback to monitor zero-shot performance
-    from nqa_evaluator import NQAZeroShotEvaluator
-
+    # build evaluator
     data_args = copy.deepcopy(training_args)
-    data_args.dataset = training_args.nqa_dataset
-    evaluator = NQAZeroShotEvaluator(data_args, generation_kwargs={})
+    if training_args.evaluate_on == "nqa":
+        evaluator = NQAZeroShotEvaluator(data_args)
+    elif training_args.evaluate_on == "quality":
+        evaluator = QualityEvaluator(data_args)
 
     if training_args.loss_function == "dcd":
         loss_function = dcd_loss

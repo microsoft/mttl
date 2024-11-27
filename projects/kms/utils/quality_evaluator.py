@@ -1,28 +1,31 @@
-from nqa_datamodule import NQADatamodule, NQADatasetConfig
+from typing import Dict
 
 from mttl.arguments import create_config_class_from_args
 from mttl.datamodule.base import DataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
+from mttl.evaluators.loglike_evaluator import LogLikeEvaluator
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 from mttl.logging import warn_once
+from projects.kms.utils.nqa_datamodule import NQADatamodule, NQADatasetConfig
+from projects.kms.utils.quality_datamodule import (
+    QualityDatamodule,
+    QualityDatasetConfig,
+)
 
 
-class NQAZeroShotEvaluator(RougeEvaluator):
-    def __init__(self, dataset_args, generation_kwargs):
-
+class QualityEvaluator(LogLikeEvaluator):
+    def __init__(self, dataset_args: "DataArgs", generation_kwargs: Dict = {}):
         from mttl.datamodule.base import get_datamodule
 
-        # set the dataset type
-        dataset_args.dataset_type = "narrativeqa"
+        dataset_args.dataset_type = "quality"
+        dataset_args.dataset = "sordonia/quality_sanitized"
 
-        datamodule = get_datamodule(dataset_args, for_generation=True)
-
+        datamodule = get_datamodule(dataset_args, for_generation=False)
         super().__init__(datamodule, generation_kwargs=generation_kwargs)
 
     def evaluate(self, model, split=None, **kwargs):
-
         # splits in order of preference
-        splits = ["test", "dev", "train"]
+        splits = ["dev", "train"]
 
         if split is not None:
             assert split in splits, f"Split {split} not found in {splits}"

@@ -3,12 +3,12 @@ import os
 
 import torch
 import tqdm
-from dataset_augmenter import chunk_text
 from datasets import Dataset, load_dataset
 from sentence_transformers import SentenceTransformer
 from transformers import AutoTokenizer
 
 from mttl.utils import remote_login
+from projects.kms.utils.dataset_augmenter import chunk_text
 
 
 def main():

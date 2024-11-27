@@ -5,11 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 import torch
 import torch.nn.functional as F
-
-# register this datamodule!
-from km_datamodule import KMDatasetModule
 from lightning_fabric import seed_everything
-from nqa_datamodule import NQADatamodule  # noqa: F401
 from utils.callbacks import LogMttlArgs
 
 from mttl.arguments import ExpertConfig
@@ -17,6 +13,10 @@ from mttl.logging import setup_logging
 from mttl.models.expert_model import ExpertModel, ExpertModelConfig
 from mttl.models.hf.trainer import ExpertModelTrainer, LMTrainer
 from mttl.utils import create_library, remote_login, upload_library
+
+# register this datamodule!
+from projects.kms.utils.km_datamodule import KMDatasetModule
+from projects.kms.utils.nqa_datamodule import NQADatamodule  # noqa: F401
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -187,7 +187,7 @@ def train_km(training_args):
 
     if training_args.nqa_dataset is not None:
         # load the NQA callback to monitor zero-shot performance
-        from nqa_callback import NQAZeroShotCallback
+        from projects.kms.utils.nqa_callback import NQAZeroShotCallback
 
         data_args = copy.deepcopy(training_args)
         data_args.dataset = training_args.nqa_dataset

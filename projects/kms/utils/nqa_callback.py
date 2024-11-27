@@ -1,7 +1,5 @@
 import os
 
-from nqa_datamodule import NQADatamodule, NQADatasetConfig
-from nqa_evaluator import NQAZeroShotEvaluator
 from transformers import (
     TrainerCallback,
     TrainerControl,
@@ -12,6 +10,8 @@ from transformers import (
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 from mttl.logging import maybe_wandb_log
+from projects.kms.utils.nqa_datamodule import NQADatamodule, NQADatasetConfig
+from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator
 
 
 class NQAZeroShotCallback(TrainerCallback):

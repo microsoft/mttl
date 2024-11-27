@@ -9,12 +9,12 @@ import tenacity
 import torch
 import tqdm
 import vllm
-from dataset_augmenter import DatasetAugmenter
 from datasets import Dataset, DatasetDict, DatasetInfo, load_dataset
 from tqdm import tqdm as ttqdm
 from tqdm.asyncio import tqdm as tqdm_async
 
 from mttl.arguments import Args
+from projects.kms.utils.dataset_augmenter import DatasetAugmenter
 
 
 @dataclass

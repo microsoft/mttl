@@ -4,9 +4,6 @@ import logging
 from dataclasses import dataclass
 
 from lightning_fabric import seed_everything
-
-# register this datamodule!
-from nqa_datamodule import NQADatamodule
 from train_km import KMArguments
 from utils.callbacks import LogMttlArgs
 
@@ -20,6 +17,9 @@ from mttl.models.hf.trainer import LMTrainer
 from mttl.models.km_model import KMMoEModel, KMMoEModelConfig
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.utils import remote_login
+
+# register this datamodule!
+from projects.kms.utils.nqa_datamodule import NQADatamodule
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -86,7 +86,7 @@ def train_ke(training_args):
     callbacks = [LogMttlArgs(training_args)]
     if training_args.nqa_dataset is not None:
         # load the NQA callback to monitor zero-shot performance
-        from nqa_callback import NQAZeroShotCallback
+        from projects.kms.utils.nqa_callback import NQAZeroShotCallback
 
         data_args = copy.deepcopy(training_args)
         data_args.dataset = training_args.nqa_dataset
