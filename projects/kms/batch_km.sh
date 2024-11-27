@@ -59,7 +59,7 @@ for DOC_ID in $DOCUMENT_IDS; do
     fi
 
     mkdir -p "$OUTPUT_DIR/$DOC_ID"
-    CUDA_VISIBLE_DEVICES=0 python train_km.py \
+    torchrun --nproc-per-node 1 --master_port=$((29500 + $CUDA_VISIBLE_DEVICES)) train_km.py \
         -c "$CONFIG_FILE" \
         -k finetune_task_name="$DOC_ID" \
         -k wandb_run_name="$AMLT_EXPERIMENT_NAME-$DOC_ID" \

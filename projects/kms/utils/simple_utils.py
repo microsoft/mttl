@@ -81,10 +81,7 @@ def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0):
 
             if actual_states.size(0) != target_states.size(0):
                 # this shouldn't happen, but sometimes it does probably due to weird tokenization issues
-                if layer_id == 0:
-                    breakpoint()
                 logger.warning("Skipping batch due to mismatch in shape")
-                break
 
             # Loss is the mean abs difference between target and predicted states,
             # normalised by mean magnitude of target states
