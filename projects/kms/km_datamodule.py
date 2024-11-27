@@ -5,6 +5,7 @@ from functools import partial
 
 import numpy as np
 import torch
+from torch.utils.data import get_worker_info
 
 from mttl.datamodule.base import DataModule, DatasetConfig, DefaultCollator
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task, split_on_split_column
@@ -192,8 +193,13 @@ class DocumentDataset(torch.utils.data.Dataset):
         self.deterministic = deterministic
 
         if not self.deterministic:
-            self.rng = torch.Generator()
-            self.rng.manual_seed(torch.initial_seed() % (2**32))
+            from mttl.dist_utils import ddp_rank, ddp_world_size
+
+            self.rank = ddp_rank
+            self.world_size = ddp_world_size
+        else:
+            self.rank = -1
+            self.world_size = 1
 
         # determine how many chunks per document we should sample
         chunk_size = self.config.max_input_length
@@ -238,22 +244,24 @@ class DocumentDataset(torch.utils.data.Dataset):
         """Enable both random sampling and sequential iteration over document chunks"""
 
         doc_idx = self.idx_to_doc[idx]
+        worker_id = getattr(get_worker_info(), "id", -1)
+        chunk_idx = idx - sum(self.chunks_per_doc[:doc_idx])
+        start_idx = chunk_idx * self.config.max_input_length
+        len_doc = len(self.docs[doc_idx]["input_ids"])
+        tokens_left = len_doc - start_idx
 
-        if self.deterministic:
-            chunk_idx = idx - sum(self.chunks_per_doc[:doc_idx])
-            start_idx = chunk_idx * self.config.max_input_length
-            end_idx = start_idx + self.config.max_input_length
-        else:
-            start_idx = torch.randint(
+        if not self.deterministic:
+            # If we are deterministic, we keep start_idx fixed
+            # Otherwise, we shift by [0, chunk_size = self.config.max_input_length)
+            offset = torch.randint(
                 0,
-                max(
-                    1,
-                    len(self.docs[doc_idx]["input_ids"]) - self.config.max_input_length,
-                ),
+                max(1, min(tokens_left, self.config.max_input_length)),
                 (1,),
-                generator=self.rng,
             ).item()
-            end_idx = start_idx + self.config.max_input_length
+            start_idx += offset
+
+        end_idx = min(start_idx + self.config.max_input_length, len_doc)
+        print(f"worker_id: {worker_id}, rank: {self.rank},  start_idx: {start_idx}")
 
         output = {
             "input_ids": self.docs[doc_idx]["input_ids"][start_idx:end_idx],
