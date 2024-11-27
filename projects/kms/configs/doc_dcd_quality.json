@@ -1,0 +1,8 @@
+{
+    "loss_function": "dcd",
+    "dataset_type": "doc_km",
+    "dataset": "sordonia/quality_sanitized",
+    "evaluate_on": "quality",
+    "label_frac": 0.75,
+    "max_input_length": 2048
+}

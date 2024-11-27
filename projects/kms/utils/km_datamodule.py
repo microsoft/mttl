@@ -280,7 +280,6 @@ class DocumentDataset(torch.utils.data.Dataset):
             "seq_lens": [self.config.max_input_length],
             "task_names": self.docs[doc_idx]["document_id"],
         }
-
         return self.build_labels(output)
 
     def __len__(self):
