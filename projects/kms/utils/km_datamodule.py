@@ -1,3 +1,4 @@
+import math
 import os
 from collections import defaultdict
 from dataclasses import dataclass
@@ -9,6 +10,7 @@ from torch.utils.data import get_worker_info
 
 from mttl.datamodule.base import DataModule, DatasetConfig, DefaultCollator
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task, split_on_split_column
+from mttl.dist_utils import ddp_rank, ddp_world_size
 from mttl.logging import logger
 from mttl.models.library.dataset_library import DatasetLibrary
 
@@ -184,6 +186,85 @@ class KMDatasetModule(DataModule):
         self.test_dataset = self.dev_dataset
 
 
+class DocumentDatasetTwo(torch.utils.data.Dataset):
+    def _build_structure(self):
+        self.chunk_document = []
+        self.chunk_positions = []
+        self.chunk_lengths = []
+
+        if not self.deterministic:
+            for doc_idx, doc_data in enumerate(self.documents):
+                chunk = 0
+                doc = doc_data["input_ids"]
+
+                while chunk < max(1, len(doc) - self.chunk_length):
+                    self.chunk_document.append(doc_idx)
+                    self.chunk_positions.append(chunk)
+                    length = self.chunk_length
+                    if chunk + self.chunk_length > len(doc):
+                        length = len(doc) - chunk
+                    self.chunk_lengths.append(length)
+                    chunk += 1
+        else:
+            for doc_idx, doc in enumerate(self.documents):
+                chunk = 0
+                start_position = 0
+
+                while chunk < math.ceil(len(doc) / self.chunk_length):
+                    self.chunk_document.append(doc_idx)
+                    self.chunk_positions.append(start_position)
+                    length = min(len(doc) - start_position, self.chunk_length)
+                    self.chunk_lengths.append(length)
+
+                    if length < self.chunk_length:
+                        start_position = max(0, len(doc) - self.chunk_length)
+                    else:
+                        start_position = start_position + self.chunk_length
+                    chunk += 1
+
+        self.total_positions = len(self.chunk_document)
+
+    def __init__(self, documents, config, deterministic=False):
+        self.docs = documents
+        self.config = config
+        self.chunk_length = config.max_input_length
+        self.deterministic = deterministic
+        self._build_structure()
+
+    def build_labels(self, datapoint):
+        all_tokens = datapoint["input_ids"]
+        input_ids = all_tokens[:]
+        label_ids = all_tokens[:]
+
+        label_start = max(0, int(len(input_ids) * (1 - self.config.label_frac)))
+        warmup_start = max(0, label_start - self.config.prefix_length)
+
+        # ensure that nothing before `label_start` has loss computed
+        label_ids[:label_start] = [-100] * label_start
+
+        datapoint["labels"] = label_ids
+        datapoint["nc_input_ids"] = input_ids[warmup_start:]
+        datapoint["nc_labels"] = label_ids[warmup_start:]
+        datapoint["nc_attention_mask"] = datapoint["attention_mask"][warmup_start:]
+        return datapoint
+
+    def __len__(self):
+        return self.total_positions
+
+    def __getitem__(self, idx):
+        doc_idx = self.chunk_document[idx]
+        start_idx = self.chunk_positions[idx]
+        end_idx = start_idx + self.chunk_lengths[idx]
+        output = {
+            "input_ids": self.docs[doc_idx]["input_ids"][start_idx:end_idx],
+            "labels": self.docs[doc_idx]["input_ids"][start_idx:end_idx],
+            "attention_mask": self.docs[doc_idx]["attention_mask"][start_idx:end_idx],
+            "seq_lens": [self.config.max_input_length],
+            "task_names": self.docs[doc_idx]["document_id"],
+        }
+        return self.build_labels(output)
+
+
 class DocumentDataset(torch.utils.data.Dataset):
     """Dataset to handle randomly chunking documents at every epoch"""
 
@@ -194,9 +275,6 @@ class DocumentDataset(torch.utils.data.Dataset):
         self.docs = docs
         self.config = config
         self.deterministic = deterministic
-
-        from mttl.dist_utils import ddp_rank, ddp_world_size
-
         self.rank = ddp_rank
         self.world_size = ddp_world_size
         chunk_size = self.config.max_input_length
@@ -383,8 +461,10 @@ class LMDataModule(DataModule):
         )
         dev_dataset = dataset.map(partial(split_datapoint, split="dev"), num_proc=20)
 
-        self.train_dataset = DocumentDataset(
+        self.train_dataset = DocumentDatasetTwo(
             train_dataset, self.config, deterministic=False
         )
-        self.dev_dataset = DocumentDataset(dev_dataset, self.config, deterministic=True)
+        self.dev_dataset = DocumentDatasetTwo(
+            dev_dataset, self.config, deterministic=True
+        )
         self.test_dataset = None
