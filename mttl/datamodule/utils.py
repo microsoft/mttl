@@ -45,19 +45,19 @@ def maybe_filter_hf_dataset_by_task(
 
     if task_names is not None:
         train_dataset = train_dataset.filter(
-            lambda x: x[task_field] in task_names,
+            lambda x: str(x[task_field]) in task_names,
             num_proc=n_proc,
             desc="Filtering task names",
         )
         if dev_dataset:
             dev_dataset = dev_dataset.filter(
-                lambda x: x[task_field] in task_names,
+                lambda x: str(x[task_field]) in task_names,
                 num_proc=n_proc,
                 desc="Filtering task names",
             )
         if test_dataset:
             test_dataset = test_dataset.filter(
-                lambda x: x[task_field] in task_names,
+                lambda x: str(x[task_field]) in task_names,
                 num_proc=n_proc,
                 desc="Filtering task names",
             )
