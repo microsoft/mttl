@@ -270,13 +270,10 @@ class DocumentDataset(torch.utils.data.Dataset):
             "seq_lens": [self.config.max_input_length],
             "task_names": self.docs[doc_idx]["document_id"],
         }
-
         return self.build_labels(output)
 
     def __len__(self):
-        if not hasattr(self, "_len"):
-            self._len = sum(self.chunks_per_doc)
-        return self._len
+        return sum(self.chunks_per_doc)
 
 
 @dataclass
