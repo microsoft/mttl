@@ -271,10 +271,7 @@ class DocumentDataset(torch.utils.data.Dataset):
 
         # The following assert will be executed for a document with a single chunk smaller than max_input_length
         assert end_idx < len(self.docs[doc_idx]["input_ids"])
-        print(
-            f"rank {self.rank}, worker id {worker_id}, det {self.deterministic}",
-            start_idx,
-        )
+        # print(f"rank {self.rank}, worker id {worker_id}, det {self.deterministic}",start_idx)
 
         output = {
             "input_ids": self.docs[doc_idx]["input_ids"][start_idx:end_idx],
