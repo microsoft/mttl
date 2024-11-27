@@ -187,31 +187,38 @@ class KMDatasetModule(DataModule):
 class DocumentDataset(torch.utils.data.Dataset):
     """Dataset to handle randomly chunking documents at every epoch"""
 
+    def preprend_a_zero(self, tensor):
+        return torch.cat([torch.zeros_like(tensor[:1]), tensor])
+
     def __init__(self, docs, config, deterministic=False):
         self.docs = docs
         self.config = config
         self.deterministic = deterministic
 
-        if not self.deterministic:
-            from mttl.dist_utils import ddp_rank, ddp_world_size
+        from mttl.dist_utils import ddp_rank, ddp_world_size
 
-            self.rank = ddp_rank
-            self.world_size = ddp_world_size
-        else:
-            self.rank = -1
-            self.world_size = 1
-
-        # determine how many chunks per document we should sample
+        self.rank = ddp_rank
+        self.world_size = ddp_world_size
         chunk_size = self.config.max_input_length
-        self.chunks_per_doc = [
-            max(1, len(doc["input_ids"]) // chunk_size) for doc in self.docs
-        ]
 
-        # map dataset index to document index
-        self.idx_to_doc = []
-        for doc_idx in range(len(self.docs)):
-            for _ in range(self.chunks_per_doc[doc_idx]):
-                self.idx_to_doc.append(doc_idx)
+        if deterministic:
+            # we always want to pick the first index of every chunk
+            self.chunks_per_doc = torch.LongTensor(
+                [max(1, len(doc["input_ids"]) // chunk_size) for doc in self.docs]
+            )
+            self.cum_chunks_per_doc = torch.cumsum(self.chunks_per_doc, 0).long()
+
+            # self.cum_chunks_per_doc[i] = number of chunks from documents 0 to i-1
+            self.cum_chunks_per_doc = self.preprend_a_zero(self.cum_chunks_per_doc)
+        else:
+            # Every document can be indexed at multiple places
+            self.max_start_idx = torch.LongTensor(
+                [len(doc["input_ids"]) - chunk_size for doc in self.docs]
+            )
+            self.cum_start_idx = torch.cumsum(self.max_start_idx, 0).long()
+
+            # self.cum_start_idx[i] = sum of tokens from documents 0 to i-1
+            self.cum_start_idx = self.preprend_a_zero(self.cum_start_idx)
 
     def build_labels(self, datapoint):
         all_tokens = datapoint["input_ids"]
@@ -238,30 +245,36 @@ class DocumentDataset(torch.utils.data.Dataset):
         datapoint["nc_input_ids"] = input_ids[warmup_start:]
         datapoint["nc_labels"] = label_ids[warmup_start:]
         datapoint["nc_attention_mask"] = datapoint["attention_mask"][warmup_start:]
+
         return datapoint
 
     def __getitem__(self, idx):
         """Enable both random sampling and sequential iteration over document chunks"""
 
-        doc_idx = self.idx_to_doc[idx]
+        if self.deterministic:
+            doc_idx = torch.where(
+                (idx >= self.cum_chunks_per_doc[:-1])
+                & (idx < self.cum_chunks_per_doc[1:])
+            )[0].item()
+            # undo the offset from the previous documents
+            chunk_idx = (idx - self.cum_chunks_per_doc[doc_idx]).item()
+            start_idx = chunk_idx * self.config.max_input_length
+        else:
+            doc_idx = torch.where(
+                (idx >= self.cum_start_idx[:-1]) & (idx < self.cum_start_idx[1:])
+            )[0].item()
+            # undo the offset from the previous documents
+            start_idx = (idx - self.cum_start_idx[doc_idx]).item()
+
         worker_id = getattr(get_worker_info(), "id", -1)
-        chunk_idx = idx - sum(self.chunks_per_doc[:doc_idx])
-        start_idx = chunk_idx * self.config.max_input_length
-        len_doc = len(self.docs[doc_idx]["input_ids"])
-        tokens_left = len_doc - start_idx
+        end_idx = start_idx + self.config.max_input_length
 
-        if not self.deterministic:
-            # If we are deterministic, we keep start_idx fixed
-            # Otherwise, we shift by [0, chunk_size = self.config.max_input_length)
-            offset = torch.randint(
-                0,
-                max(1, min(tokens_left, self.config.max_input_length)),
-                (1,),
-            ).item()
-            start_idx += offset
-
-        end_idx = min(start_idx + self.config.max_input_length, len_doc)
-        # print(f"worker_id: {worker_id}, rank: {self.rank},  start_idx: {start_idx}")
+        # The following assert will be executed for a document with a single chunk smaller than max_input_length
+        assert end_idx < len(self.docs[doc_idx]["input_ids"])
+        print(
+            f"rank {self.rank}, worker id {worker_id}, det {self.deterministic}",
+            start_idx,
+        )
 
         output = {
             "input_ids": self.docs[doc_idx]["input_ids"][start_idx:end_idx],
@@ -275,7 +288,13 @@ class DocumentDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         if not hasattr(self, "_len"):
-            self._len = sum(self.chunks_per_doc)
+            if self.deterministic:
+                # always pick the first index of every chunk
+                self._len = sum(self.chunks_per_doc)
+            else:
+                # How many potential starting indices are there ?
+                self._len = (self.max_start_idx + 1).sum().item()
+
         return self._len
 
 
