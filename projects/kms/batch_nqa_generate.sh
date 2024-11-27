@@ -24,7 +24,7 @@ if [ $WORKER_ID -ge $NUM_WORKERS ]; then
 fi
 
 # Flatten the input json file
-jq -r '.[] | .[]' "nqa_splits/nqa_full.json" > input.txt
+jq -r '.[] | .[]' "splits/nqa/nqa_full.json" > input.txt
 
 # Extract IDs assigned to this worker
 DOCUMENT_IDS=$(awk -v wid=$WORKER_ID -v nworkers=$NUM_WORKERS '{
