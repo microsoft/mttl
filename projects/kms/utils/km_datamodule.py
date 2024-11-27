@@ -193,7 +193,7 @@ class DocumentDatasetTwo(torch.utils.data.Dataset):
         self.chunk_lengths = []
 
         if not self.deterministic:
-            for doc_idx, doc_data in enumerate(self.documents):
+            for doc_idx, doc_data in enumerate(self.docs):
                 chunk = 0
                 doc = doc_data["input_ids"]
 
@@ -206,7 +206,7 @@ class DocumentDatasetTwo(torch.utils.data.Dataset):
                     self.chunk_lengths.append(length)
                     chunk += 1
         else:
-            for doc_idx, doc in enumerate(self.documents):
+            for doc_idx, doc in enumerate(self.docs):
                 chunk = 0
                 start_position = 0
                 doc = doc_data["input_ids"]
