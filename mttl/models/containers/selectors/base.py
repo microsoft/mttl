@@ -41,9 +41,11 @@ def get_selector(selector_config: "SelectorConfig", **kwargs):
 class SelectorConfig(Serializable):
     # the granularity of the selector (which layers use the same selectors)
     router_granularity: str = "*"
-    lora_merge_after: bool = False
     selector_logging: bool = True
     num_experts: int = 0
+
+    # applies only to lora selectors, specify whether loras must be merged after the outer product
+    lora_merge_after: bool = False
 
     def __eq__(self, other):
         # compare all the attributes

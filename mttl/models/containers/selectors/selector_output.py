@@ -3,14 +3,11 @@ from typing import List, Union
 
 import torch
 
+ALL_EXPERTS = object()
+
 
 @dataclass
 class SelectorOutput:
-    ALL_EXPERTS = object()
-
-    # applies only to loras, merges after the outer product
-    lora_merge_after: bool = False
-
     def __post_init__(self):
         if hasattr(self, "weights") and self.weights.ndim != len(self.dim_names):
             raise ValueError(
