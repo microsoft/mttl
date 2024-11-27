@@ -50,7 +50,7 @@ class QualityDatamodule(MultiChoiceDataModule):
                     document_id = examples["document_id"][i]
                     question = examples["questions"][i][j]
                     options = examples["options"][i][j]
-                    label_index = examples["gold_label"][i][j]
+                    label_index = examples["gold_label"][i][j] - 1
 
                     if self.config.include_context:
                         context = examples["text"][i]
