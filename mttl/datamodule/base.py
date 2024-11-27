@@ -568,7 +568,7 @@ class DataModule(LightningDataModule, Registrable):
             sampler=train_sampler,
             num_workers=self.config.dataloader_num_workers,
             pin_memory=True,
-            persistent_workers=True,
+            persistent_workers=self.config.dataloader_num_workers > 0,
             collate_fn=self.collate_fn,
         )
 
@@ -586,7 +586,7 @@ class DataModule(LightningDataModule, Registrable):
             sampler=dev_sampler,
             num_workers=self.config.dataloader_num_workers,
             pin_memory=False,
-            persistent_workers=False,
+            persistent_workers=self.config.dataloader_num_workers > 0,
             collate_fn=self.collate_fn,
             drop_last=False,
         )
@@ -605,7 +605,7 @@ class DataModule(LightningDataModule, Registrable):
             num_workers=self.config.dataloader_num_workers,
             pin_memory=False,
             sampler=test_sampler,
-            persistent_workers=False,
+            persistent_workers=self.config.dataloader_num_workers > 0,
             collate_fn=self.collate_fn,
             drop_last=False,
         )
