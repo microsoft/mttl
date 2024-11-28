@@ -16,6 +16,7 @@ from mttl.models.containers.selectors.base import (
     safe_logging,
 )
 from mttl.models.containers.selectors.selector_output import (
+    ALL_EXPERTS,
     BatchSequenceExpertsAndWeightsSelectorOutput,
     SelectorOutput,
 )
@@ -215,7 +216,7 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
             )
             router_logits = router_logits.masked_fill(~chosen, -1e9)
         else:
-            experts = SelectorOutput.ALL_EXPERTS
+            experts = ALL_EXPERTS
             router_probs = F.softmax(router_logits, dim=-1, dtype=torch.float)
 
         self._log_entropy(router_logits)
