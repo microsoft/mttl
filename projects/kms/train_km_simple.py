@@ -33,7 +33,12 @@ from projects.kms.utils.km_datamodule import KMDatasetModule
 from projects.kms.utils.nqa_datamodule import NQADatamodule  # noqa: F401
 from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator
 from projects.kms.utils.quality_evaluator import QualityEvaluator
-from projects.kms.utils.simple_utils import SimpleLogger, dcd_loss, do_evaluation
+from projects.kms.utils.simple_utils import (
+    SimpleLogger,
+    dcd_loss,
+    do_evaluation,
+    lm_loss,
+)
 
 torch.set_float32_matmul_precision("high")
 
@@ -87,6 +92,8 @@ def train_km(training_args: KMArguments):
 
     if training_args.loss_function == "dcd":
         loss_function = dcd_loss
+    elif training_args.loss_function == "lm":
+        loss_function = lm_loss
     else:
         raise ValueError(f"Loss function {training_args.loss_function} not supported")
 
