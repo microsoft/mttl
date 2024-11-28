@@ -436,6 +436,9 @@ class DatasetAugmenter:
                 else:
                     section["outputs"].append(text)
 
+            if len(section["outputs"]) == 0:
+                continue
+
             if n < 5:
                 print("********************")
                 print("Type: ", section["type"])

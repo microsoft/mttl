@@ -10,6 +10,8 @@ from mttl.models.utils import compute_loglike_loss
 
 class LogLikeEvaluator(Evaluator):
     def __init__(self, datamodule, **kwargs):
+        self.length_normalization = kwargs.pop("length_normalization", True)
+
         super().__init__(datamodule=datamodule, **kwargs)
 
     @switch_to_eval_mode
@@ -68,7 +70,10 @@ class LogLikeEvaluator(Evaluator):
                     ).logits
 
                 loss_per_option = compute_loglike_loss(
-                    logits, batch["labels"], reduction="none"
+                    logits,
+                    batch["labels"],
+                    reduction="none",
+                    normalize_length=self.length_normalization,
                 )
                 loss_per_option = loss_per_option.cpu()
 
@@ -81,6 +86,7 @@ class LogLikeEvaluator(Evaluator):
                     ]
                     for i in range(batch_size)
                 ]
+
                 predictions = [
                     np.argmin(option_loss) for option_loss in loss_per_example
                 ]

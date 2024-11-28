@@ -89,7 +89,7 @@ def main(args):
                 }
             )
             d.save_to_disk(args.output_path)
-    elif args.dataset_type == "narrativeqa":
+    elif args.dataset_type in ["narrativeqa", "quality"]:
         # process only selected document ids
         import glob
 
@@ -97,7 +97,7 @@ def main(args):
 
         # disable caching
         disable_caching()
-        dataset = load_dataset("sordonia/narrativeqa_sanitized", split="train")
+        dataset = load_dataset(f"sordonia/{args.dataset_type}_sanitized", split="train")
 
         if "split" not in dataset.column_names:
             raise ValueError(
@@ -105,10 +105,13 @@ def main(args):
             )
 
         if args.dataset_task is not None:
-            document_ids = args.dataset_task.split(",")
+            if type(args.dataset_task) == tuple:
+                document_ids = list(map(str, args.dataset_task))
+            else:
+                document_ids = args.dataset_task.split(",")
 
             dataset = dataset.filter(
-                lambda x: x["document_id"] in set(document_ids), num_proc=16
+                lambda x: str(x["document_id"]) in set(document_ids), num_proc=16
             )
 
         concat_dataset = augmenter.augment(dataset, carry_columns="document_id")
