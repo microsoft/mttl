@@ -256,7 +256,7 @@ class DocumentDatasetTwo(torch.utils.data.Dataset):
             "input_ids": self.docs[doc_idx]["input_ids"][start_idx:end_idx],
             "labels": self.docs[doc_idx]["input_ids"][start_idx:end_idx],
             "attention_mask": self.docs[doc_idx]["attention_mask"][start_idx:end_idx],
-            "seq_lens": [self.config.max_input_length],
+            "seq_lens": [end_idx - start_idx],
             "task_names": self.docs[doc_idx]["document_id"],
         }
         return self.build_labels(output)
