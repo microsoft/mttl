@@ -45,7 +45,7 @@ def eval_qa(training_args):
     # create a model without any experts
     model = MoEModel(model_config)
 
-    from nqa_evaluator import NQAZeroShotEvaluator
+    from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator
 
     evaluator = NQAZeroShotEvaluator(training_args, generation_kwargs={})
 
