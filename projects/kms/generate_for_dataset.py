@@ -106,12 +106,12 @@ def main(args):
 
         if args.dataset_task is not None:
             if type(args.dataset_task) == tuple:
-                document_ids = args.dataset_task
+                document_ids = list(map(str, args.dataset_task))
             else:
                 document_ids = args.dataset_task.split(",")
 
             dataset = dataset.filter(
-                lambda x: x["document_id"] in set(document_ids), num_proc=16
+                lambda x: str(x["document_id"]) in set(document_ids), num_proc=16
             )
 
         concat_dataset = augmenter.augment(dataset, carry_columns="document_id")
