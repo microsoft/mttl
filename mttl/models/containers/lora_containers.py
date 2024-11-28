@@ -5,6 +5,7 @@ from torch import Tensor, nn
 from mttl.logging import warn_once
 from mttl.models.containers.base import ExpertContainer, MergeableContainer
 from mttl.models.containers.selectors.selector_output import (
+    ALL_EXPERTS,
     BatchExpertsAndWeightsSelectorOutput,
     BatchExpertsSelectorOutput,
     BatchSequenceExpertsAndWeightsSelectorOutput,
@@ -30,11 +31,8 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
         config: LoRAConfig,
         layer,
         selector=None,
-        lora_merge_after=False,
     ):
         super().__init__(config, layer, selector)
-
-        self.lora_merge_after = lora_merge_after
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
@@ -136,7 +134,7 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
                 [skilled_lora],
                 selection.weights,
                 dim_names=selection.dim_names,
-                merge_after=self.lora_merge_after,
+                merge_after=self.selector.config.lora_merge_after,
             )
         elif isinstance(selection, BatchExpertsSelectorOutput):
             # In this case, we have exactly one expert per example in the batch with no weights
@@ -151,9 +149,9 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
             ),
         ):
             # In this case, we have exactly multiple experts per example (and possible per token) in the batch with weights
-            # The selectors might return a list of expert names, in this case we need to convert them to indices
+            # The selectors might return a list of expert names, qin this case we need to convert them to indices
             # If expert names are not returned, it means that we are scoring all the experts
-            if selection.experts is not SelectorOutput.ALL_EXPERTS:
+            if selection.experts is not ALL_EXPERTS:
                 if not isinstance(selection.experts, torch.Tensor):
                     # convert expert names to indices
                     selection.experts = torch.LongTensor(
@@ -199,7 +197,7 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
                     skilled_loras,
                     inverse_weights,
                     dim_names=selection.dim_names,
-                    merge_after=self.lora_merge_after,
+                    merge_after=self.selector.config.lora_merge_after,
                 )
             else:
                 # we have no indices, so we assume that we have weights for all the experts
@@ -220,7 +218,7 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
                     skilled_loras,
                     selection.weights,
                     dim_names=selection.dim_names,
-                    merge_after=self.lora_merge_after,
+                    merge_after=self.selector.config.lora_merge_after,
                 )
             return module_output.view(input.shape[0], input.shape[1], -1)
 
@@ -248,10 +246,9 @@ class SkilledLoRAExpertContainer(LoRAExpertContainer):
         config,
         layer,
         selector=None,
-        lora_merge_after=False,
         **kwargs,
     ):
-        super().__init__(config, layer, selector, lora_merge_after)
+        super().__init__(config, layer, selector)
 
         if not isinstance(self.layer, nn.Linear):
             raise ValueError(
@@ -347,7 +344,7 @@ class SkilledLoRAExpertContainer(LoRAExpertContainer):
                 [self.experts],
                 weights,
                 dim_names=["batch", "experts"],
-                merge_after=self.lora_merge_after,
+                merge_after=self.selector.config.lora_merge_after,
             )
             return module_output
         elif (
@@ -355,7 +352,7 @@ class SkilledLoRAExpertContainer(LoRAExpertContainer):
             or isinstance(selection, BatchExpertsAndWeightsSelectorOutput)
             or isinstance(selection, ExpertsAndWeightsSelectorOutput)
         ):
-            if selection.experts is not SelectorOutput.ALL_EXPERTS:
+            if selection.experts is not ALL_EXPERTS:
                 # we are in top-k or sparse selection mode
                 if not isinstance(selection.experts, torch.Tensor):
                     selection.experts = torch.LongTensor(
@@ -383,7 +380,7 @@ class SkilledLoRAExpertContainer(LoRAExpertContainer):
                 [self.experts],
                 weights,
                 dim_names=selection.dim_names,
-                merge_after=self.lora_merge_after,
+                merge_after=self.selector.config.lora_merge_after,
             )
             return module_output
         else:

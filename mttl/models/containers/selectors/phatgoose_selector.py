@@ -120,7 +120,8 @@ class PhatgooseTrainerSelector(Selector):
         self.routing_gates.append(scores.detach().cpu().float())
 
         return BatchSequenceExpertsAndWeightsSelectorOutput(
-            torch.zeros_like(scores, dtype=torch.long), scores
+            experts=torch.zeros_like(scores, dtype=torch.long),
+            weights=scores,
         )
 
     def on_add_expert(

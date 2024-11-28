@@ -15,6 +15,7 @@ from mttl.models.containers.selectors.base import (
     SelectorOutput,
     forward_with_cache,
 )
+from mttl.models.containers.selectors.selector_output import ALL_EXPERTS
 from mttl.models.library.expert import ExpertInfo
 
 
@@ -128,12 +129,10 @@ class PolySelector(Selector):
 
         if self.n_tasks == 0:
             return ExpertsSplitsAndWeightsSelectorOutput(
-                SelectorOutput.ALL_EXPERTS, weights.squeeze(0)
+                ALL_EXPERTS, weights.squeeze(0)
             )
 
-        return BatchExpertsSplitsAndWeightsSelectorOutput(
-            SelectorOutput.ALL_EXPERTS, weights
-        )
+        return BatchExpertsSplitsAndWeightsSelectorOutput(ALL_EXPERTS, weights)
 
     def get_merging_weights(self, **selector_kwargs) -> Dict:
         return self.get_routing_weights(**selector_kwargs)
