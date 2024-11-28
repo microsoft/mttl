@@ -117,7 +117,7 @@ def train_km(training_args: KMArguments):
     )
 
     global_step = 0
-    best_val = float("inf")
+    best_val = val_loss = float("inf")
     met_logger = SimpleLogger(training_args.output_dir)
 
     if training_args.eval_before_training:
@@ -184,7 +184,7 @@ def train_km(training_args: KMArguments):
                 f" Loss: {loss_accum:.4f},"
                 f" Norm: {norm:.4f},"
                 f" Lr: {scheduler.get_last_lr()[0]:.4f},"
-                f" Val: {best_val:.4f}"
+                f" Val: {best_val:.4f} ({val_loss:.4f})"
             )
 
         global_step += 1
