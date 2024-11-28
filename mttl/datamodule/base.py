@@ -146,23 +146,30 @@ class PackedMixin:
                     output_batch[key].append(value)
 
         # create proper containers
+        def get_pad_token(key):
+            if "attention_mask" in key:
+                return 0
+            elif "input_ids" in key:
+                return self.tokenizer.pad_token_id
+            elif "labels" in key:
+                return self.label_pad_token_id
+            else:
+                raise ValueError(f"Unknown key {key}")
+
         for key, value in output_batch.items():
             if isinstance(value[0], torch.Tensor):
-                pad_token = {
-                    "input_ids": self.tokenizer.pad_token_id,
-                    "nc_input_ids": self.tokenizer.pad_token_id,
-                    "labels": self.label_pad_token_id,
-                    "nc_labels": self.label_pad_token_id,
-                }.get(key, self.tokenizer.pad_token_id)
+                # Is there a sequence in the batch?
+                if any(v.numel() > 1 for v in value):
+                    value = self.pad_sequence_wrapper(
+                        value,
+                        batch_first=True,
+                        padding_value=get_pad_token(key),
+                        side=self.tokenizer.padding_side,
+                    )
+                else:
+                    value = torch.stack(value, dim=0)
 
-                value = self.pad_sequence_wrapper(
-                    value,
-                    batch_first=True,
-                    padding_value=pad_token,
-                    side=self.tokenizer.padding_side,
-                )
                 output_batch[key] = value
-
         packed_seq_lens = output_batch["seq_lens"].flatten().cumsum(0)
         output_batch["packed_seq_lens"] = F.pad(packed_seq_lens, (1, 0)).to(torch.int32)
 
