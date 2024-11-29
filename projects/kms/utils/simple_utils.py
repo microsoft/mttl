@@ -17,6 +17,8 @@ from mttl.models.utils import transfer_batch_to_device
 
 
 def print_metrics(data):
+    import numpy as np
+
     min_value = min(data)
     max_value = max(data)
     spark_chars = "▁▂▃▄▅▆▇█"
@@ -24,6 +26,9 @@ def print_metrics(data):
     # Handle the case where all data points are the same
     if max_value - min_value == 0:
         return spark_chars[3] * len(data)
+
+    min_value = min(data) - np.std(data)
+    max_value = max(data) + np.std(data)
 
     # Scale data points to indices of spark_chars
     scaled_data = [
@@ -95,7 +100,6 @@ def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0):
         for layer_id, (actual_states, target_states) in enumerate(
             zip(outputs.hidden_states, target_hidden_states)
         ):
-            # actual_states = actual_states[nc_labels != -100, :]
             actual_states = actual_states[nc_valid_idx, :]
 
             if actual_states.size(0) != target_states.size(0):
