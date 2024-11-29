@@ -99,9 +99,6 @@ def main(args):
         disable_caching()
         dataset = load_dataset(f"sordonia/{args.dataset_type}_sanitized", split="train")
 
-        if "split" not in dataset.column_names:
-            raise ValueError("Dataset must have a 'split' column.")
-
         if args.dataset_task is not None:
             if type(args.dataset_task) == tuple:
                 document_ids = list(map(str, args.dataset_task))
