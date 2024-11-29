@@ -38,7 +38,9 @@ from projects.kms.utils.simple_utils import (
     dcd_loss,
     do_evaluation,
     lm_loss,
+    print_metrics,
 )
+from projects.kms.utils.wiki_mmlu_evaluator import WikiMMLUEvaluator
 
 torch.set_float32_matmul_precision("high")
 
@@ -89,6 +91,9 @@ def train_km(training_args: KMArguments):
     elif training_args.evaluate_on == "quality":
         eval_metric = "accuracy"
         evaluator = QualityEvaluator(data_args)
+    elif training_args.evaluate_on == "wiki_mmlu":
+        eval_metric = "accuracy"
+        evaluator = WikiMMLUEvaluator(data_args)
 
     if training_args.loss_function == "dcd":
         loss_function = dcd_loss
@@ -118,16 +123,22 @@ def train_km(training_args: KMArguments):
 
     global_step = 0
     best_val = val_loss = float("inf")
+    eval_score_so_far = []
     met_logger = SimpleLogger(training_args.output_dir)
 
     if training_args.eval_before_training:
         val_loss, eval_score = do_evaluation(
             datamodule, model, loss_function, evaluator
         )
-        logger.info(f"Validation Loss: {val_loss}, {eval_metric}: {eval_score}")
         met_logger.log_metrics(
             {"val_loss": val_loss, eval_metric: eval_score}, step=global_step
         )
+
+        logger.info(f"Validation Loss: {val_loss}, {eval_metric}: {eval_score}")
+        logger.info(
+            f"Losses so far: {print_metrics(met_logger.get_metric('val_loss'))}"
+        )
+        logger.info(f"Eval so far: {print_metrics(met_logger.get_metric(eval_metric))}")
 
     # Handle "step" vs "epoch" logic for training and testing
     assert (
@@ -201,9 +212,17 @@ def train_km(training_args: KMArguments):
             val_loss, eval_score = do_evaluation(
                 datamodule, model, loss_function, evaluator
             )
-            logger.info(f"Validation Loss: {val_loss}, {eval_metric}: {eval_score}")
+
             met_logger.log_metrics(
                 {"val_loss": val_loss, eval_metric: eval_score}, step=global_step
+            )
+
+            logger.info(f"Validation Loss: {val_loss}, {eval_metric}: {eval_score}")
+            logger.info(
+                f"Losses so far: {print_metrics(met_logger.get_metric('val_loss'))}"
+            )
+            logger.info(
+                f"Eval so far: {print_metrics(met_logger.get_metric(eval_metric))}"
             )
 
             if val_loss < best_val and is_main_process():

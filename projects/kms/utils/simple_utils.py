@@ -16,6 +16,25 @@ from mttl.models.expert_model import disable_modifiers
 from mttl.models.utils import transfer_batch_to_device
 
 
+def print_metrics(data):
+    min_value = min(data)
+    max_value = max(data)
+    spark_chars = "▁▂▃▄▅▆▇█"
+
+    # Handle the case where all data points are the same
+    if max_value - min_value == 0:
+        return spark_chars[3] * len(data)
+
+    # Scale data points to indices of spark_chars
+    scaled_data = [
+        int((value - min_value) / (max_value - min_value) * (len(spark_chars) - 1))
+        for value in data
+    ]
+
+    # Map scaled data to corresponding sparkline characters
+    return "".join(spark_chars[idx] for idx in scaled_data)
+
+
 def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0):
     """Deep Contextual Distillation loss."""
     kl_loss = torch.nn.KLDivLoss(reduction="none")
@@ -147,6 +166,12 @@ class SimpleLogger:
 
         if os.path.exists(self.output_file):
             os.remove(self.output_file)
+
+    def get_metric(self, metric_name):
+        with open(self.output_file, "r") as f:
+            lines = [json.loads(s) for s in f.readlines()]
+            lines = [l["value"] for l in lines if l["name"] == metric_name]
+        return lines
 
     def log_metrics(self, metrics, step=None):
         from mttl.dist_utils import is_main_process

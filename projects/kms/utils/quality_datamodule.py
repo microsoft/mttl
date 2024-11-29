@@ -33,10 +33,6 @@ class QualityDatamodule(MultiChoiceDataModule):
             dataset, self.config.task_name_field, self.config.finetune_task_name
         )
 
-        self.train_dataset, self.dev_dataset, self.test_dataset = split_on_split_column(
-            train_dataset
-        )
-
         def expand_questions(examples, tokenizer):
             batch = {
                 "source": [],
@@ -99,16 +95,31 @@ class QualityDatamodule(MultiChoiceDataModule):
                     batch["document_id"].append(examples["document_id"][i])
             return batch
 
-        # test dataset doesn't have the gold labels
-        for split in ["train", "dev"]:
-            dataset = getattr(self, f"{split}_dataset")
-
-            if dataset:
-                dataset = dataset.map(
-                    lambda examples: expand_questions(examples, self.tokenizer),
-                    batched=True,
-                    batch_size=1000,
-                    num_proc=1,
-                    remove_columns=dataset.column_names,
-                )
-                setattr(self, f"{split}_dataset", dataset)
+        if "split" in train_dataset.features:
+            self.train_dataset, self.dev_dataset, _ = split_on_split_column(
+                train_dataset
+            )
+            self.train_dataset = self.train_dataset.map(
+                lambda examples: expand_questions(examples, self.tokenizer),
+                batched=True,
+                batch_size=1000,
+                num_proc=1,
+                remove_columns=train_dataset.column_names,
+            )
+            self.dev_dataset = self.dev_dataset.map(
+                lambda examples: expand_questions(examples, self.tokenizer),
+                batched=True,
+                batch_size=1000,
+                num_proc=1,
+                remove_columns=train_dataset.column_names,
+            )
+            self.test_dataset = None
+        else:
+            train_dataset = train_dataset.map(
+                lambda examples: expand_questions(examples, self.tokenizer),
+                batched=True,
+                batch_size=1000,
+                num_proc=1,
+                remove_columns=train_dataset.column_names,
+            )
+            self.train_dataset = self.dev_dataset = self.test_dataset = train_dataset
