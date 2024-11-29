@@ -97,7 +97,6 @@ class EMAExpertModel(BaseExpertModel, MultiExpertMixin):
             param.requires_grad = False
 
         self.add_empty_expert("KM", expert_config=config.modifier_config)
-        print("b random : ", self.config.modifier_config.lora_init_b_random)
 
         # Set EMA weights to match the KM weights
         self.ema_update(ema_coef=0.0)
