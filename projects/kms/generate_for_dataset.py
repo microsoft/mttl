@@ -89,7 +89,7 @@ def main(args):
                 }
             )
             d.save_to_disk(args.output_path)
-    elif args.dataset_type in ["narrativeqa", "quality"]:
+    elif args.dataset_type in ["narrativeqa", "quality", "wiki_top_20"]:
         # process only selected document ids
         import glob
 
@@ -100,9 +100,7 @@ def main(args):
         dataset = load_dataset(f"sordonia/{args.dataset_type}_sanitized", split="train")
 
         if "split" not in dataset.column_names:
-            raise ValueError(
-                "Dataset must have a 'split' column, did you call `create_nqa_dataset.py`?"
-            )
+            raise ValueError("Dataset must have a 'split' column.")
 
         if args.dataset_task is not None:
             if type(args.dataset_task) == tuple:
