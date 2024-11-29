@@ -26,23 +26,5 @@ class QualityEvaluator(LogLikeEvaluator):
             datamodule, generation_kwargs=generation_kwargs, length_normalization=True
         )
 
-    def evaluate(self, model, split=None, **kwargs):
-        # splits in order of preference
-        splits = ["dev", "train"]
-
-        if split is not None:
-            assert split in splits, f"Split {split} not found in {splits}"
-            dataset = getattr(self.datamodule, f"{split}_dataset")
-            if dataset is None or len(dataset) == 0:
-                warn_once(
-                    f"invalid dataset for split {split}, \n{dataset}. Using default split."
-                )
-                split = None
-
-        if split is None:
-            for split in splits:
-                dataset = getattr(self.datamodule, f"{split}_dataset")
-                if dataset and len(dataset):
-                    break
-
+    def evaluate(self, model, split="dev", **kwargs):
         return super().evaluate(model, split=split, **kwargs)
