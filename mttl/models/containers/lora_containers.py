@@ -10,6 +10,7 @@ from mttl.models.containers.selectors.selector_output import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
     ExpertsAndWeightsSelectorOutput,
     SelectorOutput,
+    SharedExpertsSelectorOutput,
 )
 from mttl.models.library.expert import Expert
 from mttl.models.modifiers.lora import (
@@ -125,7 +126,11 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
         """Depending on the selection output, we and merge differently."""
         from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRAView
 
-        if isinstance(selection, ExpertsAndWeightsSelectorOutput):
+        if isinstance(selection, SharedExpertsSelectorOutput):
+            # a single, shared expert across the batch and sequence
+            expert = self.get(selection.expert)
+            return expert(input)
+        elif isinstance(selection, ExpertsAndWeightsSelectorOutput):
             # In this case, we have a list of experts and their weights
             # and these are shared across all the batch examples
             skilled_lora = SkilledLoRAView.from_loras(

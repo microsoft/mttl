@@ -18,6 +18,7 @@ from mttl.models.containers.selectors.selector_output import (
     ExpertsAndWeightsSelectorOutput,
     ExpertsSplitsAndWeightsSelectorOutput,
     SelectorOutput,
+    SharedExpertsSelectorOutput,
 )
 from mttl.models.library.expert import ExpertInfo
 from mttl.models.modifiers.base import Modifier
@@ -102,7 +103,7 @@ class MultiSelectorConfig(Serializable):
         return self.selectors[key]
 
     def get(self, key):
-        return self.selectors.get(key, TaskNameSelectorConfig())
+        return self.selectors.get(key, DefaultExpertSelectorConfig())
 
     def keys(self):
         return self.selectors.keys()
@@ -537,6 +538,23 @@ class TaskNameSelector(Selector):
         raise NotImplementedError(
             "Not required for TaskNameSelector as it performs hard selection. Use 'get_expert_instance' instead."
         )
+
+
+@dataclass
+class DefaultExpertSelectorConfig(SelectorConfig):
+    router_granularity: str = "coarsegrained"
+
+
+@Selector.register("default_expert_selector", DefaultExpertSelectorConfig)
+class DefaultExpertSelector(Selector):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+
+    @forward_with_cache
+    def forward(self, input, **kwargs) -> SharedExpertsSelectorOutput:
+        if self.default_expert_name is None:
+            raise ValueError("No default expert name set!")
+        return SharedExpertsSelectorOutput(expert=self.default_expert_name)
 
 
 @dataclass
