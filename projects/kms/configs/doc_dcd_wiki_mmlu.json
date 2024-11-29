@@ -1,0 +1,8 @@
+{
+    "loss_function": "dcd",
+    "dataset_type": "doc_km",
+    "dataset": "sordonia/wiki_top_20_sanitized",
+    "evaluate_on": "wiki_mmlu",
+    "label_frac": 0.75,
+    "max_input_length": 2048
+}

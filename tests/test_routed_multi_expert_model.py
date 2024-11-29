@@ -17,6 +17,7 @@ from mttl.models.containers.selectors.poly_selector import (
     PolySelectorDirect,
 )
 from mttl.models.containers.selectors.selector_output import (
+    ALL_EXPERTS,
     BatchSequenceExpertsAndWeightsSelectorOutput,
     SelectorOutput,
 )
@@ -360,7 +361,7 @@ def test_expert_selector_with_moe_routing_soft(mocker, tmp_moe_exp_config, dummy
 
     assert spy.call_count == 1
     assert isinstance(spy.spy_return, BatchSequenceExpertsAndWeightsSelectorOutput)
-    assert spy.spy_return.experts is SelectorOutput.ALL_EXPERTS
+    assert spy.spy_return.experts is ALL_EXPERTS
     assert spy.spy_return.weights.shape == (2, 3, 8)
 
 
@@ -420,7 +421,7 @@ def test_expert_selector_with_moe_routing_soft(
 
     assert spy.call_count == 1
     assert isinstance(spy.spy_return, BatchSequenceExpertsAndWeightsSelectorOutput)
-    assert spy.spy_return.experts is SelectorOutput.ALL_EXPERTS
+    assert spy.spy_return.experts is ALL_EXPERTS
     assert spy.spy_return.weights.shape == (2, 3, 8)
 
 
