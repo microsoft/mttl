@@ -1,8 +1,14 @@
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import List
 
+import torch
+
 from mttl.logging import logger
-from mttl.models.containers.selectors.base import AutoSelectorConfig
+from mttl.models.containers.selectors.base import (
+    AutoSelectorConfig,
+    DefaultExpertSelectorConfig,
+)
 from mttl.models.containers.selectors.km_selector import (
     KnowledgeExtractorSelectorConfig,
 )
@@ -63,3 +69,48 @@ class KMMoEModel(BaseExpertModel, MultiExpertMixin):
             self.ke_expert_name, expert_config=an_expert.expert_config
         )
         logger.info("Added KE expert: %s", self.ke_expert_name)
+
+
+@dataclass
+class EMAExpertModelConfig(MoEModelConfig):
+    ema_coef: float = 0.999
+    modifier_config: AutoModifierConfig = None
+    default_expert: str = "KM"
+    downscale_factor: int = 16
+
+
+@BaseExpertModel.register("ema_km", config_cls=KMMoEModelConfig)
+class EMAExpertModel(BaseExpertModel, MultiExpertMixin):
+    """MoeModel that can accomodate a Knowledge Extractor"""
+
+    def __init__(self, config, **kwargs):
+
+        config.selector_config = DefaultExpertSelectorConfig()
+        super().__init__(config, **kwargs)
+
+        ema_modif_config = deepcopy(config.modifier_config)
+        ema_modif_config.lora_alpha /= self.config.downscale_factor
+
+        self.add_empty_expert("EMA", expert_config=ema_modif_config)
+        # Make sure existing experts are not trainable
+        for param in self.parameters():
+            param.requires_grad = False
+
+        self.add_empty_expert("KM", expert_config=config.modifier_config)
+        print("b random : ", self.config.modifier_config.lora_init_b_random)
+
+        # Set EMA weights to match the KM weights
+        self.ema_update(ema_coef=0.0)
+
+    @torch.no_grad()
+    def ema_update(self, ema_coef=None):
+        if ema_coef is None:
+            ema_coef = self.config.ema_coef
+
+        expert = self.get_expert_instance("KM")
+        ema_expert = self.get_expert_instance(f"EMA")
+
+        state_dict_keys = expert.expert_weights.keys()
+        for key in state_dict_keys:
+            p, ema_p = expert.expert_weights[key], ema_expert.expert_weights[key]
+            ema_p.data.mul_(ema_coef).add_(p.data, alpha=1 - ema_coef)
