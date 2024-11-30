@@ -119,6 +119,7 @@ class BlobStorageEngine(BackendEngine):
         """
         super().__init__()
         self._token: str = token
+        self.azure_auth: str = True
         self.cache_dir = cache_dir
         # Quiet down the azure logging
         logging.getLogger("azure").setLevel(logging.WARNING)
@@ -140,29 +141,44 @@ class BlobStorageEngine(BackendEngine):
 
     @property
     def token(self):
-        if self._token is None:
-            self.login()
-        return self._token
+        if self._token:
+            return self._token
+
+        from azure.identity import AzureCliCredential
+
+        return AzureCliCredential()
 
     def login(self, token: Optional[str] = None):
-        """Set the SAS token to use for authentication."""
-        if token is None:
-            token = os.environ.get("BLOB_SAS_TOKEN", None)
-        if token is None:
-            raise ValueError(
-                "No token provided. Please provide a token when initializing "
-                "the engine or set the BLOB_SAS_TOKEN environment variable."
+        if token is not None:
+            self._token = token
+            self.azure_auth = False
+
+    def _get_blob_client(self, repo_id, use_async=False):
+        storage_uri, container = self._parse_repo_id_to_storage_info(repo_id)
+        if use_async:
+            blob_client = AsyncBlobServiceClient(
+                storage_uri + (f"/?{self.token}" if not self.azure_auth else ""),
+                self.token if self.azure_auth else None,
             )
-        self._token = token
+        else:
+            blob_client = BlobServiceClient(
+                storage_uri + (f"/?{self.token}" if not self.azure_auth else ""),
+                self.token if self.azure_auth else None,
+            )
+        return blob_client
+
+    def _get_container_client(self, repo_id, use_async=False):
+        storage_uri, container = self._parse_repo_id_to_storage_info(repo_id)
+        return self._get_blob_client(repo_id, use_async).get_container_client(container)
 
     def _last_modified(self, repo_id: str) -> datetime.datetime:
         """Get the last modified date of a repository."""
         try:
-            connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
-            container_client = BlobServiceClient(
-                connection_string
-            ).get_container_client(container)
-            return container_client.get_container_properties().last_modified
+            return (
+                self._get_container_client(repo_id)
+                .get_container_properties()
+                .last_modified
+            )
         except ResourceNotFoundError as error:
             raise ValueError(f"Repository {repo_id} not found") from error
 
@@ -182,13 +198,11 @@ class BlobStorageEngine(BackendEngine):
     def _parse_repo_id_to_storage_info(self, repo_id: str) -> Tuple[str, str]:
         """Extracts storage account and container from repo_id.
         Returns the container and its connection string (with SAS token)."""
-        storage_account, container = repo_id.split("/", 1)  # split at first "/"
+        storage_account, container = repo_id.split("/")[:2]  # split at first "/"
         # The connection string is in the format:
         # https://<storage_account>.blob.core.windows.net/?<token>
-        connection_string = (
-            f"https://{storage_account}.blob.core.windows.net/?{self.token}"
-        )
-        return connection_string, container
+        storage_uri = f"https://{storage_account}.blob.core.windows.net/"
+        return storage_uri, container
 
     def snapshot_download(
         self, repo_id, allow_patterns: Optional[Union[List[str], str]] = None
@@ -220,8 +234,8 @@ class BlobStorageEngine(BackendEngine):
     def create_repo(self, repo_id, repo_type=None, exist_ok=True, private=True):
         """Creates a new repository. repo_type and private are ignored for blob storage."""
         try:
-            connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
-            BlobServiceClient(connection_string).create_container(name=container)
+            _, container = self._parse_repo_id_to_storage_info(repo_id)
+            self._get_blob_client(repo_id).create_container(name=container)
         except ResourceExistsError as error:
             error_message = "A container with this name already exists"
             if exist_ok:
@@ -231,12 +245,8 @@ class BlobStorageEngine(BackendEngine):
 
     def delete_repo(self, repo_id, repo_type=None):
         """Deletes a repository."""
-        connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
-        container_client = BlobServiceClient(connection_string).get_container_client(
-            container=container
-        )
         try:
-            container_client.delete_container()
+            self._get_container_client(repo_id).delete_container()
         except ResourceNotFoundError:
             print(f"Container {repo_id} not found.")
 
@@ -301,10 +311,7 @@ class BlobStorageEngine(BackendEngine):
     def list_repo_files(self, repo_id):
         """List all files in a repository. The files might not be downloaded locally."""
         try:
-            connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
-            container_client = BlobServiceClient(
-                connection_string
-            ).get_container_client(container)
+            container_client = self._get_container_client(repo_id)
             return [b.name for b in container_client.list_blobs()]
         except ResourceNotFoundError as error:
             raise ValueError(f"Repository {repo_id} not found") from error
@@ -361,8 +368,11 @@ class BlobStorageEngine(BackendEngine):
         return filenames[0] if is_str else filenames
 
     async def _async_upload_blob(self, repo_id, filename, buffer=None, overwrite=False):
-        connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
-        async with AsyncBlobServiceClient(connection_string) as blob_service_client:
+        storage_uri, container = self._parse_repo_id_to_storage_info(repo_id)
+
+        async with self._get_blob_client(
+            repo_id, use_async=True
+        ) as blob_service_client:
             blob_client = blob_service_client.get_blob_client(
                 container=container, blob=filename
             )
@@ -386,8 +396,10 @@ class BlobStorageEngine(BackendEngine):
         return local_filenames[0] if is_str else local_filenames
 
     async def _async_download_blob(self, repo_id, filename):
-        connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
-        async with AsyncBlobServiceClient(connection_string) as blob_service_client:
+        storage_uri, container = self._parse_repo_id_to_storage_info(repo_id)
+        async with self._get_blob_client(
+            repo_id, use_async=True
+        ) as blob_service_client:
             blob_client = blob_service_client.get_blob_client(
                 container=container, blob=filename
             )
@@ -443,11 +455,11 @@ class BlobStorageEngine(BackendEngine):
         overwrite=True,
     ):
         (
-            source_connection_string,
+            source_storage_uri,
             source_container,
         ) = self._parse_repo_id_to_storage_info(source_repo_id)
-        async with AsyncBlobServiceClient(
-            source_connection_string
+        async with self._get_blob_client(
+            source_repo_id, use_async=True
         ) as blob_service_client:
             source_blob_client = blob_service_client.get_blob_client(
                 container=source_container, blob=source_filename
@@ -469,8 +481,10 @@ class BlobStorageEngine(BackendEngine):
         await asyncio.gather(*tasks)
 
     async def _async_delete_blob(self, repo_id, filename):
-        connection_string, container = self._parse_repo_id_to_storage_info(repo_id)
-        async with AsyncBlobServiceClient(connection_string) as blob_service_client:
+        storage_uri, container = self._parse_repo_id_to_storage_info(repo_id)
+        async with self._get_blob_client(
+            repo_id, use_async=True
+        ) as blob_service_client:
             blob_client = blob_service_client.get_blob_client(
                 container=container, blob=filename
             )

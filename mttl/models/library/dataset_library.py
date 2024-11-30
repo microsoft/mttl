@@ -196,6 +196,7 @@ class DatasetLibrary:
             "az": BlobStorageDatasetEngine,
             "hf": HuggingfaceHubDatasetEngine,
         }
+
         prefix = dataset_id.split("://")
         if prefix[0] in engines:
             engine_id = prefix[0]
