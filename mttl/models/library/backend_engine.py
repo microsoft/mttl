@@ -144,9 +144,26 @@ class BlobStorageEngine(BackendEngine):
         if self._token:
             return self._token
 
-        from azure.identity import AzureCliCredential
+        from azure.core.credentials import AccessToken
+        from azure.core.exceptions import ClientAuthenticationError
+        from azure.identity import (
+            AzureCliCredential,
+            ChainedTokenCredential,
+            CredentialUnavailableError,
+            EnvironmentCredential,
+            ManagedIdentityCredential,
+        )
 
-        return AzureCliCredential()
+        try:
+            token = AzureCliCredential()
+        except:
+            token = None
+
+        default_identity_client_id = os.environ.get("DEFAULT_IDENTITY_CLIENT_ID")
+        if not token and default_identity_client_id:
+            token = ManagedIdentityCredential(client_id=default_identity_client_id)
+
+        return token
 
     def login(self, token: Optional[str] = None):
         if token is not None:
@@ -237,7 +254,7 @@ class BlobStorageEngine(BackendEngine):
             _, container = self._parse_repo_id_to_storage_info(repo_id)
             self._get_blob_client(repo_id).create_container(name=container)
         except ResourceExistsError as error:
-            error_message = "A container with this name already exists"
+            error_message = f"A container named `{container}` already exists!"
             if exist_ok:
                 logger.warning(error_message)
             else:
@@ -247,8 +264,9 @@ class BlobStorageEngine(BackendEngine):
         """Deletes a repository."""
         try:
             self._get_container_client(repo_id).delete_container()
+            logger.info(f"Deleted repository {repo_id}.")
         except ResourceNotFoundError:
-            print(f"Container {repo_id} not found.")
+            logger.info(f"Container {repo_id} not found.")
 
     def create_commit(self, repo_id, operations, commit_message="", async_mode=False):
         asyncio.run(
@@ -350,7 +368,7 @@ class BlobStorageEngine(BackendEngine):
         repo_id: str,
         filenames: Union[List[str], str],
         buffers=None,
-        overwrite=False,
+        overwrite=True,
     ):
         is_str = isinstance(filenames, str)
         if is_str:
@@ -367,7 +385,7 @@ class BlobStorageEngine(BackendEngine):
         await asyncio.gather(*tasks)
         return filenames[0] if is_str else filenames
 
-    async def _async_upload_blob(self, repo_id, filename, buffer=None, overwrite=False):
+    async def _async_upload_blob(self, repo_id, filename, buffer=None, overwrite=True):
         storage_uri, container = self._parse_repo_id_to_storage_info(repo_id)
 
         async with self._get_blob_client(

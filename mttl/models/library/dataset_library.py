@@ -143,9 +143,11 @@ class BlobStorageDatasetEngine(DatasetEngine):
         # HF push_to_hub sets the split to "train" if it's None
         if isinstance(dataset, Dataset):
             dataset = DatasetDict({"train": dataset})
+
         dataset_cache_dir = str(
             self.backend_engine.get_repository_cache_dir(self.dataset_id)
         )
+
         # Name is a subset of the dataset. Save in its own directory
         dataset_path = self._concat_paths(dataset_cache_dir, name)
         dataset.save_to_disk(dataset_path)
