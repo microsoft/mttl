@@ -14,8 +14,6 @@ class NQAZeroShotEvaluator(RougeEvaluator):
         from mttl.datamodule.base import get_datamodule
 
         dataset_args.dataset_type = "narrativeqa"
-        dataset_args.dataset = "sordonia/narrativeqa_sanitized"
-
         datamodule = get_datamodule(dataset_args, for_generation=True)
         super().__init__(datamodule, generation_kwargs=generation_kwargs)
 

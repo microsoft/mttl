@@ -16,7 +16,6 @@ class WikiMMLUEvaluator(LogLikeEvaluator):
         from mttl.datamodule.base import get_datamodule
 
         dataset_args.dataset_type = "wiki_mmlu"
-        dataset_args.dataset = "sordonia/wiki_top_20_sanitized"
         dataset_args.add_eos_to_targets = False
 
         datamodule = get_datamodule(dataset_args, for_generation=False)
