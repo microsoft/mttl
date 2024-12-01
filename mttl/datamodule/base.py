@@ -968,6 +968,11 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         WinograndeMultiChoiceDataModule,
     )
 
+    from mttl.datamodule.mathqa_data_module import (
+        MathQADataConfig,
+        MathQADataModule,
+    )
+
     # if we have a DataArgs object, we can directly create the datamodule
     if isinstance(args, DataArgs) and args.dataset_type is not None:
         dataset_config = args.dataset_config
@@ -1063,6 +1068,11 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
             pack_sequences=args.pack_sequences,
         )
         dm = FlatMultiTaskModule(config, for_generation=for_generation)
+    elif "mathqa" in dataset:
+        config = MathQADataConfig(
+            **common_kwargs,
+        )
+        dm = MathQADataModule(config, for_generation=for_generation)
     elif "mmlu" in dataset:
         config = MMLUDataConfig(
             **common_kwargs,
