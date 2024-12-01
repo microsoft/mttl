@@ -6,7 +6,7 @@ import os
 from abc import ABC, abstractmethod
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.storage.blob import BlobServiceClient
@@ -26,6 +26,20 @@ from huggingface_hub import (
 
 from mttl.logging import logger
 from mttl.utils import remote_login
+
+
+def _try_auth(*credentials, interactive=False, scope=None):
+    from azure.identity import ChainedTokenCredential
+
+    if scope is None:
+        scope = "https://management.azure.com/.default"
+
+    try:
+        cred = ChainedTokenCredential(*credentials)
+        return cred
+    except:
+        return None
+    return cred
 
 
 class BackendEngine(ABC):
@@ -154,15 +168,13 @@ class BlobStorageEngine(BackendEngine):
             ManagedIdentityCredential,
         )
 
-        try:
-            token = AzureCliCredential()
-        except:
-            token = None
-
         default_identity_client_id = os.environ.get("DEFAULT_IDENTITY_CLIENT_ID")
-        if not token and default_identity_client_id:
-            token = ManagedIdentityCredential(client_id=default_identity_client_id)
-
+        if default_identity_client_id:
+            token = _try_auth(
+                ManagedIdentityCredential(client_id=default_identity_client_id)
+            )
+        else:
+            token = _try_auth(AzureCliCredential())
         return token
 
     def login(self, token: Optional[str] = None):
@@ -175,12 +187,12 @@ class BlobStorageEngine(BackendEngine):
         if use_async:
             blob_client = AsyncBlobServiceClient(
                 storage_uri + (f"/?{self.token}" if not self.azure_auth else ""),
-                self.token if self.azure_auth else None,
+                credential=self.token if self.azure_auth else None,
             )
         else:
             blob_client = BlobServiceClient(
                 storage_uri + (f"/?{self.token}" if not self.azure_auth else ""),
-                self.token if self.azure_auth else None,
+                credential=self.token if self.azure_auth else None,
             )
         return blob_client
 
@@ -422,6 +434,7 @@ class BlobStorageEngine(BackendEngine):
                 container=container, blob=filename
             )
             local_filename = self._get_local_filepath(repo_id, filename)
+
             os.makedirs(os.path.dirname(local_filename), exist_ok=True)
             with open(file=local_filename, mode="wb") as blob_file:
                 download_stream = await blob_client.download_blob()
