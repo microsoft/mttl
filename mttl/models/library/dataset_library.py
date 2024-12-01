@@ -122,7 +122,7 @@ class BlobStorageDatasetEngine(DatasetEngine):
         name: Optional[str] = None,
         split: Optional[str] = None,
     ) -> Dataset:
-        local_path = self._concat_paths(self.dataset_id, name, split)
+        local_path = self._concat_paths(name, split)
         download_filter = self._concat_paths(local_path, "*")
         self.backend_engine.snapshot_download(self.dataset_id, download_filter)
         dataset_cache_dir = str(
