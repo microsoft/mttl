@@ -410,6 +410,9 @@ class TrainingArgs(DataArgs):
 
     profile: bool = False  # if 'True' will profile the model training
 
+    # dpo
+    rl_training: str = "dpo"
+
     @property
     def dataset_config(self):
         if self.dataset_type is not None:

@@ -32,6 +32,8 @@ from mttl.models.modifiers.base import (
     Modifier,
 )
 from mttl.models.modifiers.modify_model import modify_transformer
+from mttl.models.lightning.base_module import LightningEfficientCheckpoint
+import torch.nn.functional as F
 
 
 @contextlib.contextmanager
@@ -64,7 +66,6 @@ class ExpertModel(BaseExpertModel):
         **loading_kwargs,
     ):
         super().__init__(config, model_object=model_object, **loading_kwargs)
-
         if config.modifier_config is not None:
             modify_transformer(self.model, config.modifier_config)
 
@@ -543,6 +544,512 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
         self = cls(config, **kwargs)
         self.add_expert_instance(expert, is_default=set_as_default)
         return self
+
+    def set_routing_infos(self, batch, generate=False):
+        self.model.info_container["routing_infos"] = RoutingInfo.from_batch(batch)
+
+
+def calculate_DPO_loss(
+    original_prefered_logprob,
+    original_disprefered_logprob,
+    ref_prefered_logprob,
+    ref_disprefered_logprob,
+    beta=2.0,
+):
+    """
+    Calculate the DPO loss.
+    original_prefered_logprob: the logprob of the prefered expert in the original model
+    original_disprefered_logprob: the logprob of the disprefered expert in the original model
+    ref_prefered_logprob: the logprob of the prefered expert in the reference model
+    ref_disprefered_logprob: the logprob of the disprefered expert in the reference model
+    """
+
+    original_prefered_relative_logprob = (
+        original_prefered_logprob - ref_prefered_logprob
+    )
+    disprefered_relative_logprob = (
+        original_disprefered_logprob - ref_disprefered_logprob
+    )
+
+    reward_accuracies = (
+        (original_prefered_relative_logprob > disprefered_relative_logprob)
+        .float()
+        .mean(dim=-1)
+    )
+    reward_margins = (
+        original_prefered_relative_logprob - disprefered_relative_logprob
+    ).mean(dim=-1)
+
+    loss = -F.logsigmoid(
+        beta * (original_prefered_relative_logprob - disprefered_relative_logprob)
+    ).mean(dim=-1)
+
+    return loss, reward_accuracies, reward_margins
+
+
+def get_log_prob(logits, labels):
+    log_probs = F.log_softmax(logits, dim=-1)
+    return torch.gather(log_probs, -1, labels.unsqueeze(-1)).squeeze(-1).mean(-1)
+
+
+class ExpertModelSimPO(LightningEfficientCheckpoint):
+    def __init__(self, preference_model, **kwargs):
+        super().__init__(**kwargs)
+        self.preference_model = preference_model
+        self.trainable_param_names = kwargs.get("trainable_param_names", None)
+        self.beta = kwargs.get("beta", 0.5)
+        self.loss_type = kwargs.get("loss_type", "sigmoid")
+        self.label_smoothing = kwargs.get("label_smoothing", 0.1)
+        self.gamma_beta_ratio = kwargs.get("gamma_beta_ratio", 0.5)
+        # log hyperparameters
+        self.save_hyperparameters(kwargs)
+
+    def simpo_loss(
+        self,
+        original_prefered_logprob,
+        original_disprefered_logprob,
+        gamma_beta_ratio,
+        prefered_y_len,
+        disprefered_y_len,
+    ):
+        """
+        Compute the SIMPO loss.
+
+        ref: https://github.com/princeton-nlp/SimPO/blob/main/scripts/simpo_trainer.py
+
+        args: original_prefered_logps: log probabiliteis of the prefered expert in the original model
+              original_disprefered_logps: log probabiliteis of the disprefered expert in the original model
+        """
+
+        # normalize the log probabilities with the length of the response
+        original_prefered_logprob = original_prefered_logprob / prefered_y_len
+        original_disprefered_logprob = original_disprefered_logprob / disprefered_y_len
+
+        pi_logratios = original_prefered_logprob - original_disprefered_logprob
+        logits = pi_logratios - gamma_beta_ratio
+
+        if self.loss_type == "sigmoid":
+            losses = (
+                -F.logsigmoid(self.beta * logits) * (1 - self.label_smoothing)
+                - F.logsigmoid(-self.beta * logits) * self.label_smoothing
+            )
+        elif self.loss_type == "hinge":
+            losses = torch.relu(1 - self.beta * logits)
+        else:
+            raise ValueError(
+                f"Loss type {self.loss_type} not supported. Choose from ['sigmoid', 'hinge']"
+            )
+
+        # normalize the log probabilities with the length of the response
+        chosen_rewards = self.beta * original_prefered_logprob.detach()
+
+        reject_rewards = self.beta * original_disprefered_logprob.detach()
+
+        return losses, chosen_rewards, reject_rewards
+
+    def forward(self, batch):
+        prompt_prefered_ids = batch["prompt_prefered_ids"]
+        prompt_disprefered_ids = batch["prompt_disprefered_ids"]
+
+        prompt_prefered_mask = batch["prompt_prefered_mask"]
+        prompt_disprefered_mask = batch["prompt_disprefered_mask"]
+
+        # get the length of the response
+        prefered_y_len = batch["prefered_y_len"]
+        disprefered_y_len = batch["disprefered_y_len"]
+
+        # get the log probabilities of the prefered and disprefered experts
+        model_prefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        model_disprefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        loss, chosen_rewards, rejected_rewards = self.simpo_loss(
+            model_prefered_log_prob,
+            model_disprefered_log_prob,
+            gamma_beta_ratio=self.gamma_beta_ratio,
+            prefered_y_len=prefered_y_len,
+            disprefered_y_len=disprefered_y_len,
+        )
+
+        return loss.mean(), chosen_rewards, rejected_rewards
+
+    def training_step(self, batch, _):
+
+        loss, chosen_rewards, rejected_rewards = self.forward(batch)
+        reward_accuracies = (chosen_rewards > rejected_rewards).float()
+
+        metrices = {
+            "loss": loss.mean(),
+            "reward_accuracies": reward_accuracies.mean().cpu(),
+            "chosen_rewards": chosen_rewards.mean(),
+            "rejected_rewards": rejected_rewards.mean(),
+            "reward_margins": (chosen_rewards - rejected_rewards).mean().cpu(),
+        }
+
+        for key, value in metrices.items():
+            self.log(f"train/{key}", value, on_step=True, on_epoch=True, prog_bar=True)
+
+        return loss.mean()
+
+    def validation_step(self, batch, _):
+
+        loss, chosen_rewards, rejected_rewards = self.forward(batch)
+
+        reward_accuracies = (chosen_rewards > rejected_rewards).float()
+
+        metrices = {
+            "loss": loss.mean(),
+            "reward_accuracies": reward_accuracies.mean().cpu(),
+            "chosen_rewards": chosen_rewards.mean(),
+            "rejected_rewards": rejected_rewards.mean(),
+            "reward_margins": (chosen_rewards - rejected_rewards).mean().cpu(),
+        }
+        for key, value in metrices.items():
+            self.log(f"val/{key}", value, on_step=True, on_epoch=True, prog_bar=True)
+
+        return loss.mean()
+
+    def test_step(self, batch, _):
+        loss, chosen_rewards, rejected_rewards = self.forward(batch)
+
+        reward_accuracies = (chosen_rewards > rejected_rewards).float()
+        metrices = {
+            "loss": loss.mean(),
+            "reward_accuracies": reward_accuracies.mean().cpu(),
+            "chosen_rewards": chosen_rewards.mean(),
+            "rejected_rewards": rejected_rewards.mean(),
+            "reward_margins": (chosen_rewards - rejected_rewards).mean().cpu(),
+        }
+        for key, value in metrices.items():
+            self.log(f"test/{key}", value, on_step=True, on_epoch=True, prog_bar=True)
+
+        return loss.mean()
+
+
+from functools import wraps
+
+
+def gpu_memory_usage_decorator(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        # 清除GPU缓存，确保测量准确
+        torch.cuda.empty_cache()
+
+        # 获取函数执行前的GPU内存使用情况
+        memory_allocated_before = torch.cuda.memory_allocated(device)
+        memory_reserved_before = torch.cuda.memory_reserved(device)
+        print(
+            f"[Before] Memory allocated: {memory_allocated_before / (1024 ** 2):.2f} MB"
+        )
+        print(
+            f"[Before] Memory reserved: {memory_reserved_before / (1024 ** 2):.2f} MB"
+        )
+
+        # 执行目标函数
+        result = func(*args, **kwargs)
+
+        # 获取函数执行后的GPU内存使用情况
+        memory_allocated_after = torch.cuda.memory_allocated(device)
+        memory_reserved_after = torch.cuda.memory_reserved(device)
+        print(
+            f"[After] Memory allocated: {memory_allocated_after / (1024 ** 2):.2f} MB"
+        )
+        print(f"[After] Memory reserved: {memory_reserved_after / (1024 ** 2):.2f} MB")
+
+        # 计算内存使用的差值
+        memory_allocated_diff = memory_allocated_after - memory_allocated_before
+        memory_reserved_diff = memory_reserved_after - memory_reserved_before
+        print(
+            f"Memory allocated difference: {memory_allocated_diff / (1024 ** 2):.2f} MB"
+        )
+        print(
+            f"Memory reserved difference: {memory_reserved_diff / (1024 ** 2):.2f} MB"
+        )
+
+        return result
+
+    return wrapper
+
+
+class ExpertModelDPO(LightningEfficientCheckpoint):
+
+    def __init__(self, preference_model, ref_expert_model, **kwargs):
+        super().__init__(**kwargs)
+        self.preference_model = preference_model
+        self.ref_expert_model = ref_expert_model
+        self.trainable_param_names = kwargs.get("trainable_param_names", None)
+        self.beta = kwargs.get("beta", 2.0)
+        # log hyperparameters
+        self.save_hyperparameters(kwargs)
+
+    def training_step(self, batch, _):
+
+        prompt_prefered_ids = batch["prompt_prefered_ids"]
+        prompt_disprefered_ids = batch["prompt_disprefered_ids"]
+
+        prompt_prefered_mask = batch["prompt_prefered_mask"]
+        prompt_disprefered_mask = batch["prompt_disprefered_mask"]
+
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Measure GPU memory before forward pass
+        memory_allocated_before = torch.cuda.memory_allocated(device)
+        memory_reserved_before = torch.cuda.memory_reserved(device)
+
+        # logits = self.preference_model.model.forward(prompt_prefered_ids).logits
+
+        # loss = torch.mean(logits)
+        # original model
+        model_prefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        model_disprefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        # reference model
+        ref_prefered_log_prob = get_log_prob(
+            self.ref_expert_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        ref_disprefered_log_prob = get_log_prob(
+            self.ref_expert_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        # Measure GPU memory after forward pass
+        memory_allocated_after = torch.cuda.memory_allocated(device)
+        memory_reserved_after = torch.cuda.memory_reserved(device)
+
+        # Calculate the difference in memory usage
+        memory_allocated_diff = memory_allocated_after - memory_allocated_before
+        memory_reserved_diff = memory_reserved_after - memory_reserved_before
+
+        print(
+            f"Memory allocated before forward pass: {memory_allocated_before / (1024 ** 2):.2f} MB"
+        )
+        print(
+            f"Memory allocated after forward pass: {memory_allocated_after / (1024 ** 2):.2f} MB"
+        )
+        print(
+            f"Memory allocated difference: {memory_allocated_diff / (1024 ** 2):.2f} MB"
+        )
+
+        print(
+            f"Memory reserved before forward pass: {memory_reserved_before / (1024 ** 2):.2f} MB"
+        )
+        print(
+            f"Memory reserved after forward pass: {memory_reserved_after / (1024 ** 2):.2f} MB"
+        )
+        print(
+            f"Memory reserved difference: {memory_reserved_diff / (1024 ** 2):.2f} MB"
+        )
+
+        loss = -F.logsigmoid(
+            self.beta * (model_prefered_log_prob - model_disprefered_log_prob)
+            - (ref_prefered_log_prob - ref_disprefered_log_prob)
+        ).mean()
+
+        loss, reward_accuracies, reward_margins = calculate_DPO_loss(
+            model_prefered_log_prob,
+            model_disprefered_log_prob,
+            ref_prefered_log_prob,
+            ref_disprefered_log_prob,
+            beta=self.beta,
+        )
+        self.log("train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+
+        # self.log(
+        #     "train/reward_accuracies",
+        #     reward_accuracies,
+        #     on_step=True,
+        #     on_epoch=True,
+        #     prog_bar=True,
+        # )
+        # self.log(
+        #     "train/reward_margins",
+        #     reward_margins,
+        #     on_step=True,
+        #     on_epoch=True,
+        #     prog_bar=True,
+        # )
+        # clear the gpu memory
+
+        return loss
+
+    def validation_step(self, batch, _):
+        prompt_prefered_ids = batch["prompt_prefered_ids"]
+        prompt_disprefered_ids = batch["prompt_disprefered_ids"]
+
+        prompt_prefered_mask = batch["prompt_prefered_mask"]
+        prompt_disprefered_mask = batch["prompt_disprefered_mask"]
+
+        # original model
+        model_prefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        model_disprefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        # reference model
+        ref_prefered_log_prob = get_log_prob(
+            self.ref_expert_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        ref_disprefered_log_prob = get_log_prob(
+            self.ref_expert_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        loss, reward_accuracies, reward_margins = calculate_DPO_loss(
+            model_prefered_log_prob,
+            model_disprefered_log_prob,
+            ref_prefered_log_prob,
+            ref_disprefered_log_prob,
+            beta=self.beta,
+        )
+
+        self.log("val/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(
+            "val/reward_accuracies",
+            reward_accuracies,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "val/reward_margins",
+            reward_margins,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
+        return loss
+
+    def test_step(self, batch, _):
+        prompt_prefered_ids = batch["prompt_prefered_ids"]
+        prompt_disprefered_ids = batch["prompt_disprefered_ids"]
+
+        prompt_prefered_mask = batch["prompt_prefered_mask"]
+        prompt_disprefered_mask = batch["prompt_disprefered_mask"]
+
+        # original model
+        model_prefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        model_disprefered_log_prob = get_log_prob(
+            self.preference_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        # reference model
+        ref_prefered_log_prob = get_log_prob(
+            self.ref_expert_model.model.forward(
+                prompt_prefered_ids, attention_mask=prompt_prefered_mask
+            ).logits,
+            labels=prompt_prefered_ids,
+        )
+
+        ref_disprefered_log_prob = get_log_prob(
+            self.ref_expert_model.model.forward(
+                prompt_disprefered_ids, attention_mask=prompt_disprefered_mask
+            ).logits,
+            labels=prompt_disprefered_ids,
+        )
+
+        loss, reward_accuracies, reward_margins = calculate_DPO_loss(
+            model_prefered_log_prob,
+            model_disprefered_log_prob,
+            ref_prefered_log_prob,
+            ref_disprefered_log_prob,
+            beta=self.beta,
+        )
+        self.log("test/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(
+            "test/reward_accuracies",
+            reward_accuracies,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.log(
+            "test/reward_margins",
+            reward_margins,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        return loss
+
+
+class MoEModel(MultiExpertModel):
+    def __init__(self, expert_library: ExpertLibrary = None, **kwargs):
+        kwargs["top_k"] = kwargs["moe_top_k"]
+        kwargs["emb_dim"] = kwargs["moe_emb_dim"]
+        kwargs["rkhs_dim"] = kwargs["moe_rkhs_dim"]
+        init_from_scratch = kwargs.get("init_from_scratch", False)
+
+        super().__init__(**kwargs)
+
+        if not self.hparams.library_id and expert_library is None or init_from_scratch:
+            for i in range(self.hparams.moe_num_experts):
+                # Adding a Skilled LoRA with 1 skill.
+                exp_config = SkilledLoRAConfig(
+                    n_skills=1,
+                    modify_layers=self.hparams.modify_layers,
+                    modify_modules=self.hparams.modify_modules,
+                    lora_alpha=self.hparams.lora_alpha,
+                    lora_dropout=self.hparams.lora_dropout,
+                    lora_rank=self.hparams.lora_rank,
+                    lora_init_b_random=True,
+                    n_splits=self.hparams.n_splits,
+                    phi_2_align_heads=self.hparams.phi_2_align_heads,
+                )
+                self.add_empty_expert(f"e{i}", exp_config)
+            self.moe_num_experts = kwargs["moe_num_experts"]
 
     @classmethod
     def from_pretrained_library(

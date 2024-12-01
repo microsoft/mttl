@@ -70,7 +70,11 @@ class LogLikeEvaluator(Evaluator):
                 )
                 loss_per_option = loss_per_option.cpu()
 
-                if loss_per_option.dtype in [torch.bfloat16, torch.float16]:
+                if loss_per_option.dtype in [
+                    torch.bfloat16,
+                    torch.float16,
+                    torch.float32,
+                ]:
                     loss_per_option = loss_per_option.float().numpy()
 
                 loss_per_example = [
@@ -105,6 +109,5 @@ class LogLikeEvaluator(Evaluator):
             "predictions": all_predictions,
             "accuracy": float(np.mean(all_accuracies)) if all_accuracies else None,
         }
-
         self.save_metrics(metrics, output_path)
         return metrics["accuracy"]
