@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from mttl.datamodule.base import DatasetConfig, DefaultCollator, DataModule
+from mttl.datamodule.base import DataModule, DatasetConfig, DefaultCollator
 from mttl.models.library.dataset_library import DatasetLibrary
 
 

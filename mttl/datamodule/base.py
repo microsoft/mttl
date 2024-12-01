@@ -944,6 +944,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         HellaswagDataConfig,
         HellaswagMultiChoiceDataModule,
     )
+    from mttl.datamodule.mathqa_data_module import MathQADataConfig, MathQADataModule
     from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
     from mttl.datamodule.mt_seq_to_seq_module import (
         FlanConfig,
@@ -966,11 +967,6 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
     from mttl.datamodule.winogrande_data_module import (
         WinograndeDataConfig,
         WinograndeMultiChoiceDataModule,
-    )
-
-    from mttl.datamodule.mathqa_data_module import (
-        MathQADataConfig,
-        MathQADataModule,
     )
 
     # if we have a DataArgs object, we can directly create the datamodule
