@@ -430,10 +430,14 @@ class BlobStorageEngine(BackendEngine):
         async with self._get_blob_client(
             repo_id, use_async=True
         ) as blob_service_client:
+            # already cached!
+            local_filename = self._get_local_filepath(repo_id, filename)
+            if local_filename.exists():
+                return local_filename
+
             blob_client = blob_service_client.get_blob_client(
                 container=container, blob=filename
             )
-            local_filename = self._get_local_filepath(repo_id, filename)
 
             os.makedirs(os.path.dirname(local_filename), exist_ok=True)
             with open(file=local_filename, mode="wb") as blob_file:
