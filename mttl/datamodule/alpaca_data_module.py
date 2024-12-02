@@ -19,7 +19,7 @@ class AlpacaDataModule(DataModule):
 
 
 @DataModule.register("alpaca_code", config_cls=DatasetConfig)
-class AlapacaCodeDataModule(DataModule):
+class AlpacaCodeDataModule(DataModule):
     @property
     def all_instructions(self):
         return self.dataset.read_all_instructions()
@@ -49,7 +49,7 @@ if __name__ == "__main__":
     alpaca_data_module.setup_dataset()
     print(alpaca_data_module.train_dataset)
 
-    alpaca_code_data_module = AlapacaCodeDataModule(
+    alpaca_code_data_module = AlpacaCodeDataModule(
         DatasetConfig(model="meta-llama/Llama-2-7b-hf")
     )
     alpaca_code_data_module.setup_dataset()
