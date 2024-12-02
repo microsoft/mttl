@@ -187,8 +187,8 @@ def train_km(training_args: KMArguments):
                 dtype=torch.bfloat16,
             ):
                 batch = transfer_batch_to_device(batch, device)
+                loss = loss_function(model, batch)
 
-            loss = loss_function(model, batch)
             loss = loss / args.gradient_accumulation_steps
             loss_accum += loss.detach()
             loss.backward()
