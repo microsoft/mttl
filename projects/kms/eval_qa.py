@@ -7,7 +7,8 @@ from lightning_fabric import seed_everything
 # register this datamodule!
 from projects.kms.utils.km_datamodule import KMDatasetModule
 from projects.kms.utils.nqa_datamodule import NQADatamodule
-from projects.kms.train_qa import KEArguments
+
+from projects.kms.train_qa import KEArguments  # isort: split
 
 from mttl.logging import setup_logging
 from mttl.models.containers.selectors.km_selector import (

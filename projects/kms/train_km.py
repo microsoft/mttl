@@ -9,8 +9,10 @@ from lightning_fabric import seed_everything
 from utils.callbacks import LogMttlArgs
 
 # register this datamodule!
-from projects.kms.utils.km_datamodule import KMDatasetModule  # noqa: F401 isort:skip
-from projects.kms.utils.nqa_datamodule import NQADatamodule  # noqa: F401 isort:skip
+from projects.kms.utils.km_datamodule import KMDatasetModule
+from projects.kms.utils.nqa_datamodule import NQADatamodule
+
+# isort: split
 
 from mttl.arguments import ExpertConfig
 from mttl.logging import setup_logging
@@ -85,7 +87,7 @@ class DCDTrainer(ExpertModelTrainer):
             target_hidden_logits = torch.cat(
                 (target_hidden_logits, target_logits.unsqueeze(0)), dim=0
             )
-            
+
             breakpoint()
             xx = 1
             """

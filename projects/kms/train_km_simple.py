@@ -17,7 +17,9 @@ from tqdm import tqdm
 
 # register this datamodule!
 from projects.kms.utils.km_datamodule import KMDatasetModule
-from projects.kms.utils.nqa_datamodule import NQADatamodule  # noqa: F401
+from projects.kms.utils.nqa_datamodule import NQADatamodule
+
+# isort: split
 
 from mttl.arguments import ExpertConfig
 from mttl.datamodule.base import get_datamodule
@@ -32,7 +34,6 @@ from mttl.models.expert_model import ExpertModel, ExpertModelConfig, disable_mod
 from mttl.models.get_optimizer import get_optimizer_and_scheduler
 from mttl.models.utils import transfer_batch_to_device
 from mttl.utils import create_library, remote_login, seed_everything, upload_library
-
 from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator
 from projects.kms.utils.quality_evaluator import QualityEvaluator
 from projects.kms.utils.simple_utils import (
