@@ -15,6 +15,11 @@ from mttl.models.library.expert import load_expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.utils import remote_login
 
+# register this datamodule!
+from projects.kms.utils.km_datamodule import KMDatasetModule  # noqa: F401 isort:skip
+from projects.kms.utils.nqa_datamodule import NQADatamodule  # noqa: F401 isort:skip
+
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -32,7 +37,10 @@ def eval_qa(training_args):
     setup_logging(training_args.output_dir)
     logger.info("Args: %s", training_args.to_json())
 
-    remote_login(training_args.remote_token)
+    try:
+        remote_login(training_args.remote_token)
+    except Exception as e:
+        logger.error(f"Failed to login remotely: {e}")
 
     # Build model (will have 0 experts if `library_id` is None)
     model_config = KMMoEModelConfig(
