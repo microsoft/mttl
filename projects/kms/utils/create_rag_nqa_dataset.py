@@ -37,7 +37,7 @@ def main():
     args = parser.parse_args()
 
     remote_login(os.environ["HF_TOKEN"])
-    dataset = load_dataset(args.dataset)
+    dataset = load_dataset(args.dataset, split="train")
 
     tokenizer = AutoTokenizer.from_pretrained(args.model)
     model = SentenceTransformer(args.model, device="cuda")
@@ -57,75 +57,64 @@ def main():
                 valid_files["train"] + valid_files["dev"] + valid_files["test"]
             )
 
-    for split in ["train", "validation", "test"]:
+    if valid_files is not None:
+        dataset = dataset.filter(lambda x: x["document_id"] in valid_files)
 
-        if len(dataset) == 3:
-            dataset_split = dataset[split]
-        else:
-            dataset_split = dataset["train"].filter(lambda x: x["split"] == split)
+    for ex_id, example in enumerate(tqdm.tqdm(dataset)):
+        if ex_id % args.num_workers != args.worker_id:
+            continue
 
-        if valid_files is not None:
-            dataset_split = dataset_split.filter(
-                lambda x: x["document_id"] in valid_files
+        chunked_dataset = []
+        document = example[args.document_field]
+        doc_id = example[args.document_id_field]
+
+        # first, we chunk the text into blocks
+        for chunk_idx, chunk in enumerate(
+            chunk_text(
+                document,
+                tokenizer,
+                args.block_size,
+                int(args.token_overlap * args.block_size),
             )
+        ):
+            text = chunk
+            chunked_dataset += [text]
 
-        for ex_id, example in enumerate(tqdm.tqdm(dataset_split)):
+        # second, we preprocess the questions
+        def get_detailed_query(q):
+            return f"Instruct: Given a question about a work of literature, retrieve relevant passages that answer the question.\nQuery: {q}"
 
-            if ex_id % args.num_workers != args.worker_id:
-                continue
+        questions = [get_detailed_query(q) for q in example["questions"]]
 
-            chunked_dataset = []
-            document = example[args.document_field]
-            doc_id = example[args.document_id_field]
-
-            # first, we chunk the text into blocks
-            for chunk_idx, chunk in enumerate(
-                chunk_text(
-                    document,
-                    tokenizer,
-                    args.block_size,
-                    int(args.token_overlap * args.block_size),
+        # finally, we compute the similarity scores
+        # let's get the embeddings for the questions and the chunks
+        embeds = []
+        for seqs in [questions, chunked_dataset]:
+            embeds += [
+                model.encode(
+                    seqs,
+                    batch_size=args.batch_size,
+                    show_progress_bar=True,
+                    convert_to_tensor=True,
                 )
-            ):
-                text = chunk
-                chunked_dataset += [text]
+            ]
 
-            # second, we preprocess the questions
-            def get_detailed_query(q):
-                return f"Instruct: Given a question about a work of literature, retrieve relevant passages that answer the question.\nQuery: {q}"
+        q_embeds, chunk_embeds = embeds
+        scores = model.similarity(q_embeds, chunk_embeds)
+        k = min(args.top_k, chunk_embeds.size(0))
+        topk_scores, topk_chunks = torch.topk(scores, k, dim=1)
 
-            questions = [get_detailed_query(q) for q in example["questions"]]
+        # finally, we store the most similar chunks in `document_field_name`, as a
+        # list of excerpts for each question (so a list of lists)
+        excerpts = []
+        for q_id, (q, topk) in enumerate(zip(questions, topk_chunks)):
+            excerpts += [[chunked_dataset[i] for i in topk]]
 
-            # finally, we compute the similarity scores
-            # let's get the embeddings for the questions and the chunks
-            embeds = []
-            for seqs in [questions, chunked_dataset]:
-                embeds += [
-                    model.encode(
-                        seqs,
-                        batch_size=args.batch_size,
-                        show_progress_bar=True,
-                        convert_to_tensor=True,
-                    )
-                ]
-
-            q_embeds, chunk_embeds = embeds
-            scores = model.similarity(q_embeds, chunk_embeds)
-            k = min(args.top_k, chunk_embeds.size(0))
-            topk_scores, topk_chunks = torch.topk(scores, k, dim=1)
-
-            # finally, we store the most similar chunks in `document_field_name`, as a
-            # list of excerpts for each question (so a list of lists)
-            excerpts = []
-            for q_id, (q, topk) in enumerate(zip(questions, topk_chunks)):
-                excerpts += [[chunked_dataset[i] for i in topk]]
-
-            example[args.document_field] = excerpts
-            final_dataset += [example]
+        example[args.document_field] = excerpts
+        final_dataset += [example]
 
     final_dataset = Dataset.from_list(final_dataset)
 
-    breakpoint()
     if args.num_workers == 1:
         final_dataset.push_to_hub(f"{args.hf_id}")
     else:

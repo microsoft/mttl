@@ -47,6 +47,28 @@ from projects.kms.utils.wiki_mmlu_evaluator import WikiMMLUEvaluator
 torch.set_float32_matmul_precision("high")
 
 
+evaluate_datasets = {
+    "nqa": "az://mttldata/narrativeqa-sanitized",
+    "wiki": "az://mttldata/wiki-top-20-sanitized",
+    "quality": "az://mttldata/quality-sanitized",
+    "wiki-rag": "az://mttldata/wiki-top-20-sanitized-rag",
+}
+
+evaluate_metrics = {
+    "nqa": "rougeL",
+    "wiki": "accuracy",
+    "wiki-rag": "accuracy",
+    "quality": "accuracy",
+}
+
+evaluate_class = {
+    "nqa": NQAZeroShotEvaluator,
+    "wiki": WikiMMLUEvaluator,
+    "wiki-rag": WikiMMLUEvaluator,
+    "quality": QualityEvaluator,
+}
+
+
 @dataclass
 class KMArguments(ExpertConfig):
     loss_function: str = "dcd"
@@ -89,15 +111,9 @@ def train_km(training_args: KMArguments):
 
     # build evaluator
     data_args = copy.deepcopy(training_args)
-    if training_args.evaluate_on == "nqa":
-        eval_metric = "rougeL"
-        evaluator = NQAZeroShotEvaluator(data_args)
-    elif training_args.evaluate_on == "quality":
-        eval_metric = "accuracy"
-        evaluator = QualityEvaluator(data_args)
-    elif training_args.evaluate_on == "wiki_mmlu":
-        eval_metric = "accuracy"
-        evaluator = WikiMMLUEvaluator(data_args)
+    data_args.dataset = evaluate_datasets[training_args.evaluate_on]
+    evaluator = evaluate_class[training_args.evaluate_on](data_args)
+    eval_metric = evaluate_metrics[training_args.evaluate_on]
 
     if training_args.loss_function == "dcd":
         loss_function = partial(
@@ -179,8 +195,8 @@ def train_km(training_args: KMArguments):
                 dtype=torch.bfloat16,
             ):
                 batch = transfer_batch_to_device(batch, device)
+                loss = loss_function(model, batch)
 
-            loss = loss_function(model, batch)
             loss = loss / args.gradient_accumulation_steps
             loss_accum += loss.detach()
             loss.backward()
