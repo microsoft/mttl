@@ -4,6 +4,7 @@ import logging
 import os
 import random
 from dataclasses import dataclass
+from functools import partial
 
 import numpy as np
 import torch
@@ -49,6 +50,8 @@ torch.set_float32_matmul_precision("high")
 class KMArguments(ExpertConfig):
     loss_function: str = "dcd"
     evaluate_on: str = "nqa"
+    logit_factor: float = 1.0
+    hidden_factor: float = 1.0
 
 
 def train_km(training_args: KMArguments):
@@ -96,7 +99,11 @@ def train_km(training_args: KMArguments):
         evaluator = WikiMMLUEvaluator(data_args)
 
     if training_args.loss_function == "dcd":
-        loss_function = dcd_loss
+        loss_function = partial(
+            dcd_loss,
+            logit_factor=training_args.logit_factor,
+            hidden_factor=training_args.hidden_factor,
+        )
     elif training_args.loss_function == "lm":
         loss_function = lm_loss
     else:
