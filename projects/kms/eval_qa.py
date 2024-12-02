@@ -3,7 +3,11 @@ import logging
 from dataclasses import dataclass
 
 from lightning_fabric import seed_everything
-from train_qa import KEArguments
+
+# register this datamodule!
+from projects.kms.utils.km_datamodule import KMDatasetModule
+from projects.kms.utils.nqa_datamodule import NQADatamodule
+from projects.kms.train_qa import KEArguments
 
 from mttl.logging import setup_logging
 from mttl.models.containers.selectors.km_selector import (
@@ -14,11 +18,6 @@ from mttl.models.km_model import KMMoEModelConfig
 from mttl.models.library.expert import load_expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.utils import remote_login
-
-# register this datamodule!
-from projects.kms.utils.km_datamodule import KMDatasetModule  # noqa: F401 isort:skip
-from projects.kms.utils.nqa_datamodule import NQADatamodule  # noqa: F401 isort:skip
-
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
