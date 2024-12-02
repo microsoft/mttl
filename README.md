@@ -1,6 +1,6 @@
-# MTTL
+# Mixture of Latent experts using Tensor Product
 
-MTTL - Multi-Task Transfer Learning
+This is the offical code for the paper: Mixture of Latent experts using Tensor Product(TMLR2024 accepted). 
 
 ## Setup
 
@@ -17,20 +17,44 @@ Download the datasets:
 ## Multi-task Pre-training
 
 The general command:
+- pretrain the lora:
 
-`python pl_train.py -c $CONFIG_FILES -k $KWARGS`
+```
+python pl_train.py -c t0/3b.json+t0/poly_lora_sota.json+t0/pretrain.json -k output_dir=pretrain_lora n_skills=1
 
-Multiple `CONFIG_FILES` can be concatenated as `file1+file2`. To modify defaults, `KWARGS` can be expressed as `key=value`.
+```
 
-## Test Fine-Tuning
+- pretrain the poly:
+
+```
+python pl_train.py -c t0/3b.json+t0/poly_lora_sota.json+t0/pretrain.json -k output_dir=pretrain_poly_lora checkpoint=pretrain_poly_lora
+```
+
+- pretrain the tensorpoly:
+
+```
+python pl_train.py -c t0/3b.json+t0/tensorpoly_lora_sota.json+t0/pretrain.json -k output_dir=pretrain_tensorpoly_lora_order_2 order=2
+```
+
+## Fine-Tuning
 
 To perform finetuning for a test task, use the script `pl_finetune.py`
 
-## Hyper-parameter Search for Test Fine-Tuning
+```
+for dataset in copa h-swag storycloze winogrande wsc wic rte cb anli-r1 anli-r2 anli-r3
+do
+    python -m pl_finetune -c \
+    t0/finetune.json+t0/${dataset}.json \
+    -k \
+    checkpoint=pretrain_tensororderpoly_lora_order_2 \
+    output_dir=finetune_tensororderpoly_lora_order_2/${dataset} order=4
+done
+```
+## Few-shot Evaluation
 
-To perform an hyperparameter search for a test task, use the script `pl_finetune_tune.py`.
-The script will just call the functions in `pl_finetune.py` in a loop. The script itself defines hp ranges for different fine-tuning types.
-
+```
+python get_metrics.py files finetune_tensororderpoly_lora_order_4 --dataset=t0
+```
 ## Contributing
 
 This project welcomes contributions and suggestions.  Most contributions require you to agree to a
