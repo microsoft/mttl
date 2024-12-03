@@ -12,7 +12,12 @@ from mttl.models.containers.selectors.base import (
 from mttl.models.containers.selectors.km_selector import (
     KnowledgeExtractorSelectorConfig,
 )
-from mttl.models.expert_model import BaseExpertModel, MoEModelConfig, MultiExpertMixin
+from mttl.models.expert_model import (
+    BaseExpertModel,
+    ExpertModelConfig,
+    MoEModelConfig,
+    MultiExpertMixin,
+)
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.modifiers.base import AutoModifierConfig
 
@@ -72,7 +77,7 @@ class KMMoEModel(BaseExpertModel, MultiExpertMixin):
 
 
 @dataclass
-class EMAExpertModelConfig(MoEModelConfig):
+class EMAExpertModelConfig(ExpertModelConfig, MoEModelConfig):
     ema_coef: float = 0.999
     modifier_config: AutoModifierConfig = None
     default_expert: str = "KM"

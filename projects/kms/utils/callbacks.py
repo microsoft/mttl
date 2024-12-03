@@ -1,6 +1,6 @@
+import wandb
 from transformers import TrainerCallback
 
-import wandb
 from mttl.utils import logger
 
 

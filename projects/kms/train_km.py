@@ -8,15 +8,17 @@ import torch.nn.functional as F
 from lightning_fabric import seed_everything
 from utils.callbacks import LogMttlArgs
 
+# register this datamodule!
+from projects.kms.utils.km_datamodule import KMDatasetModule
+from projects.kms.utils.nqa_datamodule import NQADatamodule
+
+# isort: split
+
 from mttl.arguments import ExpertConfig
 from mttl.logging import setup_logging
 from mttl.models.expert_model import ExpertModel, ExpertModelConfig
 from mttl.models.hf.trainer import ExpertModelTrainer, LMTrainer
 from mttl.utils import create_library, remote_login, upload_library
-
-# register this datamodule!
-from projects.kms.utils.km_datamodule import KMDatasetModule
-from projects.kms.utils.nqa_datamodule import NQADatamodule  # noqa: F401
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -85,7 +87,7 @@ class DCDTrainer(ExpertModelTrainer):
             target_hidden_logits = torch.cat(
                 (target_hidden_logits, target_logits.unsqueeze(0)), dim=0
             )
-            
+
             breakpoint()
             xx = 1
             """

@@ -4,6 +4,7 @@ import logging
 import os
 import random
 from dataclasses import dataclass
+from functools import partial
 
 import numpy as np
 import torch
@@ -13,6 +14,12 @@ from lightning_fabric import seed_everything
 from torch.distributed import destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm import tqdm
+
+# register this datamodule!
+from projects.kms.utils.km_datamodule import KMDatasetModule
+from projects.kms.utils.nqa_datamodule import NQADatamodule
+
+# isort: split
 
 from mttl.arguments import ExpertConfig
 from mttl.datamodule.base import get_datamodule
@@ -27,10 +34,6 @@ from mttl.models.expert_model import ExpertModel, ExpertModelConfig, disable_mod
 from mttl.models.get_optimizer import get_optimizer_and_scheduler
 from mttl.models.utils import transfer_batch_to_device
 from mttl.utils import create_library, remote_login, seed_everything, upload_library
-
-# register this datamodule!
-from projects.kms.utils.km_datamodule import KMDatasetModule
-from projects.kms.utils.nqa_datamodule import NQADatamodule  # noqa: F401
 from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator
 from projects.kms.utils.quality_evaluator import QualityEvaluator
 from projects.kms.utils.simple_utils import (
@@ -71,6 +74,8 @@ evaluate_class = {
 class KMArguments(ExpertConfig):
     loss_function: str = "dcd"
     evaluate_on: str = "nqa"
+    logit_factor: float = 1.0
+    hidden_factor: float = 1.0
 
 
 def train_km(training_args: KMArguments):
@@ -112,7 +117,11 @@ def train_km(training_args: KMArguments):
     eval_metric = evaluate_metrics[training_args.evaluate_on]
 
     if training_args.loss_function == "dcd":
-        loss_function = dcd_loss
+        loss_function = partial(
+            dcd_loss,
+            logit_factor=training_args.logit_factor,
+            hidden_factor=training_args.hidden_factor,
+        )
     elif training_args.loss_function == "lm":
         loss_function = lm_loss
     else:

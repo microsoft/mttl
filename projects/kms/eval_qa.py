@@ -3,7 +3,12 @@ import logging
 from dataclasses import dataclass
 
 from lightning_fabric import seed_everything
-from train_qa import KEArguments
+
+# register this datamodule!
+from projects.kms.utils.km_datamodule import KMDatasetModule
+from projects.kms.utils.nqa_datamodule import NQADatamodule
+
+from projects.kms.train_qa import KEArguments  # isort: split
 
 from mttl.logging import setup_logging
 from mttl.models.containers.selectors.km_selector import (
@@ -32,7 +37,10 @@ def eval_qa(training_args):
     setup_logging(training_args.output_dir)
     logger.info("Args: %s", training_args.to_json())
 
-    remote_login(training_args.remote_token)
+    try:
+        remote_login(training_args.remote_token)
+    except Exception as e:
+        logger.error(f"Failed to login remotely: {e}")
 
     # Build model (will have 0 experts if `library_id` is None)
     model_config = KMMoEModelConfig(

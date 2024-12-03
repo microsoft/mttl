@@ -66,6 +66,8 @@ def train_km(training_args: KMArguments):
     model_config = EMAExpertModelConfig(
         base_model=args.model,
         modifier_config=args.modifier_config,
+        task_name=args.finetune_task_name,
+        expert_name=args.expert_name or args.finetune_task_name,
     )
 
     device = get_device()
