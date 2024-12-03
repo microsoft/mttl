@@ -14,6 +14,11 @@ Download the datasets:
 
 `bash scripts/create_datasets.sh`
 
+there are some datasets not available multi_news,gigaword,wiki_hop. you can download from this link:
+
+https://drive.google.com/drive/folders/1rd8cbtxNFOptHLES1W84hD92bGY96bQX?usp=drive_link
+
+
 ## Multi-task Pre-training
 
 The general command:
