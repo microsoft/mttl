@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from lightning_fabric import seed_everything
 from train_km import KMArguments
+from transformers import EarlyStoppingCallback
 from utils.callbacks import LogMttlArgs
 
 from mttl.arguments import MultiExpertConfig
@@ -83,7 +84,10 @@ def train_ke(training_args):
         )
 
     # Not all argument are being logged. This remedies it
-    callbacks = [LogMttlArgs(training_args)]
+    callbacks = [
+        LogMttlArgs(training_args),
+        EarlyStoppingCallback(early_stopping_patience=3),
+    ]
     if training_args.nqa_dataset is not None:
         # load the NQA callback to monitor zero-shot performance
         from projects.kms.utils.nqa_callback import NQAZeroShotCallback
@@ -113,11 +117,11 @@ def train_ke(training_args):
         # create a library and upload that expert
         lib_path, exp_name = args.ke_hf_path.rsplit("/", 1)
         expert_library = ExpertLibrary.get_expert_library(lib_path, create=True)
-        expert_library.add_expert(ke_expert, exp_name)
+        expert_library.add_expert(ke_expert, exp_name, force=True)
 
 
 if __name__ == "__main__":
-    args = KEArguments.parse(raise_error=False)
+    args = KEArguments.parse()
     assert args.dataset_config
 
     if args.nqa_dataset is None:
