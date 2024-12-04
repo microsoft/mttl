@@ -48,6 +48,16 @@ from projects.kms.utils.wiki_mmlu_evaluator import WikiMMLUEvaluator
 torch.set_float32_matmul_precision("high")
 
 
+train_datasets = {
+    "quality-km-llama-8b": "az://mttldata/quality-summaries-qa-llama-8b-instruct",
+    "quality-km-phi3-med": "az://mttldata/quality-summaries-qa-phi3-medium",
+    "wiki-km-llama-8b": "az://mttldata/wiki-top-20-summaries-qa-llama-8b-instruct",
+    "wiki-km-phi3-med": "az://mttldata/wiki-top-20-summaries-qa-phi3-medium",
+    "nqa-km-phi3-med": "az://mttldata/nqa-summaries-qa-phi-3-medium",
+    "nqa-km-llama-8b": "az://mttldata/nqa-summaries-qa-llama-8b-instruct",
+}
+
+
 evaluate_datasets = {
     "nqa": "az://mttldata/narrativeqa-sanitized",
     "wiki": "az://mttldata/wiki-top-20-sanitized",
