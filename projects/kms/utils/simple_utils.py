@@ -27,8 +27,12 @@ def print_metrics(data):
     if max_value - min_value == 0:
         return spark_chars[3] * len(data)
 
-    min_value = min(data) - np.std(data)
-    max_value = max(data) + np.std(data)
+    std = np.std(data)
+    if std == 0:
+        return "<std = 0>, skipping"
+
+    min_value = min(data) - std
+    max_value = max(data) + std
 
     # Scale data points to indices of spark_chars
     scaled_data = [
