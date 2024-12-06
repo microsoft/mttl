@@ -945,6 +945,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         HellaswagMultiChoiceDataModule,
     )
     from mttl.datamodule.mathqa_data_module import MathQADataConfig, MathQADataModule
+    from mttl.datamodule.gsm_data_module import GsmDataConfig, GsmDataModule
     from mttl.datamodule.base import DatasetConfig
     from mttl.datamodule.alpaca_data_module import (
         AlpacaCodeDataModule,
@@ -1073,6 +1074,12 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
             **common_kwargs,
         )
         dm = MathQADataModule(config, for_generation=for_generation)
+    elif "gsm" in dataset:
+        config = GsmDataConfig(
+            **common_kwargs,
+        )
+        dm = GsmDataModule(config, for_generation=for_generation)
+
     elif "alpaca_code" in dataset:
         config = DatasetConfig(
             **common_kwargs,
