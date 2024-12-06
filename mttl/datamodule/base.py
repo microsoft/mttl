@@ -492,8 +492,8 @@ class MultipleChoiceCollator(DefaultCollator):
         labels = [b["target"] for b in batch]
         label_index = [b["label_index"] for b in batch]
         task_ids = [b.get("task_id", None) for b in batch]
-        task_names = [b.get("task_name", None) for b in batch]
-        task_sources = [b.get("task_source", None) for b in batch]
+        task_names = [b.get(self.task_name_field, None) for b in batch]
+        task_sources = [b.get(self.task_source_field, None) for b in batch]
 
         if self.multisource:
             num_options = [len(t) for t in sources]
