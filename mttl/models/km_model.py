@@ -12,6 +12,7 @@ from mttl.models.containers.selectors.base import (
 from mttl.models.containers.selectors.km_selector import (
     KnowledgeExtractorSelectorConfig,
 )
+from mttl.models.containers.selectors.poly_selector import PolySelectorConfig
 from mttl.models.expert_model import (
     BaseExpertModel,
     ExpertModelConfig,
@@ -33,7 +34,7 @@ class KMMoEModelConfig(MoEModelConfig):
     modifier_config: AutoModifierConfig = None
 
 
-@BaseExpertModel.register("moe_km", config_cls=KMMoEModelConfig)
+@BaseExpertModel.register("moe_ke", config_cls=KMMoEModelConfig)
 class KMMoEModel(BaseExpertModel, MultiExpertMixin):
     """MoeModel that can accomodate a Knowledge Extractor"""
 
@@ -84,7 +85,7 @@ class EMAExpertModelConfig(ExpertModelConfig, MoEModelConfig):
     downscale_factor: int = 16
 
 
-@BaseExpertModel.register("ema_km", config_cls=KMMoEModelConfig)
+@BaseExpertModel.register("ema_km", config_cls=EMAExpertModelConfig)
 class EMAExpertModel(BaseExpertModel, MultiExpertMixin):
     """MoeModel that can accomodate a Knowledge Extractor"""
 
@@ -118,3 +119,21 @@ class EMAExpertModel(BaseExpertModel, MultiExpertMixin):
         for key in state_dict_keys:
             p, ema_p = expert.expert_weights[key], ema_expert.expert_weights[key]
             ema_p.data.mul_(ema_coef).add_(p.data, alpha=1 - ema_coef)
+
+
+@dataclass
+class KMMoEConfig(ExpertModelConfig, MoEModelConfig):
+    moe_num_experts: int = 8
+
+
+@BaseExpertModel.register("moe_km", config_cls=KMMoEConfig)
+class KMMoEModel(BaseExpertModel, MultiExpertMixin):
+    def __init__(self, config, **kwargs):
+
+        assert config.selector_config is not None
+        assert isinstance(config.selector_config, PolySelectorConfig)
+
+        super().__init__(config, **kwargs)
+
+        for e_i in range(self.config.moe_num_experts):
+            self.add_empty_expert(f"e{e_i}", expert_config=config.modifier_config)
