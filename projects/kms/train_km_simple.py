@@ -50,9 +50,9 @@ torch.set_float32_matmul_precision("high")
 
 train_datasets = {
     "quality-km-llama-8b": "az://mttldata/quality-summaries-qa-llama-8b-instruct",
-    "quality-km-phi3-med": "az://mttldata/quality-summaries-qa-phi3-medium",
+    "quality-km-phi3-med": "az://mttldata/quality-summaries-qa-phi-3-medium",
     "wiki-km-llama-8b": "az://mttldata/wiki-top-20-summaries-qa-llama-8b-instruct",
-    "wiki-km-phi3-med": "az://mttldata/wiki-top-20-summaries-qa-phi3-medium",
+    "wiki-km-phi3-med": "az://mttldata/wiki-top-20-summaries-qa-phi-3-medium",
     "nqa-km-phi3-med": "az://mttldata/nqa-summaries-qa-phi-3-medium",
     "nqa-km-llama-8b": "az://mttldata/nqa-summaries-qa-llama-8b-instruct",
 }
@@ -99,7 +99,7 @@ def train_km(training_args: KMArguments):
 
     logger.info("Args: %s", training_args.to_json())
 
-    remote_login(training_args.remote_token)
+    remote_login(training_args.remote_token, raise_error=False)
 
     model_config = ExpertModelConfig(
         base_model=args.model,
@@ -275,5 +275,5 @@ def train_km(training_args: KMArguments):
 
 
 if __name__ == "__main__":
-    args = KMArguments.parse(raise_error=False)
+    args = KMArguments.parse()
     train_km(args)

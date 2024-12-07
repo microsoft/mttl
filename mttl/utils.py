@@ -46,7 +46,7 @@ def retry(max_retries=10, wait_seconds=60):
     return decorator
 
 
-def remote_login(token: Optional[str] = None):
+def remote_login(token: Optional[str] = None, raise_error: bool = True):
     """Caches the provided token and login to remote service: Azure Blob Storage or Hugging Face Hub.
 
     Sets the environment variable "BLOB_SAS_TOKEN" for later use
@@ -69,7 +69,13 @@ def remote_login(token: Optional[str] = None):
         if token is not None:
             from huggingface_hub import login as hf_hub_login
 
-            hf_hub_login(token=token)
+            try:
+                hf_hub_login(token=token)
+            except Exception as e:
+                if raise_error:
+                    raise e
+                else:
+                    logger.error("Failed to login to Hugging Face Hub.", exc_info=True)
 
 
 def hash_example(example):

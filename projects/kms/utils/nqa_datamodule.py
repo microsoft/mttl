@@ -60,6 +60,19 @@ class NQADatamodule(DataModule):
         )
 
         def expand_questions(examples, tokenizer):
+
+            def maybe_truncate(fixed_prompt, content, buffer=10):
+                """Handling truncation here to make sure the prompt is not truncated"""
+                prompt_length = len(tokenizer.encode(fixed_prompt))
+                remaining_length = self.config.max_input_length - prompt_length - buffer
+                content = tokenizer(content)["input_ids"]
+                if tokenizer.truncation_side == "right":
+                    content = content[:remaining_length]
+                else:
+                    content = content[-remaining_length:]
+
+                return tokenizer.decode(content)
+
             batch = {
                 "source": [],
                 "target": [],
@@ -93,6 +106,10 @@ class NQADatamodule(DataModule):
                                     )[::-1]
                                 ]
                             )
+                            context = maybe_truncate(
+                                f"Consider the following passages:\n\n{self.config.prompt}{question}",
+                                context,
+                            )
                             source = [
                                 {
                                     "role": "user",
@@ -100,6 +117,10 @@ class NQADatamodule(DataModule):
                                 }
                             ]
                         else:
+                            context = maybe_truncate(
+                                f"Consider the following paragraph:\n\n{self.config.prompt}{question}",
+                                context,
+                            )
                             source = [
                                 {
                                     "role": "user",
@@ -114,6 +135,12 @@ class NQADatamodule(DataModule):
                             }
                         ]
 
+                    xx = tokenizer.apply_chat_template(
+                        source, add_generation_prompt=True, tokenize=False
+                    )
+                    yy = tokenizer.apply_chat_template(
+                        source, add_generation_prompt=True, tokenize=True
+                    )
                     batch["source"].append(
                         tokenizer.apply_chat_template(
                             source, add_generation_prompt=True, tokenize=False
