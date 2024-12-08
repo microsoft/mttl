@@ -948,7 +948,8 @@ def eval_generative_qa(model, tokenizer, dataset):
                 [
                     {
                         "role": "user",
-                        "content": "Answer the following question: " + question,
+                        "content": "Answer the following question briefly and to the point: "
+                        + question,
                     }
                 ],
                 add_generation_prompt=True,
@@ -963,19 +964,21 @@ def eval_generative_qa(model, tokenizer, dataset):
         tokenizer.pad_token_id,
         padding_side="left",
     ).to(device)
+    questions_mask = question_tensors.ne(tokenizer.pad_token_id)
     # now generate answers with a given batch size
     with torch.no_grad():
         generations = []
         # use tqdm instead of range
         for i in tqdm(range(0, len(question_tensors), batch_size)):
             output = model.generate(
-                question_tensors[i : i + batch_size],
+                input_ids=question_tensors[i : i + batch_size],
+                attention_mask=questions_mask[i : i + batch_size],
                 do_sample=True,
                 max_length=500,
                 temperature=temperature,
                 num_return_sequences=1,
             )
-            generations.extend(output)
+            generations.extend(output[:, question_tensors.shape[1] :].cpu().tolist())
     # now we have the generations, let's detokenize them
     generations = [tokenizer.decode(g, skip_special_tokens=True) for g in generations]
     # now compute multi-reference rouge
@@ -1047,9 +1050,11 @@ for mn in models.keys():
         model_name = models[mn]
         break
 
+# Set number of inner ppo off policy epochs
 if "-ppo_epochs" in sys.argv:
     num_ppo_epochs = int(sys.argv[sys.argv.index("-ppo_epochs") + 1])
 
+# Trainer
 if "-rloo" in sys.argv:
     algo = RLOOTrainer(model_name)
 elif "-rft" in sys.argv:
@@ -1059,16 +1064,19 @@ elif "-peft" in sys.argv:
 else:
     raise ValueError("Invalid algorithm type.")
 
+# lr
 if "-lr" in sys.argv:
     lr = float(sys.argv[sys.argv.index("-lr") + 1])
 else:
     lr = 1e-5
 
+# document id
 if "-task" in sys.argv:
     task = sys.argv[sys.argv.index("-task") + 1]
 else:
     raise ValueError("Task not specified.")
 
+# output directory
 if "-o" in sys.argv:
     import shutil
 
@@ -1087,17 +1095,17 @@ chunks = list(chunk_text(dataset["text"][0], algo.tokenizer))
 if num_problems_per_step == -1:
     num_problems_per_step = len(chunks)
 
-optimized_group = []
 # set params in optimized group as trainable and others as not
+optimized_group = []
 for n, p in algo.model.named_parameters():
     p.requires_grad = "lora" in n
     if p.requires_grad:
         optimized_group.append(p)
-
 # print number of trainable parameters
 print(
     f"Number of trainable parameters: {sum(p.numel() for p in optimized_group)}",
 )
+# optimizer
 optimizer = torch.optim.Adam(optimized_group, lr=lr)
 # get scheduler now
 if "-wsd" in sys.argv:
