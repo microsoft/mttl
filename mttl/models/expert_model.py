@@ -36,6 +36,24 @@ from mttl.models.modifiers.modify_model import modify_transformer
 
 
 @contextlib.contextmanager
+def set_active_expert(model, expert_name):
+    """Context manager to set the active expert in a model.
+
+    Args:
+        model (BaseExpertModel): The model to set the active expert in.
+    """
+    if is_dist_avail_and_initialized() and hasattr(model, "module"):
+        model = model.module
+
+    state = model.config.default_expert_name
+    model.set_default_expert(expert_name)
+
+    yield
+
+    model.set_default_expert(state)
+
+
+@contextlib.contextmanager
 def disable_modifiers(model):
     """Context manager to disable all adapters in a model.
 
@@ -206,6 +224,7 @@ class MultiExpertMixin:
         """Propagate default expert to all containers that contain it."""
         for container in self.experts_containers:
             container.default_expert_name = None
+        self.config.default_expert_name = None
 
     def set_default_expert(self, expert_name):
         """Propagate default expert to all containers that contain it."""
@@ -217,6 +236,7 @@ class MultiExpertMixin:
                 container.default_expert_name = expert_name
             else:
                 raise ValueError(f"Expert {expert_name} not found in the container.")
+        self.config.default_expert_name = expert_name
 
     @property
     def lock(self):
