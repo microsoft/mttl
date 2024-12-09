@@ -17,34 +17,37 @@ from mttl.models.utils import transfer_batch_to_device
 
 
 def print_metrics(data):
-    import numpy as np
+    try:
+        import numpy as np
 
-    min_value = min(data)
-    max_value = max(data)
-    spark_chars = "▁▂▃▄▅▆▇█"
+        min_value = min(data)
+        max_value = max(data)
+        spark_chars = "▁▂▃▄▅▆▇█"
 
-    # Handle the case where all data points are the same
-    if max_value - min_value == 0:
-        return spark_chars[3] * len(data)
+        # Handle the case where all data points are the same
+        if max_value - min_value == 0:
+            return spark_chars[3] * len(data)
 
-    std = np.std(data)
-    if std == 0:
-        return "<std = 0>, skipping"
+        std = np.std(data)
+        if std == 0:
+            return "<std = 0>, skipping"
 
-    min_value = min(data) - std
-    max_value = max(data) + std
+        min_value = min(data) - std
+        max_value = max(data) + std
 
-    # Scale data points to indices of spark_chars
-    scaled_data = [
-        int((value - min_value) / (max_value - min_value) * (len(spark_chars) - 1))
-        for value in data
-    ]
+        # Scale data points to indices of spark_chars
+        scaled_data = [
+            int((value - min_value) / (max_value - min_value) * (len(spark_chars) - 1))
+            for value in data
+        ]
 
-    # Map scaled data to corresponding sparkline characters
-    return "".join(spark_chars[idx] for idx in scaled_data)
+        # Map scaled data to corresponding sparkline characters
+        return "".join(spark_chars[idx] for idx in scaled_data)
+    except:
+        return "<error>"
 
 
-def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0):
+def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0, loss_on_topk=None):
     """Deep Contextual Distillation loss."""
     kl_loss = torch.nn.KLDivLoss(reduction="none")
 
@@ -90,19 +93,45 @@ def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0):
             ]
             target_logits = outputs.logits[valid_idx]
 
-    outputs = model(
+    nc_outputs = model(
         input_ids=nc_input_ids,
         attention_mask=nc_attention_mask,
         output_hidden_states=True,
         return_dict=True,
+        task_names=inputs.get("task_names"),  # Here
     )
 
     loss = 0.0
     losses = []
 
+    if loss_on_topk is not None:
+        # per token losses for student and teacher
+        # for the teacher
+        bs, sq, D = outputs.logits.size()
+        target_loss = F.cross_entropy(
+            outputs.logits[:, :-1].flatten(0, 1),
+            labels[:, 1:].flatten(0),
+            reduction="none",
+        )
+        target_loss = target_loss.reshape(bs, sq - 1)[valid_idx[:, :-1]]
+
+        # for the student
+        bs, sq, D = nc_outputs.logits.size()
+        student_loss = F.cross_entropy(
+            nc_outputs.logits[:, :-1].flatten(0, 1),
+            nc_labels[:, 1:].flatten(0),
+            reduction="none",
+        )
+        student_loss = student_loss.reshape(bs, sq - 1)[nc_valid_idx[:, :-1]]
+
+        score = student_loss - target_loss
+
+        # topk
+        _, hard_token_idx = score.topk(k=int(score.numel() * loss_on_topk))
+
     if hidden_factor > 0:
         for layer_id, (actual_states, target_states) in enumerate(
-            zip(outputs.hidden_states, target_hidden_states)
+            zip(nc_outputs.hidden_states, target_hidden_states)
         ):
             actual_states = actual_states[nc_valid_idx, :]
 
@@ -112,6 +141,9 @@ def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0):
 
             # Loss is the mean abs difference between target and predicted states,
             # normalised by mean magnitude of target states
+            if loss_on_topk is not None:
+                actual_states = actual_states[hard_token_idx, :]
+                target_states = target_states[hard_token_idx, :]
             loss = (actual_states - target_states).abs().mean()
             loss = loss / target_states.abs().mean()
             losses.append(loss)
@@ -126,8 +158,16 @@ def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0):
 
     # Add KL divergence between target and predicted output distributions to loss
     target_probs = F.softmax(target_logits, dim=-1)
-    preds = F.log_softmax(outputs.logits[nc_valid_idx, ...], dim=-1)
-    kl_loss = kl_loss(preds, target_probs).sum(dim=-1).mean()
+    preds = F.log_softmax(nc_outputs.logits[nc_valid_idx, ...], dim=-1)
+
+    if loss_on_topk is not None:
+        kl_loss = (
+            kl_loss(preds[hard_token_idx], target_probs[hard_token_idx])
+            .sum(dim=-1)
+            .mean()
+        )
+    else:
+        kl_loss = kl_loss(preds, target_probs).sum(dim=-1).mean()
 
     loss = loss + logit_factor * kl_loss
     return loss
@@ -250,7 +290,7 @@ def lm_loss(model, inputs):
     return outputs.loss
 
 
-def do_evaluation(datamodule, model, loss_function, evaluator) -> bool:
+def do_evaluation(datamodule, model, loss_function, evaluator, **kwargs) -> bool:
     val_loss = []
     for batch in tqdm(datamodule.val_dataloader(), disable=not is_main_process()):
         with torch.no_grad():
@@ -258,7 +298,7 @@ def do_evaluation(datamodule, model, loss_function, evaluator) -> bool:
             val_loss.append(loss_function(model, batch).item())
 
     val_loss = distributed_mean(val_loss, model.device)
-    eval_score = evaluator.evaluate(model, "dev")
+    eval_score = evaluator.evaluate(model, "dev", **kwargs)
     return val_loss, eval_score
 
 

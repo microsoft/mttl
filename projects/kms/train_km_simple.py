@@ -59,7 +59,7 @@ train_datasets = {
 
 
 evaluate_datasets = {
-    "nqa": "az://mttldata/narrativeqa-sanitized",
+    "nqa": "az://mttldata/narrativeqa-sanitized",  # "sordonia/narrativeqa_sanitized",
     "wiki": "az://mttldata/wiki-top-20-sanitized",
     "quality": "az://mttldata/quality-sanitized",
     "wiki-rag": "az://mttldata/wiki-top-20-sanitized-rag",
@@ -86,6 +86,7 @@ class KMArguments(ExpertConfig):
     evaluate_on: str = "nqa"
     logit_factor: float = 1.0
     hidden_factor: float = 1.0
+    loss_on_topk: float = None
 
 
 def train_km(training_args: KMArguments):
@@ -131,6 +132,7 @@ def train_km(training_args: KMArguments):
             dcd_loss,
             logit_factor=training_args.logit_factor,
             hidden_factor=training_args.hidden_factor,
+            loss_on_topk=training_args.loss_on_topk,
         )
     elif training_args.loss_function == "lm":
         loss_function = lm_loss
