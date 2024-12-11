@@ -96,8 +96,8 @@ class QualityDatamodule(MultiChoiceDataModule):
             return batch
 
         if "split" in train_dataset.features:
-            self.train_dataset, self.dev_dataset, _ = split_on_split_column(
-                train_dataset
+            self.train_dataset, self.dev_dataset, self.test_dataset = (
+                split_on_split_column(train_dataset)
             )
             self.train_dataset = self.train_dataset.map(
                 lambda examples: expand_questions(examples, self.tokenizer),
@@ -113,7 +113,13 @@ class QualityDatamodule(MultiChoiceDataModule):
                 num_proc=1,
                 remove_columns=train_dataset.column_names,
             )
-            self.test_dataset = None
+            self.test_dataset = self.test_dataset.map(
+                lambda examples: expand_questions(examples, self.tokenizer),
+                batched=True,
+                batch_size=1000,
+                num_proc=1,
+                remove_columns=train_dataset.column_names,
+            )
         else:
             train_dataset = train_dataset.map(
                 lambda examples: expand_questions(examples, self.tokenizer),
