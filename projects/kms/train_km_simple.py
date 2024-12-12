@@ -86,6 +86,7 @@ class KMArguments(ExpertConfig):
     evaluate_on: str = "nqa"
     logit_factor: float = 1.0
     hidden_factor: float = 1.0
+    temp: float = 1.0
     loss_on_topk: float = None
 
 
@@ -127,22 +128,24 @@ def train_km(training_args: KMArguments):
     evaluator = evaluate_class[training_args.evaluate_on](data_args)
     eval_metric = evaluate_metrics[training_args.evaluate_on]
 
+    datamodule = get_datamodule(training_args)
+    (optimizer, scheduler), trainable_param_names = get_optimizer_and_scheduler(
+        model, training_args, num_train_examples=len(datamodule.train_dataset)
+    )
+
     if training_args.loss_function == "dcd":
         loss_function = partial(
             dcd_loss,
             logit_factor=training_args.logit_factor,
             hidden_factor=training_args.hidden_factor,
             loss_on_topk=training_args.loss_on_topk,
+            tokenizer=datamodule.tokenizer,
+            temp=training_args.temp,
         )
     elif training_args.loss_function == "lm":
         loss_function = lm_loss
     else:
         raise ValueError(f"Loss function {training_args.loss_function} not supported")
-
-    datamodule = get_datamodule(training_args)
-    (optimizer, scheduler), trainable_param_names = get_optimizer_and_scheduler(
-        model, training_args, num_train_examples=len(datamodule.train_dataset)
-    )
 
     # compute number of trainable parameters
     num_trainable_params = sum(

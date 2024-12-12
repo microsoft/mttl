@@ -47,7 +47,15 @@ def print_metrics(data):
         return "<error>"
 
 
-def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0, loss_on_topk=None):
+def dcd_loss(
+    model,
+    inputs,
+    logit_factor=1.0,
+    hidden_factor=1.0,
+    loss_on_topk=None,
+    tokenizer=None,
+    temp=1.0,
+):
     """Deep Contextual Distillation loss."""
     kl_loss = torch.nn.KLDivLoss(reduction="none")
 
@@ -105,29 +113,78 @@ def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0, loss_on_topk=No
     losses = []
 
     if loss_on_topk is not None:
-        # per token losses for student and teacher
-        # for the teacher
-        bs, sq, D = outputs.logits.size()
-        target_loss = F.cross_entropy(
-            outputs.logits[:, :-1].flatten(0, 1),
-            labels[:, 1:].flatten(0),
-            reduction="none",
-        )
-        target_loss = target_loss.reshape(bs, sq - 1)[valid_idx[:, :-1]]
+        with torch.no_grad():
+            # per token losses for student and teacher
 
-        # for the student
-        bs, sq, D = nc_outputs.logits.size()
-        student_loss = F.cross_entropy(
-            nc_outputs.logits[:, :-1].flatten(0, 1),
-            nc_labels[:, 1:].flatten(0),
-            reduction="none",
-        )
-        student_loss = student_loss.reshape(bs, sq - 1)[nc_valid_idx[:, :-1]]
+            # for the teacher
+            bs, sq, D = outputs.logits.size()
+            target_loss = F.cross_entropy(
+                outputs.logits[:, :-1].flatten(0, 1),
+                labels[:, 1:].flatten(0),
+                reduction="none",
+            )
+            all_target_loss = target_loss.reshape(bs, sq - 1)
+            target_loss = all_target_loss[valid_idx[:, :-1]]
 
-        score = student_loss - target_loss
+            # for the student
+            bs, sq, D = nc_outputs.logits.size()
+            student_loss = F.cross_entropy(
+                nc_outputs.logits[:, :-1].flatten(0, 1),
+                nc_labels[:, 1:].flatten(0),
+                reduction="none",
+            )
+            all_student_loss = student_loss.reshape(bs, sq - 1)
+            student_loss = all_student_loss[nc_valid_idx[:, :-1]]
 
-        # topk
-        _, hard_token_idx = score.topk(k=int(score.numel() * loss_on_topk))
+            score = all_target_loss.clone() * -1
+            # add student loss
+            score[valid_idx[:, :-1]] += student_loss
+            score[~valid_idx[:, :-1]] = -1e9
+
+            # hard token idx : bs, topk
+            avg_valid_tokens = valid_idx[:, :-1].sum(1).float().mean().int().item()
+            _, hard_token_idx = score.topk(
+                k=int(avg_valid_tokens * loss_on_topk), dim=1
+            )
+
+            """
+            # --- Debugging to make sure masking seems ok 
+            mask = torch.zeros_like(score).bool()
+            mask.scatter_(1, hard_token_idx, True)
+
+            for bs_idx in range(bs):
+                tea_ids = torch.where(valid_idx[bs_idx, :-1])[0]
+                stu_ids = torch.where(nc_valid_idx[bs_idx, :-1])[0]
+                hard_token_idx_ = torch.where(mask[bs_idx][valid_idx[bs_idx, :-1]])[0]
+
+                for i in range(tea_ids.size(0)):
+                    assert nc_input_ids[bs_idx, stu_ids[i]] == input_ids[bs_idx, tea_ids[i]]
+                    token = tokenizer.decode(input_ids[bs_idx, tea_ids[i]].item())
+                    tea_loss = all_target_loss[bs_idx, tea_ids[i]].item()
+                    stu_loss = all_student_loss[bs_idx, stu_ids[i]].item()
+                    hard_token = (i == hard_token_idx_).any().item()
+                    fill = lambda x : (x + ' ' * (20 - len(x)))
+                    if hard_token:
+                        print(f'{fill(token)} | tea loss : {tea_loss:.2f} | stu loss : {stu_loss:.2f} | gap : {stu_loss - tea_loss:.2f} | hard token')
+                    else:
+                        print(f'{fill(token)} | tea loss : {tea_loss:.2f} | stu loss : {stu_loss:.2f} | gap : {stu_loss - tea_loss:.2f}')
+
+            # --- Debug end 
+            """
+
+            # build a bool mask the same size of `score` that's True if the token is among the hard token
+            # mask[i,j] = True if `j` in hard_token_idx[i]
+            mask = torch.zeros_like(score).bool()
+            mask.scatter_(1, hard_token_idx, True)
+            hard_token_idx = mask[valid_idx[:, :-1]]
+
+            # finally, let's extract 1-dim indices
+            hard_token_idx = torch.where(hard_token_idx.flatten())[0]
+
+            # topk
+            # old_score = student_loss - target_loss
+            # _, old_hard_token_idx = old_score.topk(k=int(old_score.numel() * loss_on_topk))
+            # will be torch.allclose(old_score, score[score != -1e9])
 
     if hidden_factor > 0:
         for layer_id, (actual_states, target_states) in enumerate(
@@ -144,6 +201,7 @@ def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0, loss_on_topk=No
             if loss_on_topk is not None:
                 actual_states = actual_states[hard_token_idx, :]
                 target_states = target_states[hard_token_idx, :]
+
             loss = (actual_states - target_states).abs().mean()
             loss = loss / target_states.abs().mean()
             losses.append(loss)
@@ -157,8 +215,8 @@ def dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0, loss_on_topk=No
         loss = torch.mean(torch.stack(losses)) * hidden_factor
 
     # Add KL divergence between target and predicted output distributions to loss
-    target_probs = F.softmax(target_logits, dim=-1)
-    preds = F.log_softmax(nc_outputs.logits[nc_valid_idx, ...], dim=-1)
+    target_probs = F.softmax(target_logits / temp, dim=-1)
+    preds = F.log_softmax(nc_outputs.logits[nc_valid_idx, ...] / temp, dim=-1)
 
     if loss_on_topk is not None:
         kl_loss = (
@@ -311,10 +369,13 @@ class SimpleLogger:
             os.remove(self.output_file)
 
     def get_metric(self, metric_name):
-        with open(self.output_file, "r") as f:
-            lines = [json.loads(s) for s in f.readlines()]
-            lines = [l["value"] for l in lines if l["name"] == metric_name]
-        return lines
+        try:
+            with open(self.output_file, "r") as f:
+                lines = [json.loads(s) for s in f.readlines()]
+                lines = [l["value"] for l in lines if l["name"] == metric_name]
+            return lines
+        except:
+            return None
 
     def log_metrics(self, metrics, step=None):
         from mttl.dist_utils import is_main_process
