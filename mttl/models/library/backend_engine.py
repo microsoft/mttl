@@ -433,12 +433,11 @@ class BlobStorageEngine(BackendEngine):
         ) as blob_service_client:
             # already cached!
             local_filename = self._get_local_filepath(repo_id, filename)
+            if local_filename.exists():
+                return local_filename
+
             lock = FileLock(local_filename)
-
             with lock:
-                if local_filename.exists():
-                    return local_filename
-
                 blob_client = blob_service_client.get_blob_client(
                     container=container, blob=filename
                 )
