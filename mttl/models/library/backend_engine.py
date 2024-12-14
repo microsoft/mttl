@@ -11,7 +11,7 @@ from typing import Callable, List, Optional, Tuple, Union
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.storage.blob import BlobServiceClient
 from azure.storage.blob.aio import BlobServiceClient as AsyncBlobServiceClient
-from filelock import FileLock
+from filelock import AsyncFileLock
 from huggingface_hub import (
     CommitOperationAdd,
     CommitOperationCopy,
@@ -433,15 +433,15 @@ class BlobStorageEngine(BackendEngine):
         ) as blob_service_client:
             # already cached!
             local_filename = self._get_local_filepath(repo_id, filename)
-            if local_filename.exists():
-                return local_filename
 
-            lock = FileLock(local_filename)
-            with lock:
+            async with AsyncFileLock(str(local_filename) + ".lock"):
+                exists = local_filename.exists()
+                if exists:
+                    return local_filename
+
                 blob_client = blob_service_client.get_blob_client(
                     container=container, blob=filename
                 )
-
                 os.makedirs(os.path.dirname(local_filename), exist_ok=True)
                 with open(file=local_filename, mode="wb") as blob_file:
                     download_stream = await blob_client.download_blob()
