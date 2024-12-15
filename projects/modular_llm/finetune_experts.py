@@ -315,7 +315,7 @@ def finetune_polylib_full(args: FinetuneConfig, dm):
     )
     # args.router_selector = "poly_router"
     assert args.router_selector is not None
-    module = MoEModule(**vars(args), device_map="auto")
+    module = MoEModule(**vars(args))
 
     for n, p in module.named_parameters():
         if "selector" in n:
@@ -347,7 +347,7 @@ def finetune_polylib_sel(args: FinetuneConfig, dm):
     args.trainable_param_names = "|.*module_logits.*|.*selector.*"
     assert args.router_selector is not None
 
-    module = MoEModule(**vars(args), device_map="auto")
+    module = MoEModule(**vars(args))
 
     for n, p in module.named_parameters():
         if "selector" in n:
@@ -466,7 +466,6 @@ def run_multitask(args: FinetuneConfig):
     # select dataloader
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
-
     if args.checkpoint is not None:
         # Passing a checkpoint assumes the use of `ExpertModule`
         # e.g. for poly-μ and MHR-μ
@@ -504,7 +503,7 @@ def finetune_polylib_full(args: FinetuneConfig, dm):
         args.trainable_param_names += "|.*module_logits.*|.*selector.*"
     assert args.library_id is None
     args.router_selector = "poly_router"
-    module = MoEModule(**vars(args), device_map="auto")
+    module = MoEModule(**vars(args))
     module.to("cuda")
     return train_module(args, module, dm)
 
