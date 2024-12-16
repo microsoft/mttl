@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass
 
 from lightning_fabric import seed_everything
-from train_km import KMArguments
+from train_km_simple import KMArguments
 from transformers import EarlyStoppingCallback
 from utils.callbacks import LogMttlArgs
 
