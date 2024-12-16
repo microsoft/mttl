@@ -64,6 +64,8 @@ def main():
         if ex_id % args.num_workers != args.worker_id:
             continue
 
+        print(f"document {ex_id}/{len(dataset)}")
+
         chunked_dataset = []
         document = example[args.document_field]
         doc_id = example[args.document_id_field]
