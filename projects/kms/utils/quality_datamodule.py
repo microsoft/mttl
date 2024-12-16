@@ -95,6 +95,9 @@ class QualityDatamodule(MultiChoiceDataModule):
                     batch["document_id"].append(examples["document_id"][i])
             return batch
 
+        if self.tokenizer.chat_template is None:
+            self.tokenizer.apply_chat_template = lambda x, **kwargs: x[0]["content"]
+
         if "split" in train_dataset.features:
             self.train_dataset, self.dev_dataset, self.test_dataset = (
                 split_on_split_column(train_dataset)
