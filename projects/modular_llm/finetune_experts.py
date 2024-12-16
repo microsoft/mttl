@@ -32,11 +32,14 @@ from mttl.models.lightning.callbacks import (
     RougeCallback,
 )
 from mttl.models.lightning.expert_module import ExpertModule as ExpertModule
+from mttl.models.lightning.expert_module import MultiExpertModule
 from mttl.models.lightning.expert_module import MoEModule
 from mttl.models.lightning.loggers import get_pl_loggers
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.monitors import get_monitors
 from mttl.utils import get_checkpoint_path, remote_login, retry
+
+from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
 
 FINETUNE_FUNCTIONS: dict[str, Callable] = {}
 
@@ -252,8 +255,7 @@ def finetune_lib_mu(args: FinetuneConfig, dm):
     mean_expert: Expert = create_mean_expert(args)
     if args.finetune_task_name:
         mean_expert.name = args.finetune_task_name
-
-    module = MultiExpertModel(**vars(args)).to("cuda")
+    module = MultiExpertModule(**vars(args)).to("cuda")
     module.add_expert_instance(mean_expert, is_default=True)
 
     return (train_module(args, module, dm),)
