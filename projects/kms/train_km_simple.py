@@ -143,13 +143,6 @@ def train_km(training_args: KMArguments):
             tokenizer=datamodule.tokenizer,
             temp=training_args.temp,
         )
-    elif training_args.loss_function == "teacher_force_dcd":
-        loss_function = partial(
-            teacher_force_dcd_loss,
-            logit_factor=training_args.logit_factor,
-            hidden_factor=training_args.hidden_factor,
-            temp=training_args.temp,
-        )
     elif training_args.loss_function == "lm":
         loss_function = lm_loss
     elif training_args.loss_function == "summary_lm":
@@ -221,8 +214,7 @@ def train_km(training_args: KMArguments):
                 dtype=torch.bfloat16,
             ):
                 batch = transfer_batch_to_device(batch, device)
-                p_training = global_step / training_args.total_steps
-                loss = loss_function(model, batch)  # , p_training=p_training)
+                loss = loss_function(model, batch)
 
             loss = loss / args.gradient_accumulation_steps
             loss_accum += loss.detach()
