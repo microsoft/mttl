@@ -47,6 +47,130 @@ def print_metrics(data):
         return "<error>"
 
 
+def teacher_force_dcd_loss(
+    model, inputs, logit_factor=1.0, hidden_factor=1.0, temp=1.0, p_training=0.5
+):
+    """Deep Contextual Distillation loss."""
+    kl_loss = torch.nn.KLDivLoss(reduction="none")
+
+    # document + small task prompt + task output (e.g. summary, or question and answer)
+    input_ids = inputs["input_ids"]
+    labels = inputs["labels"]
+    attention_mask = inputs["attention_mask"]
+    valid_idx = labels != -100
+
+    # small task prompt + task output (e.g. summary, or question and answer)
+    nc_input_ids = inputs["nc_input_ids"]
+    nc_labels = inputs["nc_labels"]
+    nc_attention_mask = inputs["nc_attention_mask"]
+    nc_valid_idx = nc_labels != -100
+
+    # length of the context!
+    all_length = attention_mask.sum(1)
+    context_length = all_length - nc_attention_mask.sum(1)
+    position_ids = torch.arange(
+        0,
+        nc_input_ids.size(1),
+        device=input_ids.device,
+        dtype=torch.long,
+    )
+    position_ids = context_length.unsqueeze(1) + position_ids.unsqueeze(0)
+    raw_model = (
+        model.module
+        if isinstance(model, torch.nn.parallel.DistributedDataParallel)
+        else model
+    )
+
+    # define a hook that will cache the hidden state outputs
+    def cache_hidden_states_hook(module, input, output, cache_dict, layer_name):
+        assert isinstance(output, tuple) and len(output) == 2
+        cache_dict[layer_name] = output[0][valid_idx].detach()
+
+    # Dictionary to store cached hidden states
+    hidden_states_cache = {}
+
+    # let's cache the outputs of each raw_model.model.model.layers
+    teacher_hooks = []
+    for i, layer in enumerate(raw_model.model.model.layers):
+        hook = layer.register_forward_hook(
+            lambda module, input, output, cache_dict=hidden_states_cache, layer_name=f"layer_{i}": cache_hidden_states_hook(
+                module, input, output, cache_dict, layer_name
+            )
+        )
+        teacher_hooks += [hook]
+
+    # for the context-aware pass, we need to disable the adapter
+    with disable_modifiers(raw_model):
+        with torch.no_grad():
+            outputs = model(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                output_hidden_states=True,
+            )
+            target_logits = outputs.logits[valid_idx]
+
+        # remove hooks
+        for hook in teacher_hooks:
+            hook.remove()
+
+    # Now, we build a hook that will replace the hidden states of the student with the cached hidden states of the teacher
+    def replace_hidden_states_hook(
+        module, input, output, cache_dict, loss_array, layer_name
+    ):
+        assert isinstance(output, tuple) and len(output) == 2
+        target_states = cache_dict[layer_name]
+        actual_states = output[0][nc_valid_idx]
+
+        # compute norm-aware loss
+        loss = (actual_states - target_states).abs().mean()
+        loss = loss / target_states.abs().mean()
+        loss_array += [loss]
+
+        # replace with teacher's hidden states
+        # at the start of training, we want to use the teacher's hidden states
+        output[0][nc_valid_idx] = (
+            target_states * (1 - p_training) + actual_states * p_training
+        )
+        return output
+
+    # apply hook
+    hidden_losses = []
+    student_hooks = []
+    for i, layer in enumerate(raw_model.model.model.layers):
+        hook = layer.register_forward_hook(
+            lambda module, input, output, cache_dict=hidden_states_cache, loss_array=hidden_losses, layer_name=f"layer_{i}": replace_hidden_states_hook(
+                module, input, output, cache_dict, loss_array, layer_name
+            )
+        )
+        student_hooks += [hook]
+
+    nc_outputs = model(
+        input_ids=nc_input_ids,
+        attention_mask=nc_attention_mask,
+        output_hidden_states=True,
+        return_dict=True,
+        task_names=inputs.get("task_names"),  # Here
+    )
+
+    # remove hooks
+    for hook in student_hooks:
+        hook.remove()
+
+    loss = 0.0
+
+    if hidden_factor > 0:
+        loss = torch.mean(torch.stack(hidden_losses)) * hidden_factor
+
+    # Add KL divergence between target and predicted output distributions to loss
+    target_probs = F.softmax(target_logits / temp, dim=-1)
+    preds = F.log_softmax(nc_outputs.logits[nc_valid_idx, ...] / temp, dim=-1)
+
+    kl_loss = kl_loss(preds, target_probs).sum(dim=-1).mean()
+
+    loss = loss + logit_factor * kl_loss
+    return loss
+
+
 def dcd_loss(
     model,
     inputs,
@@ -326,11 +450,14 @@ def ema_dcd_loss(model, inputs, logit_factor=1.0, hidden_factor=1.0):
     return loss
 
 
-def lm_loss(model, inputs):
+def lm_loss(model, inputs, prefix=""):
     """Next-token prediction loss."""
-    input_ids = inputs["input_ids"]
-    labels = inputs["labels"]
-    attention_mask = inputs["attention_mask"]
+
+    assert prefix in ["", "nc_"]
+
+    input_ids = inputs[f"{prefix}input_ids"]
+    labels = inputs[f"{prefix}labels"]
+    attention_mask = inputs[f"{prefix}attention_mask"]
 
     assert input_ids.size() == labels.size()
     # assert that labels is either -100 or the same as input_ids

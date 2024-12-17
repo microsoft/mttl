@@ -42,6 +42,7 @@ from projects.kms.utils.simple_utils import (
     do_evaluation,
     lm_loss,
     print_metrics,
+    teacher_force_dcd_loss,
 )
 from projects.kms.utils.wiki_mmlu_evaluator import WikiMMLUEvaluator
 
@@ -59,7 +60,7 @@ train_datasets = {
 
 
 evaluate_datasets = {
-    "nqa": "az://mttldata/narrativeqa-sanitized",  # "sordonia/narrativeqa_sanitized",
+    "nqa": "az://mttldata/narrativeqa-sanitized",
     "wiki": "az://mttldata/wiki-top-20-sanitized",
     "quality": "az://mttldata/quality-sanitized",
     "wiki-rag": "az://mttldata/wiki-top-20-sanitized-rag",
@@ -142,8 +143,17 @@ def train_km(training_args: KMArguments):
             tokenizer=datamodule.tokenizer,
             temp=training_args.temp,
         )
+    elif training_args.loss_function == "teacher_force_dcd":
+        loss_function = partial(
+            teacher_force_dcd_loss,
+            logit_factor=training_args.logit_factor,
+            hidden_factor=training_args.hidden_factor,
+            temp=training_args.temp,
+        )
     elif training_args.loss_function == "lm":
         loss_function = lm_loss
+    elif training_args.loss_function == "summary_lm":
+        loss_function = partial(lm_loss, prefix="nc_")
     else:
         raise ValueError(f"Loss function {training_args.loss_function} not supported")
 
@@ -211,7 +221,8 @@ def train_km(training_args: KMArguments):
                 dtype=torch.bfloat16,
             ):
                 batch = transfer_batch_to_device(batch, device)
-                loss = loss_function(model, batch)
+                p_training = global_step / training_args.total_steps
+                loss = loss_function(model, batch)  # , p_training=p_training)
 
             loss = loss / args.gradient_accumulation_steps
             loss_accum += loss.detach()
