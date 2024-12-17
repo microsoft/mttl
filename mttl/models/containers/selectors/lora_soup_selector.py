@@ -24,20 +24,16 @@ class LoraSoupSelector(Selector):
     def __init__(self, **kwargs) -> None:
         super().__init__(**kwargs)
 
-        self.lora_learnable_weights = nn.Parameter(torch.randn(1), requires_grad=True)
         self.softmax = nn.Softmax(dim=-1)
         self.module_logits_dict = nn.ParameterDict()
 
     def _get_weights(self):
-        wts_before_softmax = torch.cat(
-            list(self.lora_learnable_weights.values()), dim=0
-        )
+        wts_before_softmax = torch.cat(list(self.module_logits_dict.values()), dim=0)
         wts_after_softmax = self.softmax(wts_before_softmax)
         return wts_after_softmax
 
     def on_add_expert(self, expert_name, expert_info=None, is_default=False):
         if expert_name not in self.module_logits_dict:
-            # to do: we did not use the logits here.
             self.module_logits_dict[expert_name] = torch.nn.Parameter(
                 torch.randn(1).to(self.device)
             )

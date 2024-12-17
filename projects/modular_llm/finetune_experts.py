@@ -276,8 +276,19 @@ def finetune_lib_mu_with_rand_retrieval(args: FinetuneConfig, dm):
 
     mean_expert: Expert = create_mean_expert(args, library)
 
-    module = MultiExpertModel(**vars(args)).to("cuda")
+    module = MultiExpertModule(**vars(args)).to("cuda")
     module.add_expert_instance(mean_expert, is_default=True)
+
+    return train_module(args, module, dm)
+
+
+@register_finetune_func("lib_lora_soup")
+def finetune_lib_lora_soup(args: FinetuneConfig, dm):
+    """ """
+    args.router_selector = "lora_soup_selector"
+
+    module = MultiExpertModule(**vars(args)).to("cuda")
+    module.add_experts_from_library(args.library_id)
 
     return train_module(args, module, dm)
 
