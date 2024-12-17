@@ -14,7 +14,7 @@ class LoraSoupSelectorConfig(SelectorConfig):
     pass
 
 
-@Selector.register("lora_soup_selector", LoraSoupSelectorConfig)
+@Selector.register("lora_soup_router", LoraSoupSelectorConfig)
 class LoraSoupSelector(Selector):
     """
     LoraSoupSelector is a selector that uses a learnable routing mechanism to select experts.

@@ -285,7 +285,7 @@ def finetune_lib_mu_with_rand_retrieval(args: FinetuneConfig, dm):
 @register_finetune_func("lib_lora_soup")
 def finetune_lib_lora_soup(args: FinetuneConfig, dm):
     """ """
-    args.router_selector = "lora_soup_selector"
+    args.router_selector = "lora_soup_router"
 
     module = MultiExpertModule(**vars(args)).to("cuda")
     module.add_experts_from_library(args.library_id)
