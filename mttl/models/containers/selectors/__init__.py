@@ -29,6 +29,10 @@ from mttl.models.containers.selectors.poly_selector import (
     PolySelector,
     PolySelectorConfig,
 )
+from mttl.models.containers.selectors.lora_soup_selector import (
+    LoraSoupSelector,
+    LoraSoupSelectorConfig,
+)
 from mttl.models.containers.selectors.product_key import PKSelectorConfig, PKSSelector
 from mttl.models.containers.selectors.selector_output import (
     BatchExpertsAndWeightsSelectorOutput,

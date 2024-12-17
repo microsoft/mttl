@@ -272,8 +272,8 @@ class GenerativeEvaluator(Evaluator):
         from mttl.models.utils import transfer_batch_to_device
 
         # wrapped model
-        if hasattr(model, "module"):
-            model = model.module
+        if hasattr(model, "model"):
+            model = model.model
 
         extra_kwargs = {}
         extra_kwargs["pad_token_id"] = self.tokenizer.pad_token_id
