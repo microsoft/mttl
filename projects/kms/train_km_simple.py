@@ -42,7 +42,6 @@ from projects.kms.utils.simple_utils import (
     do_evaluation,
     lm_loss,
     print_metrics,
-    teacher_force_dcd_loss,
 )
 from projects.kms.utils.wiki_mmlu_evaluator import WikiMMLUEvaluator
 
