@@ -5,8 +5,12 @@ from mttl.datamodule.base import get_datamodule
 from projects.modular_llm.finetune_experts import train_module
 
 
-def train_lora_soup_with_peft(experts):
-    repos = experts.split(",")
+def train_lora_soup_with_peft(args):
+    if (
+        not args.experts
+    ):  # something like this "lorahub/flan_t5_large-super_glue_wic,lorahub/flan_t5_large-wiki_qa_Jeopardy_style"
+        raise ValueError("Please provide paths to experts.")
+    repos = args.experts.split(",")
     if not repos:
         raise ValueError("Nothing to be done! Please provide paths to experts.")
 
@@ -17,10 +21,6 @@ def train_lora_soup_with_peft(experts):
     for path in repos:
         library.add_expert_from_ckpt(path)
 
-    args = FinetuneConfig.parse()
-    args.model = "t5-large"
-    args.library_id = library
-    args.router_selector = "poly_router_dir"
     module = MultiExpertModule(**vars(args)).to("cuda")
     module.add_experts_from_library(library=library)
 
@@ -30,5 +30,5 @@ def train_lora_soup_with_peft(experts):
 
 
 if __name__ == "__main__":
-    experts = "lorahub/flan_t5_large-super_glue_wic,lorahub/flan_t5_large-wiki_qa_Jeopardy_style"
-    train_lora_soup_with_peft(experts)
+    args = FinetuneConfig.parse()
+    train_lora_soup_with_peft(args)

@@ -557,6 +557,7 @@ class FinetuneConfig(MultiExpertConfig):
     finetune_regime: str = None  # polylib_full, lib_mu, polylib_selector
     tasksets_path: str = None
     es_metric: str = "loss"
+    experts: str = None  # peft experts
 
     def __post_init__(self):
         super().__post_init__()
