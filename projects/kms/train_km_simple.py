@@ -57,19 +57,12 @@ train_datasets = {
     "nqa-km-llama-8b": "az://mttldata/nqa-summaries-qa-llama-8b-instruct",
 }
 
-
 evaluate_datasets = {
     "nqa": "az://mttldata/narrativeqa-sanitized",
     "wiki": "az://mttldata/wiki-top-20-sanitized",
-    "quality": "az://mttldata/quality-sanitized",
     "wiki-rag": "az://mttldata/wiki-top-20-sanitized-rag",
-}
-
-evaluate_metrics = {
-    "nqa": "rougeL",
-    "wiki": "accuracy",
-    "wiki-rag": "accuracy",
-    "quality": "accuracy",
+    "quality": "az://mttldata/quality-sanitized",
+    "quality-rag": "pclucas14/quality-RAG-64",
 }
 
 evaluate_class = {
@@ -77,6 +70,15 @@ evaluate_class = {
     "wiki": WikiMMLUEvaluator,
     "wiki-rag": WikiMMLUEvaluator,
     "quality": QualityEvaluator,
+    "quality-rag": QualityEvaluator,
+}
+
+evaluate_metrics = {
+    "nqa": "rougeL",
+    "wiki": "accuracy",
+    "wiki-rag": "accuracy",
+    "quality": "accuracy",
+    "quality-rag": "accuracy",
 }
 
 
@@ -88,6 +90,7 @@ class KMArguments(ExpertConfig):
     hidden_factor: float = 1.0
     temp: float = 1.0
     loss_on_topk: float = None
+    callback_during_training: bool = True
 
 
 def train_km(training_args: KMArguments):
@@ -170,7 +173,10 @@ def train_km(training_args: KMArguments):
 
     if training_args.eval_before_training:
         val_loss, eval_score = do_evaluation(
-            datamodule, model, loss_function, evaluator
+            datamodule,
+            model,
+            loss_function,
+            evaluator if training_args.callback_during_training else None,
         )
         met_logger.log_metrics(
             {"val_loss": val_loss, eval_metric: eval_score}, step=global_step
@@ -205,6 +211,7 @@ def train_km(training_args: KMArguments):
                 batch = next(iter_train)
             except StopIteration:
                 iter_train = iter(datamodule.train_dataloader())
+                batch = next(iter_train)
                 epoch_finished = True
                 epoch += 1
 
@@ -247,12 +254,16 @@ def train_km(training_args: KMArguments):
         )
         do_eval_on_epoch = (
             training_args.eval_every_n_epoch
+            and training_args.eval_every_n_epoch > 0
             and epoch_finished
             and epoch % training_args.eval_every_n_epoch == 0
         )
         if do_eval_on_step or do_eval_on_epoch:
             val_loss, eval_score = do_evaluation(
-                datamodule, model, loss_function, evaluator
+                datamodule,
+                model,
+                loss_function,
+                evaluator if training_args.callback_during_training else None,
             )
 
             met_logger.log_metrics(
@@ -276,9 +287,25 @@ def train_km(training_args: KMArguments):
         if global_step >= training_args.total_steps:
             break
 
+    # To reload the best model:
+
     # Also save last model
     raw_model.save_pretrained(training_args.output_dir + "/last_model")
     training_args.save_config(training_args.output_dir + "/last_model")
+
+    if not training_args.callback_during_training:
+        model = (
+            type(model)
+            .from_pretrained(training_args.output_dir + "/best_model")
+            .to(device)
+        )
+        val_loss, eval_score = do_evaluation(
+            datamodule, model, loss_function, evaluator
+        )
+        logger.info(f"Final Validation Loss: {val_loss}, {eval_metric}: {eval_score}")
+        met_logger.log_metrics(
+            {"cv_val_loss": val_loss, eval_metric: eval_score}, step=global_step
+        )
 
 
 if __name__ == "__main__":
