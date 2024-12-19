@@ -24,7 +24,7 @@ from mttl.models.modifiers.base import AutoModifierConfig
 
 
 @dataclass
-class KMMoEModelConfig(MoEModelConfig):
+class KEMoEModelConfig(MoEModelConfig):
     ke_expert_name: str = "KE"
     library_id: str = None
     expert_selection: List[str] = None
@@ -34,8 +34,8 @@ class KMMoEModelConfig(MoEModelConfig):
     modifier_config: AutoModifierConfig = None
 
 
-@BaseExpertModel.register("moe_ke", config_cls=KMMoEModelConfig)
-class KMMoEModel(BaseExpertModel, MultiExpertMixin):
+@BaseExpertModel.register("moe_ke", config_cls=KEMoEModelConfig)
+class KEMoEModel(BaseExpertModel, MultiExpertMixin):
     """MoeModel that can accomodate a Knowledge Extractor"""
 
     def __init__(self, config, **kwargs):
@@ -122,11 +122,12 @@ class EMAExpertModel(BaseExpertModel, MultiExpertMixin):
 
 
 @dataclass
-class KMMoEConfig(ExpertModelConfig, MoEModelConfig):
+class KMMoEModelConfig(ExpertModelConfig, MoEModelConfig):
     moe_num_experts: int = 8
 
 
-@BaseExpertModel.register("moe_km", config_cls=KMMoEConfig)
+# For training models in a multitask setup
+@BaseExpertModel.register("moe_km", config_cls=KMMoEModelConfig)
 class KMMoEModel(BaseExpertModel, MultiExpertMixin):
     def __init__(self, config, **kwargs):
 
