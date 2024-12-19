@@ -359,7 +359,10 @@ def do_evaluation(datamodule, model, loss_function, evaluator, **kwargs) -> bool
             val_loss.append(loss_function(model, batch).item())
 
     val_loss = distributed_mean(val_loss, model.device)
-    eval_score = evaluator.evaluate(model, "dev", **kwargs)
+    if evaluator is not None:
+        eval_score = evaluator.evaluate(model, "dev", **kwargs)
+    else:
+        eval_score = None
     return val_loss, eval_score
 
 
