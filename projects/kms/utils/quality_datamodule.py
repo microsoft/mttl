@@ -46,7 +46,13 @@ class QualityDatamodule(MultiChoiceDataModule):
                     document_id = examples["document_id"][i]
                     question = examples["questions"][i][j]
                     options = examples["options"][i][j]
-                    label_index = examples["gold_label"][i][j] - 1
+                    gold_label = examples["gold_label"][i][j]
+                    if gold_label == -1:
+                        raise ValueError(
+                            "Trying to evaluated on the test set for which we don't have labels."
+                        )
+
+                    label_index = gold_label - 1
 
                     if self.config.include_context:
                         context = examples["text"][i]
