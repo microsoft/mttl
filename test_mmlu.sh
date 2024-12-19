@@ -1,1 +1,1 @@
-export MMLU_DATA_DIR=/home/mila/z/zhan.su/code/lucas_mttl_pak/projects/instr_routing/data/mmlu/data
+export MMLU_DATA_DIR=mmlu/data

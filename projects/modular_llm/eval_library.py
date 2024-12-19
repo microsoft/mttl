@@ -167,6 +167,8 @@ def run_eval(args: EvaluationConfig):
     )
     an_expert = library[next(iter(library.keys()))]
     base_model = an_expert.expert_info.expert_model
+    if base_model is None:
+        base_model = an_expert.expert_info.model
     train_cfg = ExpertConfig.from_dict(an_expert.training_config)
 
     loading_kwargs = {
