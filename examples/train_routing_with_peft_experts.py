@@ -5,6 +5,25 @@ from mttl.datamodule.base import get_datamodule
 from projects.modular_llm.finetune_experts import train_module
 
 
+def create_library_from_peft(args):
+
+    if (
+        not args.experts
+    ):  # something like this "lorahub/flan_t5_large-super_glue_wic,lorahub/flan_t5_large-wiki_qa_Jeopardy_style"
+        raise ValueError("Please provide paths to experts.")
+    repos = args.experts.split(",")
+    if not repos:
+        raise ValueError("Nothing to be done! Please provide paths to experts.")
+
+    # create a temporary library
+    library = ExpertLibrary.get_expert_library(
+        "hf://zhan1993/abstention_library", create=True
+    )
+    with library.batched_commit():
+        for path in repos:
+            library.add_expert_from_ckpt(path)
+
+
 def train_lora_soup_with_peft(args):
     if (
         not args.experts
@@ -31,4 +50,5 @@ def train_lora_soup_with_peft(args):
 
 if __name__ == "__main__":
     args = FinetuneConfig.parse()
-    train_lora_soup_with_peft(args)
+    create_library_from_peft(args)
+    # train_lora_soup_with_peft(args)
