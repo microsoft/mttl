@@ -23,10 +23,11 @@ class MathQADataModule(DataModule):
         train_dataset = train_dataset.rename_column("query", "source")
         train_dataset = train_dataset.rename_column("response", "target")
 
-        self.train_dataset, self.dev_dataset = self.create_train_valid_split(
-            train_dataset, 0.1
-        )
-        self.test_dataset = self.dev_dataset
+        # filter out the rows where the source is empty
+        train_dataset = train_dataset.filter(lambda x: x["source"] != "")
+
+        self.train_dataset = train_dataset
+        self.test_dataset = self.dev_dataset = train_dataset
 
         self.print_infos()
 
