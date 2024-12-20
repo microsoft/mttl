@@ -66,23 +66,27 @@ class GsmEvaluator(GenerativeEvaluator):
                 zip(predictions_texts, batch["sources_texts"], batch["labels_texts"])
             ):
                 pred = pred[len(source) :]
-                pred_item = pred.split("The answer is")[0]
-                predictions = pred_item.replace(",", "")
-                # code is from https://github.com/aksh555/LoRA-Soups/blob/main/utils.py#L224
-                pred = find_numbers(predictions)[-1]
-                if not pred:
-                    return float("inf")
-                pred_answer = float(pred[-1])
-                all_predictions.append(pred_answer)
-                logger.info(f"Predictions: {pred}, Targets: {target}")
-                print(f"Predictions: {pred}, Targets: {target}")
-
+                fields = pred.split("The answer is")
+                if len(fields) != 0:
+                    pred_item = fields[0]
+                    predictions = pred_item.replace(",", "")
+                    # code is from https://github.com/aksh555/LoRA-Soups/blob/main/utils.py#L224
+                    pred = find_numbers(predictions)
+                    if not pred:
+                        all_predictions.append(float("inf"))
+                    else:
+                        pred_answer = float(pred[-1])
+                        all_predictions.append(pred_answer)
+                        logger.info(f"Predictions: {pred_answer}, Targets: {target}")
+                        print(f"Predictions: {pred_answer}, Targets: {target}")
+                else:
+                    all_predictions.append(float("inf"))
             all_targets.extend(batch["labels_texts"])
 
-        metrics = self.compute_metrics_for_cot(all_predictions, all_targets)
+        metrics = self.compute_metrics(all_predictions, all_targets)
         return metrics
 
-    def compute_metrics_for_cot(self, predictions, targets):
+    def compute_metrics(self, predictions, targets):
         # compute the accuracy based on the cot prompt
         correct = 0
 
