@@ -1,10 +1,25 @@
 import asyncio
 import json
 import os
+import signal
 import subprocess
 import sys
 
 from filelock import AsyncFileLock
+
+got_sigterm = False
+got_exit_signal = False
+
+
+def handle_sigterm(signum, frame):
+    # Set a global flag that we'll check in the event loop
+    global got_sigterm
+    got_sigterm = True
+
+
+def handle_exit_signal(signum, frame):
+    global got_exit_signal
+    got_exit_signal = True
 
 
 class JobQueue:
@@ -79,17 +94,17 @@ class JobQueue:
             # Update the status of the job with the given doc_id
             for task in tasks:
                 if task["doc_id"] == doc_id:
-                    if new_status == "failed":
+                    if new_status in ["failed", "crashed"]:
                         # Check if we can retry
                         if task["retries"] < self.n_retries:
                             task["retries"] += 1
                             # Re-queue the job
                             task["status"] = "queued"
                         else:
-                            # No more retries, leave as failed
-                            task["status"] = "failed"
+                            # No more retries, set status accordingly
+                            task["status"] = new_status
                     else:
-                        # If not failed, just set the status
+                        # For other statuses, set the status directly
                         task["status"] = new_status
                     break
 
@@ -194,6 +209,11 @@ async def main():
     }
     os.environ.update(env_vars)
 
+    # Add signal handler for SIGTERM
+    loop = asyncio.get_running_loop()
+    loop.add_signal_handler(signal.SIGTERM, handle_exit_signal, signal.SIGTERM, None)
+    loop.add_signal_handler(signal.SIGINT, handle_exit_signal, signal.SIGINT, None)
+
     job_queue = JobQueue(job_file, lock_file, n_retries)
     await job_queue.initialize_queue_file()
 
@@ -201,6 +221,16 @@ async def main():
     running_tasks = []
 
     while True:
+        # If we received SIGTERM, mark running jobs as failed and exit
+        if got_exit_signal:
+            print("Received exit signal, initiating graceful shutdown...")
+            # Mark all running jobs as crashed
+            for t, gpu_id, doc_id in running_tasks:
+                t.cancel()
+                await job_queue.update_job_status(doc_id, "crashed")
+            running_tasks.clear()
+            exit()
+
         # Assign new jobs to free GPUs
         for gpu_id in range(num_gpus):
             while gpu_usage[gpu_id] < jobs_per_gpu:
@@ -214,6 +244,7 @@ async def main():
                 )
                 running_tasks.append((task, gpu_id, doc_id))
                 gpu_usage[gpu_id] += 1
+
         if not running_tasks:
             print("No more jobs to process. Exiting.")
             break
@@ -230,7 +261,12 @@ async def main():
                     running_tasks.pop(idx)
                     result_doc_id, return_code = completed_task.result()
                     # Update job status based on return code
-                    new_status = "done" if return_code == 0 else "failed"
+                    if return_code == 0:
+                        new_status = "done"
+                    elif return_code < 0:
+                        new_status = "crashed"
+                    else:
+                        new_status = "failed"
                     await job_queue.update_job_status(result_doc_id, new_status)
                     break
         print_gpu_status(gpu_usage)
