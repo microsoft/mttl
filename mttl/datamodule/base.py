@@ -1077,6 +1077,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
     elif "gsm" in dataset:
         config = GsmDataConfig(
             **common_kwargs,
+            gsm_template=args.gsm_template,
         )
         dm = GsmDataModule(config, for_generation=for_generation)
 

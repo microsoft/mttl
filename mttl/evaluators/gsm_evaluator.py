@@ -4,6 +4,7 @@ from tqdm.auto import tqdm
 from mttl.evaluators.base import GenerativeEvaluator, switch_to_eval_mode
 import re
 from mttl.logging import logger
+import json
 
 
 class GsmEvaluator(GenerativeEvaluator):
@@ -24,6 +25,12 @@ class GsmEvaluator(GenerativeEvaluator):
         self.split = split
         self.prepend_source = prepend_source
         os.environ["HF_ALLOW_CODE_EVAL"] = "1"
+
+        if self.config.gsm_template == "python":
+            self.save_file = f"experiment/{self.config.dataset}.jsonl"
+
+            if not os.path.exists("experiment"):
+                os.mkdir("experiment")
 
     @switch_to_eval_mode
     def evaluate(
@@ -57,11 +64,9 @@ class GsmEvaluator(GenerativeEvaluator):
             ).findall(x)
             return numbers
 
-        for num_batch, batch in pbar:
-            predictions = self.generate_for_batch(model, batch)
-            predictions_texts = predictions.sequences_texts
-
+        def get_predictions(predictions_texts, batch, all_predictions, all_targets):
             # iterate over the predictions and targets
+
             for i, (pred, source, target) in enumerate(
                 zip(predictions_texts, batch["sources_texts"], batch["labels_texts"])
             ):
@@ -82,6 +87,34 @@ class GsmEvaluator(GenerativeEvaluator):
                 else:
                     all_predictions.append(float("inf"))
             all_targets.extend(batch["labels_texts"])
+
+        def print_python_code(predictions_texts, batch, file):
+
+            for i, (pred, source, target) in enumerate(
+                zip(predictions_texts, batch["sources_texts"], batch["labels_texts"])
+            ):
+                outputs = (
+                    pred.split("### Response:")[-1].strip().split("### Instruction:")[0]
+                )
+
+                data = {}
+                data["answer"] = float(target)
+                data["output_pred"] = outputs
+                file.write(json.dumps(data) + "\n")
+                file.flush()
+
+        with open(self.save_file, "w") as f:
+            for num_batch, batch in pbar:
+                predictions = self.generate_for_batch(model, batch)
+                predictions_texts = predictions.sequences_texts
+                if self.config.gsm_template == "cot":
+                    get_predictions(
+                        predictions_texts, batch, all_predictions, all_targets
+                    )
+                elif self.config.gsm_template == "python":
+                    print_python_code(predictions_texts, batch, f)
+                else:
+                    raise ValueError("Invalid templete")
 
         metrics = self.compute_metrics(all_predictions, all_targets)
         return metrics

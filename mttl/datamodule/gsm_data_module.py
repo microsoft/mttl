@@ -8,8 +8,8 @@ import json
 
 @dataclass
 class GsmDataConfig(DatasetConfig):
-    templete: str = (
-        "cot"  # the templete we will use for the prompt, for code generation or chain of thought.
+    gsm_template: str = (
+        "cot"  # the template we will use for the prompt, for code generation or chain of thought.
     )
 
 
@@ -26,13 +26,13 @@ def generate_math_prompt_with_python(instruction, input=None):
     return prompt
 
 
-def instruct_templete_python(example):
+def instruct_template_python(example):
     example["source"] = generate_math_prompt_with_python(example["input"])
     example["target"] = str(example["answer"])
     return example
 
 
-def instruct_templete_cot(example):
+def instruct_template_cot(example):
 
     PREAMBLE = """As an expert problem solver solve step by step the following mathematical questions."""
     PROMPT = """Q: There are 15 trees in the grove. Grove workers will plant trees in the grove today. After they are done, there will be 21 trees. How many trees did the grove workers plant today?
@@ -77,16 +77,16 @@ class GsmDataModule(DataModule):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 4))
         dataset = DatasetLibrary.pull_dataset("reasoning-machines/gsm-hard")
         dataset = dataset.rename_column("target", "answer")
-        if self.config.templete == "cot":
-            dataset = dataset.map(instruct_templete_cot, num_proc=n_proc)
-        elif self.config.templete == "python":
-            dataset = dataset.map(instruct_templete_python, num_proc=n_proc)
+        if self.config.gsm_template == "cot":
+            dataset = dataset.map(instruct_template_cot, num_proc=n_proc)
+        elif self.config.gsm_template == "python":
+            dataset = dataset.map(instruct_template_python, num_proc=n_proc)
         self.train_dataset = dataset["train"]
         self.dev_dataset = self.test_dataset = dataset["train"]
 
 
 if __name__ == "__main__":
-    config = GsmDataConfig(model="microsoft/Phi-3-mini-4k-instruct", templete="cot")
+    config = GsmDataConfig(model="microsoft/Phi-3-mini-4k-instruct", gsm_template="cot")
 
     datamodule = GsmDataModule(config, for_generation=True)
     train_dataloader = datamodule.train_dataloader()
