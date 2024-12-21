@@ -88,18 +88,24 @@ class GsmEvaluator(GenerativeEvaluator):
                     all_predictions.append(float("inf"))
             all_targets.extend(batch["labels_texts"])
 
+        def extract_code(text):
+            match = re.search(r"```(.*?)```", text, re.DOTALL)
+            if match:
+                return match.group(1).strip()
+            return None
+
         def print_python_code(predictions_texts, batch, file):
 
             for i, (pred, source, target) in enumerate(
                 zip(predictions_texts, batch["sources_texts"], batch["labels_texts"])
             ):
-                outputs = (
-                    pred.split("### Response:")[-1].strip().split("### Instruction:")[0]
-                )
+                outputs = pred[len(source) - 1 :]
 
+                # convert it to code
+                code = extract_code(outputs)
                 data = {}
                 data["answer"] = float(target)
-                data["output_pred"] = outputs
+                data["output_pred"] = code
                 file.write(json.dumps(data) + "\n")
                 file.flush()
 
