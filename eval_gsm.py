@@ -24,10 +24,11 @@ with open("experiment/gsm.jsonl", "r") as f:
         try:
             exec(code)
             exec("predict_answer = solution()")
-            exec("print(predict_answer, answer)")
+            # exec("print(predict_answer, answer)")
             # compute the accuracy
         except Exception as e:
             print(e)
         if predict_answer == answer:
             correct += 1
+print(correct, all_count)
 print("Accuracy:", correct / all_count)
