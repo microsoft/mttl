@@ -4,14 +4,18 @@ import os
 import signal
 import subprocess
 import sys
+from contextlib import asynccontextmanager
+from time import sleep
 
+from azure.storage.blob import BlobClient
+from azure.storage.blob.aio import BlobClient as AsyncBlobClient
+from azure.storage.blob.aio import BlobLeaseClient
 from filelock import AsyncFileLock
+
+from mttl.models.library.backend_engine import BlobStorageEngine
 
 got_sigterm = False
 got_exit_signal = False
-
-# Make the current process a group leader
-os.setpgid(0, 0)
 
 
 def handle_exit_signal(signum, frame):
@@ -21,14 +25,31 @@ def handle_exit_signal(signum, frame):
 
 
 class JobQueue:
-    def __init__(self, job_file, lock_file, n_retries):
+    def __init__(self, job_file, lock_file, n_retries, use_blob_storage=False):
         self.job_file = job_file
-        self.lock_file = lock_file
-        self.queue_file = os.path.splitext(self.lock_file)[0] + "_queue.json"
+        # self.lock_file = lock_file
+        self.queue_file = lock_file.replace(".lock", "_queue.json")
+
         self.n_retries = n_retries
+        self.use_blob_storage = use_blob_storage
+        if use_blob_storage:
+            self.blob_engine = BlobStorageEngine()
         print(f"queue file : {self.queue_file}")
 
+    def _format_blob_path(self, path):
+        # Ensure the path is a valid URL for Azure Blob Storage
+        formatted_path = path.replace(os.sep, "/").replace(" ", "%20")
+        if len(formatted_path) > 1024:
+            raise ValueError("The path is too long for Azure Blob Storage.")
+        return formatted_path
+
     async def initialize_queue_file(self):
+        if self.use_blob_storage:
+            await self._initialize_queue_file_blob()
+        else:
+            await self._initialize_queue_file_local()
+
+    async def _initialize_queue_file_local(self):
         # This function ensures the queue file is in the correct format.
         if not os.path.exists(self.queue_file):
             # copy the original job file to the queue file
@@ -57,7 +78,49 @@ class JobQueue:
                 with open(self.queue_file, "w") as f:
                     json.dump(tasks, f, indent=2)
 
+    async def _initialize_queue_file_blob(self):
+        # This function ensures the queue file is in the correct format.
+
+        if not self.blob_engine._blob_exists(self.queue_file):
+            # copy the original job file to the queue file
+            # convert the queue_file to the desired format
+            print("gonna acquire lease")
+            async with self._blob_lock(self.queue_file):
+                print("opening file")
+                data = json.load(open(self.job_file, "r"))
+
+                # If data is a dict with train/valid/test keys, flatten it.
+                if isinstance(data, dict):
+                    doc_ids = []
+                    for value in data.values():
+                        doc_ids += value
+                else:
+                    # If data is already a single list, just use it directly.
+                    doc_ids = data
+
+                # Convert to list of {"doc_id": ..., "status": "queued", "retries": 0}
+                tasks = [
+                    {"doc_id": doc_id, "status": "queued", "retries": 0}
+                    for doc_id in doc_ids
+                ]
+
+                print(f"Uploading {self.job_file} to {self.queue_file}")
+                print("Uploaded job file : ", self.job_file)
+
+                filename = self.queue_file.split("/")[-1]
+                await self.blob_engine._async_upload_blob(
+                    repo_id=self.queue_file,
+                    filename=filename,
+                    buffer=json.dumps(tasks, indent=2).encode("utf-8"),
+                )
+
     async def get_next_job(self):
+        if self.use_blob_storage:
+            return await self._get_next_job_blob()
+        else:
+            return await self._get_next_job_local()
+
+    async def _get_next_job_local(self):
         async with AsyncFileLock(self.lock_file):
             if not os.path.exists(self.queue_file):
                 return None
@@ -89,7 +152,53 @@ class JobQueue:
 
             return doc_id
 
+    async def _get_next_job_blob(self):
+        async with self._blob_lock(self.queue_file):
+            if not self.blob_engine._blob_exists(self.queue_file):
+                raise FileNotFoundError(f"Queue file {self.queue_file} not found.")
+
+            queue_path, queue_file = self.queue_file.split("/", 1)
+            data = await self.blob_engine._async_download_blob(
+                self.queue_file, self.queue_file.split("/")[-1]
+            )
+            print("DATA : ", data)
+            tasks = json.load(open(data, "r"))
+
+            doc_id = None
+            # Find the first job that is still queued
+            for task in tasks:
+                if task["status"] == "queued":
+                    # Mark as running
+                    task["status"] = "running"
+                    doc_id = task["doc_id"]
+                    break
+
+            # Now, let's see if there are some crashed or failed jobs we can retry
+            for task in tasks:
+                if task["status"] in ["crashed", "failed"]:
+                    if task["retries"] < self.n_retries:
+                        # Mark as running
+                        task["status"] = "running"
+                        task["retries"] += 1
+                        doc_id = task["doc_id"]
+                        break
+
+            filename = self.queue_file.split("/")[-1]
+            await self.blob_engine._async_upload_blob(
+                repo_id=self.queue_file,
+                filename=filename,
+                buffer=json.dumps(tasks, indent=2).encode("utf-8"),
+            )
+
+            return doc_id
+
     async def update_job_status(self, doc_id, new_status):
+        if self.use_blob_storage:
+            await self._update_job_status_blob(doc_id, new_status)
+        else:
+            await self._update_job_status_local(doc_id, new_status)
+
+    async def _update_job_status_local(self, doc_id, new_status):
         async with AsyncFileLock(self.lock_file):
             if not os.path.exists(self.queue_file):
                 return
@@ -106,6 +215,63 @@ class JobQueue:
 
             with open(self.queue_file, "w") as f:
                 json.dump(tasks, f, indent=2)
+
+    async def _update_job_status_blob(self, doc_id, new_status):
+        async with self._blob_lock(self.queue_file):
+            if not self.blob_engine._blob_exists(self.queue_file):
+                return
+
+            queue_path, queue_file = self.queue_file.split("/", 1)
+            data = await self.blob_engine._async_download_blob(
+                self.queue_file, self.queue_file.split("/")[-1]
+            )
+            tasks = json.load(open(data, "r"))
+
+            # Update the status of the job with the given doc_id
+            for task in tasks:
+                if task["doc_id"] == doc_id:
+                    task["status"] = new_status
+                    break
+
+            filename = self.queue_file.split("/")[-1]
+            await self.blob_engine._async_upload_blob(
+                repo_id=self.queue_file,
+                filename=filename,
+                buffer=json.dumps(tasks, indent=2).encode("utf-8"),
+            )
+
+    @asynccontextmanager
+    async def _blob_lock(self, blob_file, n_retries=10):
+        """
+        Acquire a lease on the referenced blob before operating.
+        This mimics the azure sample's acquire_lease_on_blob_async approach.
+        """
+        lease_client = None
+        n_retried = 0
+        try:
+            async with self.blob_engine._get_container_client(
+                blob_file, use_async=True
+            ) as container_client:
+                while n_retried < n_retries:
+                    try:
+                        # Acquire a lease on the blob
+                        lease_client = await container_client.acquire_lease(
+                            lease_duration=15
+                        )
+                        yield
+                        return
+                    except Exception as e:
+                        print("error ", e)
+                        print("type ", type(e))
+                        n_retried += 1
+                        sleep(10)
+        finally:
+            if lease_client is not None:
+                await lease_client.release()
+            else:
+                raise Exception(
+                    f"Failed to acquire lease on {blob_file} after {n_retries} retries."
+                )
 
 
 async def run_job(gpu_id, doc_id, config_file, output_dir, train_file, config_id):
@@ -208,9 +374,6 @@ async def main():
     if os.path.exists("/data/lucas"):
         output_dir = f"/data/lucas/{output_dir}"
 
-    lock_file = f"{output_dir}/job_queue.lock"
-    os.makedirs(output_dir, exist_ok=True)
-
     env_vars = {
         "WANDB_PROJECT": f"knowledge-modules-{config_id}",
         "WANDB_MODE": "online",
@@ -222,7 +385,16 @@ async def main():
     loop.add_signal_handler(signal.SIGTERM, handle_exit_signal, signal.SIGTERM, None)
     loop.add_signal_handler(signal.SIGINT, handle_exit_signal, signal.SIGINT, None)
 
-    job_queue = JobQueue(job_file, lock_file, n_retries)
+    use_blob_storage = True  # not os.path.exists("/data/lucas")
+    lock_file = f"mttl4879355322/{config_id}/dispatcher.lock"
+
+    # create a folder for this on the blob
+    if use_blob_storage:
+        blob_engine = BlobStorageEngine()
+        blob_engine.create_repo(f"mttl4879355322/{config_id}", exist_ok=True)
+        print("created blob")
+
+    job_queue = JobQueue(job_file, lock_file, n_retries, use_blob_storage)
     await job_queue.initialize_queue_file()
 
     gpu_usage = {i: 0 for i in range(num_gpus)}
@@ -252,6 +424,7 @@ async def main():
                 doc_id = await job_queue.get_next_job()
                 if not doc_id:
                     break
+                task = None
                 task = asyncio.create_task(
                     run_job(
                         gpu_id, doc_id, config_file, output_dir, train_file, config_id
@@ -288,4 +461,5 @@ async def main():
 
 
 if __name__ == "__main__":
+    print("starting job launcher")
     asyncio.run(main())
