@@ -1,6 +1,11 @@
 # open the json file and read the data
 import json
 import re
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--file", type=str, default="experiment/gsm.jsonl")
+args = parser.parse_args()
 
 
 def extract_code(text):
@@ -12,7 +17,7 @@ def extract_code(text):
 
 correct = 0
 all_count = 0
-with open("experiment/gsm.jsonl", "r") as f:
+with open(args.file, "r") as f:
     for line in f:
         all_count += 1
         data = json.loads(line)
