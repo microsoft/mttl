@@ -96,3 +96,11 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
         for data in self.dataset:
             all_instructions.append(data["instruction"])
         return all_instructions
+
+
+class AlpacaCodeDataset(AlpacaDataset):
+    def __init__(self):
+        super().__init__()
+        self.dataset = DatasetLibrary.pull_dataset(
+            "zhan1993/code_alpaca_20k", split="train"
+        )
