@@ -122,9 +122,11 @@ class GsmEvaluator(GenerativeEvaluator):
                     print_python_code(predictions_texts, batch, f)
                 else:
                     raise ValueError("Invalid templete")
-
-        metrics = self.compute_metrics(all_predictions, all_targets)
-        return metrics
+        if len(all_predictions) != 0:
+            metrics = self.compute_metrics(all_predictions, all_targets)
+            return metrics
+        else:
+            raise ValueError("No predictions found")
 
     def compute_metrics(self, predictions, targets):
         # compute the accuracy based on the cot prompt
