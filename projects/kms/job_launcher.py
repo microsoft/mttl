@@ -26,9 +26,8 @@ got_exit_signal = False
 
 
 def handle_exit_signal(signum, frame):
-    print(f"Received exit signal {signum}, initiating graceful shutdown...")
     logger.warning(
-        f"LOG Received exit signal {signum}, initiating graceful shutdown..."
+        f"`job_launcher.py` received exit signal {signum}, initiating graceful shutdown..."
     )
     global got_exit_signal
     got_exit_signal = True
@@ -373,9 +372,9 @@ async def main():
                 # Since these tasks are cancelled, mark them as crashed
                 await job_queue.update_job_status(doc_id, "crashed")
 
-            logger.warning("Marked running jobs as crashed")
+            logger.warning("Marked running jobs as crashed during exit process.")
 
-            # Cancel all running tasks and mark as crashed
+            # Cancel all running tasks
             for t, gpu_id, doc_id in running_tasks + [monitor_task]:
                 t.cancel()
 
