@@ -27,6 +27,9 @@ got_exit_signal = False
 
 def handle_exit_signal(signum, frame):
     print(f"Received exit signal {signum}, initiating graceful shutdown...")
+    logger.warning(
+        f"LOG Received exit signal {signum}, initiating graceful shutdown..."
+    )
     global got_exit_signal
     got_exit_signal = True
 
@@ -35,7 +38,6 @@ class JobQueue:
     def __init__(self, job_file, queue_file, n_retries):
         self.job_file = job_file
         self.queue_file = queue_file
-        self.counter = 0
 
         self.n_retries = n_retries
         self.blob_engine = BlobStorageEngine()
@@ -60,6 +62,9 @@ class JobQueue:
         return self.blob_engine._blob_exists(self.queue_file)
 
     async def download_queue(self, lease=None):
+
+        # TODO: download the whole blob and rebuild the queue from
+        # individual json files. *NO AZURE LOCK* is needed for this
 
         local_filename = self.blob_engine._get_local_filepath(
             self.queue_file, self.queue_name
@@ -92,16 +97,6 @@ class JobQueue:
             filename=filename,
             buffer=buffer,
             lease=lease,
-        )
-
-        filename = self.queue_file.replace("queue", f"QUEUE{self.counter}").split("/")[
-            -1
-        ]
-        self.counter += 1
-        await self.blob_engine._async_upload_blob(
-            repo_id=self.queue_file.replace("queue", "QUEUE"),
-            filename=filename,
-            buffer=buffer,
         )
 
     async def initialize_queue_file(self):
@@ -140,10 +135,21 @@ class JobQueue:
             # Find the first job that is still queued
             for task in tasks:
                 if task["status"] == "queued":
+
+                    # TODO: try and acquire the lease for this specific file
+                    # If acquired,
+                    # 1) mark as running and
+                    # 2) upload the updated file
+                    # 3) release the lease
+                    # IF `Lease Already Acquired`, continue iterating over the tasks
+                    # `skipped += 1`
+
                     # Mark as running
                     task["status"] = "running"
                     doc_id = task["doc_id"]
                     break
+
+            # TODO: if `doc_id` is still None and `skipped`,
 
             # Now, let's see if there are some crashed or failed jobs we can retry
             for task in tasks:
@@ -175,7 +181,10 @@ class JobQueue:
             # Update the status of the job with the given doc_id
             for task in tasks:
                 if task["doc_id"] == doc_id:
-                    print(f"Updating status of {doc_id} to {new_status}")
+                    if new_status == "crashed":
+                        logger.warning(f"Marking {doc_id} as crashed")
+                    else:
+                        logger.info(f"Updating status of {doc_id} to {new_status}")
                     task["status"] = new_status
                     break
 
@@ -251,8 +260,8 @@ async def run_job(gpu_id, doc_id, config_file, output_dir, train_file, config_id
     print(f"Assigning DOC_ID={doc_id} to GPU_ID={gpu_id}")
 
     async def stream_output(stream, prefix, job_name):
-        job_name = str(job_name)[:10]
-        job_name = job_name.ljust(10)
+        job_name = str(job_name)[:5]
+        job_name = job_name.ljust(5)
         try:
             async for line in stream:
                 print(f"{prefix} <{job_name}>: {line.decode().strip()}")
@@ -356,18 +365,24 @@ async def main():
     while True:
         # If we received an exit signal (SIGTERM or SIGINT), shut down gracefully
         if got_exit_signal:
-            print("Received exit signal, initiating graceful shutdown...")
-            # Cancel all running tasks and mark as crashed
-            for t, gpu_id, doc_id in running_tasks + [monitor_task]:
-                t.cancel()
-            # Wait for all tasks to be cancelled
-            done, pending = await asyncio.wait(
-                [t for t, _, _ in running_tasks], return_when=asyncio.ALL_COMPLETED
+            logger.warning(
+                "Confirmed exit signal, proceeding with graceful shutdown..."
             )
+
             for completed_task, gpu_id, doc_id in running_tasks:
                 # Since these tasks are cancelled, mark them as crashed
                 await job_queue.update_job_status(doc_id, "crashed")
 
+            logger.warning("Marked running jobs as crashed")
+
+            # Cancel all running tasks and mark as crashed
+            for t, gpu_id, doc_id in running_tasks + [monitor_task]:
+                t.cancel()
+
+            # Wait for all tasks to be cancelled
+            done, pending = await asyncio.wait(
+                [t for t, _, _ in running_tasks], return_when=asyncio.ALL_COMPLETED
+            )
             running_tasks.clear()
             break
 
@@ -419,6 +434,5 @@ async def main():
 
 
 if __name__ == "__main__":
-
     print("starting job launcher")
     asyncio.run(main())
