@@ -104,3 +104,11 @@ class AlpacaCodeDataset(AlpacaDataset):
         self.dataset = DatasetLibrary.pull_dataset(
             "zhan1993/code_alpaca_20k", split="train"
         )
+
+
+class MathQaAlpacaCodeDataset(AlpacaDataset):
+    def __init__(self):
+        super().__init__()
+        self.dataset = DatasetLibrary.pull_dataset(
+            "zhan1993/metamath_code_alpaca_10k", split="train"
+        )

@@ -1,4 +1,8 @@
-from mttl.dataloader.alpaca_dataset_readers import AlpacaCodeDataset, AlpacaDataset
+from mttl.dataloader.alpaca_dataset_readers import (
+    AlpacaCodeDataset,
+    AlpacaDataset,
+    MathQaAlpacaCodeDataset,
+)
 from mttl.datamodule.base import DataModule, DatasetConfig
 
 
@@ -34,8 +38,12 @@ class AlpacaCodeDataModule(DataModule):
         self.test_dataset = self.dev_dataset
 
 
-class AlpacaPretrainDataModule(AlpacaDataModule):
-    pass
+@DataModule.register("mathqa_alpaca_code", config_cls=DatasetConfig)
+class MathQaAlpacaCodeDataModule(AlpacaDataModule):
+    def setup_dataset(self):
+        dataset = MathQaAlpacaCodeDataset()
+        self.train_dataset, self.dev_dataset = self.create_train_valid_split(dataset)
+        self.test_dataset = self.dev_dataset
 
 
 class AlpacaFinetuneDataModule(AlpacaDataModule):
@@ -43,17 +51,17 @@ class AlpacaFinetuneDataModule(AlpacaDataModule):
 
 
 if __name__ == "__main__":
-    alpaca_data_module = AlpacaDataModule(
-        DatasetConfig(model="meta-llama/Llama-2-7b-hf")
-    )
-    alpaca_data_module.setup_dataset()
-    print(alpaca_data_module.train_dataset)
+    # alpaca_data_module = AlpacaDataModule(
+    #     DatasetConfig(model="meta-llama/Llama-2-7b-hf")
+    # )
+    # alpaca_data_module.setup_dataset()
+    # print(alpaca_data_module.train_dataset)
 
-    alpaca_code_data_module = AlpacaCodeDataModule(
+    mathqa_alpaca_code_data_module = MathQaAlpacaCodeDataModule(
         DatasetConfig(model="meta-llama/Llama-2-7b-hf")
     )
-    alpaca_code_data_module.setup_dataset()
-    val_dataloder = alpaca_code_data_module.val_dataloader()
+    mathqa_alpaca_code_data_module.setup_dataset()
+    val_dataloder = mathqa_alpaca_code_data_module.val_dataloader()
     for batch in val_dataloder:
         print(batch)
         breakpoint()
