@@ -944,6 +944,12 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         HellaswagDataConfig,
         HellaswagMultiChoiceDataModule,
     )
+    from mttl.datamodule.mathqa_data_module import MathQADataConfig, MathQADataModule
+    from mttl.datamodule.gsm_data_module import GsmDataConfig, GsmDataModule
+    from mttl.datamodule.base import DatasetConfig
+    from mttl.datamodule.alpaca_data_module import (
+        AlpacaCodeDataModule,
+    )
     from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
     from mttl.datamodule.mt_seq_to_seq_module import (
         FlanConfig,
@@ -1063,6 +1069,23 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
             pack_sequences=args.pack_sequences,
         )
         dm = FlatMultiTaskModule(config, for_generation=for_generation)
+    elif "mathqa" in dataset:
+        config = MathQADataConfig(
+            **common_kwargs,
+        )
+        dm = MathQADataModule(config, for_generation=for_generation)
+    elif "gsm" in dataset:
+        config = GsmDataConfig(
+            **common_kwargs,
+            gsm_template=args.gsm_template,
+        )
+        dm = GsmDataModule(config, for_generation=for_generation)
+
+    elif "alpaca_code" in dataset:
+        config = DatasetConfig(
+            **common_kwargs,
+        )
+        dm = AlpacaCodeDataModule(config, for_generation=for_generation)
     elif "mmlu" in dataset:
         config = MMLUDataConfig(
             **common_kwargs,

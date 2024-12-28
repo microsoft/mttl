@@ -592,6 +592,7 @@ class EvaluationConfig(MultiExpertConfig, TransformArgs):
     es_metric: str = "loss"
     n_ng_iterations: int = 30  # number of iterations for LoraHub
     recompute_prototypes: bool = False
+    gsm_template: str = "cot"
 
 
 @dataclass
