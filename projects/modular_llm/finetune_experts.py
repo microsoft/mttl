@@ -471,7 +471,7 @@ def run_multitask(args: FinetuneConfig):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
-    setup_logging(args.output_dir)
+    setup_logging()
     logger.info("Args: {}".format(args.to_json()))
 
     remote_login(args.remote_token)
