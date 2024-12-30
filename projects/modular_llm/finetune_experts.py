@@ -287,6 +287,8 @@ def finetune_lib_lora_soup(args: FinetuneConfig, dm):
     """ """
     args.router_selector = "lora_soup_router"
 
+    args.trainable_param_names = "|.*module_logits_dict.*|.*selector.*"
+
     module = MultiExpertModule(**vars(args)).to("cuda")
     module.add_experts_from_library(args.library_id)
 
