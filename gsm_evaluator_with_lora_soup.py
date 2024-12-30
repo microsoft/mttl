@@ -16,7 +16,7 @@ from mttl.evaluators.gsm_evaluator import GsmEvaluator
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 from mttl.models.containers.selectors.base import UniformSelectorConfig
 from mttl.arguments import EvaluationConfig, ExpertConfig
-from mttl.models.lightning.expert_module import ExpertModule
+from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
 import torch
 from mttl.logging import setup_logging
 
@@ -28,8 +28,11 @@ args = EvaluationConfig.parse()
 datamodule = get_datamodule(args, for_generation=True)
 evaluator = GsmEvaluator(datamodule)
 
-#
-module = ExpertModule(**vars(args)).to(device)
+if args.library_id is None:
+    module = ExpertModule(**vars(args)).to(device)
+else:
+    module = MultiExpertModule(**vars(args)).to("cuda")
+    module.add_experts_from_library(args.library_id)
 
 if args.checkpoint is not None:
     checkpoint = torch.load(args.checkpoint, weights_only=False)["state_dict"]
