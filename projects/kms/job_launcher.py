@@ -4,13 +4,22 @@ import os
 import signal
 import subprocess
 import sys
+import time
+import uuid
 from contextlib import asynccontextmanager
+from pathlib import Path
 from time import sleep
 
-from azure.storage.blob import BlobClient
 from azure.storage.blob.aio import BlobClient as AsyncBlobClient
 from azure.storage.blob.aio import BlobLeaseClient
 from filelock import AsyncFileLock
+from tenacity import (
+    retry,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential,
+    wait_fixed,
+)
 
 from mttl.models.library.backend_engine import BlobStorageEngine
 from mttl.utils import logger
@@ -37,6 +46,12 @@ class JobQueue:
     def __init__(self, job_file, queue_file, n_retries):
         self.job_file = job_file
         self.queue_file = queue_file
+        self.queue_name = self.queue_file.split("/")[-1]
+        self.queue_dir = os.path.dirname(self.queue_file)
+
+        self.launcher_id = str(uuid.uuid4())
+        self.launcher_name = f"launcher-{self.launcher_id}.txt"
+        self.launcher_file = os.path.join(self.queue_dir, self.launcher_name)
 
         self.n_retries = n_retries
         self.blob_engine = BlobStorageEngine()
@@ -44,59 +59,68 @@ class JobQueue:
         self.storage_uri, self.container = (
             self.blob_engine._parse_repo_id_to_storage_info(self.queue_file)
         )
-        self.queue_name = self.queue_file.split("/")[-1]
+
         self.blob_service_client = self.blob_engine._get_blob_client(
             self.queue_file, use_async=True
         )
-        self.blob_client = self.blob_service_client.get_blob_client(
-            container=self.container, blob=self.queue_name
-        )
+
+        # create container client (same for queue and heartbeat)
         self.container_client = self.blob_service_client.get_container_client(
             self.container
         )
 
-        print(f"queue file : {self.queue_file}")
+        # create blob client for queue and heartbeat
+        self.queue_client = self.blob_service_client.get_blob_client(
+            container=self.container, blob=self.queue_name
+        )
+        # self.queue_client.acquire_lease(
+        self.heartbeat_client = self.blob_service_client.get_blob_client(
+            container=self.container, blob=f"launcher-{self.launcher_id}.txt"
+        )
+
+        # keep track of dead runners
+        self.dead_launchers = {}
+
+    async def close(self):
+        # close all azure stuff
+        await self.queue_client.close()
+        await self.heartbeat_client.close()
+        await self.container_client.close()
+        await self.blob_service_client.close()
+
+    async def initialize(self):
+        await self.initialize_queue_file()
+        await self.heartbeat_client.upload_blob(str(time.time()).encode("utf-8"))
 
     def queue_exists(self):
         return self.blob_engine._blob_exists(self.queue_file)
 
     async def download_queue(self, lease=None):
 
-        # TODO: download the whole blob and rebuild the queue from
-        # individual json files. *NO AZURE LOCK* is needed for this
-
         local_filename = self.blob_engine._get_local_filepath(
-            self.queue_file, self.queue_name
+            self.queue_dir, self.queue_name
         )
 
-        async with AsyncFileLock(str(local_filename) + ".lock"):
-            with open(file=local_filename, mode="wb") as blob_file:
-                download_stream = await self.blob_client.download_blob(lease=lease)
-                data = await download_stream.readall()
-                # Need an actual lock on this
+        # postpend `self.launcher_id` before the extension
+        local_filename = Path(
+            str(local_filename).replace(".json", f"_{self.launcher_id}.json")
+        )
+        with open(file=local_filename, mode="wb") as blob_file:
+            download_stream = await self.queue_client.download_blob(lease=lease)
+            data = await download_stream.readall()
+            blob_file.write(data)
 
-                blob_file.write(data)
-
+        try:
+            print("local_filename", local_filename)
             out = json.load(open(local_filename, "r"))
-
+        except json.JSONDecodeError:
+            print(f"Error reading {local_filename}")
+            raise json.JSONDecodeError()
         return out
 
-        """
-        path = await self.blob_engine._async_download_blob(
-            self.queue_file, self.queue_file.split("/")[-1], lease=lease, use_cache=False
-        )
-        return json.load(open(path, 'r'))
-        """
-
     async def upload_queue(self, python_dict, lease=None):
-        filename = self.queue_file.split("/")[-1]
         buffer = json.dumps(python_dict, indent=2).encode("utf-8")
-        await self.blob_engine._async_upload_blob(
-            repo_id=self.queue_file.replace("queue", "QUEUE"),
-            filename=filename,
-            buffer=buffer,
-            lease=lease,
-        )
+        await self.queue_client.upload_blob(buffer, overwrite=True, lease=lease)
 
     async def initialize_queue_file(self):
         # This function ensures the queue file is in the correct format.
@@ -117,80 +141,102 @@ class JobQueue:
 
             # Convert to list of {"doc_id": ..., "status": "queued", "retries": 0}
             tasks = [
-                {"doc_id": doc_id, "status": "queued", "retries": 0}
+                {
+                    "doc_id": doc_id,
+                    "status": "queued",
+                    "retries": 0,
+                    "launcher_id": None,
+                }
                 for doc_id in doc_ids
             ]
 
             await self.upload_queue(tasks)
 
     async def get_next_job(self):
-        if True:
-            lease = await self.get_lease()
-            if not self.queue_exists():
-                raise FileNotFoundError(f"Queue file {self.queue_file} not found.")
+        lease = await self.get_lease(blob_client=self.queue_client)
+        if not self.queue_exists():
+            raise FileNotFoundError(f"Queue file {self.queue_file} not found.")
 
-            tasks = await self.download_queue(lease=lease)
-            doc_id = None
-            # Find the first job that is still queued
-            for task in tasks:
-                if task["status"] == "queued":
+        tasks = await self.download_queue(lease=lease)
+        doc_id = None
+        # Find the first job that is still queued
+        for task in tasks:
+            if task["status"] == "queued":
+                # Mark as running
+                task["status"] = "running"
+                task["launcher_id"] = self.launcher_id
+                doc_id = task["doc_id"]
+                break
 
-                    # TODO: try and acquire the lease for this specific file
-                    # If acquired,
-                    # 1) mark as running and
-                    # 2) upload the updated file
-                    # 3) release the lease
-                    # IF `Lease Already Acquired`, continue iterating over the tasks
-                    # `skipped += 1`
-
-                    # Mark as running
-                    task["status"] = "running"
-                    doc_id = task["doc_id"]
-                    break
-
-            # TODO: if `doc_id` is still None and `skipped`,
-
+        if doc_id is None:
             # Now, let's see if there are some crashed or failed jobs we can retry
             for task in tasks:
                 if task["status"] in ["crashed", "failed"]:
                     if task["retries"] < self.n_retries:
                         # Mark as running
                         task["status"] = "running"
+                        task["launcher_id"] = self.launcher_id
                         task["retries"] += 1
                         doc_id = task["doc_id"]
                         break
 
-            # upload tasks
+        # upload tasks
+        if doc_id is not None:
             await self.upload_queue(tasks, lease=lease)
 
-            await lease.release()
-            print("DOC ID : ", doc_id)
-            return doc_id
+        await lease.release()
+        await asyncio.sleep(1)
+        return doc_id
 
     async def update_job_status(self, doc_id, new_status):
-        if True:
-            lease = await self.get_lease()
-            assert lease is not None
-            if not self.blob_engine._blob_exists(self.queue_file):
-                return
+        lease = await self.get_lease(blob_client=self.queue_client)
+        assert lease is not None
 
-            tasks = await self.download_queue(lease=lease)
+        if not isinstance(doc_id, list):
+            doc_id = [doc_id]
 
-            self._print_progress(tasks)
-            # Update the status of the job with the given doc_id
-            for task in tasks:
-                if task["doc_id"] == doc_id:
-                    if new_status == "crashed":
-                        logger.warning(f"Marking {doc_id} as crashed")
-                    else:
-                        logger.info(f"Updating status of {doc_id} to {new_status}")
-                    task["status"] = new_status
+        if not self.blob_engine._blob_exists(self.queue_file):
+            return
+
+        tasks = await self.download_queue(lease=lease)
+        blobs_to_delete = set()
+
+        self._print_progress(tasks)
+        # Update the status of the job with the given doc_id
+        for task in tasks:
+            if task["doc_id"] in doc_id:
+                if new_status == "crashed":
+                    logger.warning(f"Marking {task['doc_id']} as crashed")
+                else:
+                    logger.info(f"Updating status of {doc_id} to {new_status}")
+                task["status"] = new_status
+                if new_status != "running":
+                    task["launcher_id"] = None
+
+                if len(doc_id) == 1:
                     break
 
-            # upload
-            await self.upload_queue(tasks, lease=lease)
+            # At the same time, delete jobs from dead launchers
+            if (
+                task["status"] == "running"
+                and task["launcher_id"] in self.dead_launchers.keys()
+            ):
+                blobs_to_delete.add(task["launcher_id"])
+                print(
+                    f"Removing running job {task['doc_id']} from dead launcher {task['launcher_id']}"
+                )
+                task["status"] = "queued"
+                task["launcher_id"] = None
 
-            await lease.release()
+        for l_name in list(blobs_to_delete):
+            print(f"Deleting dead launcher {l_name}")
+            blob = self.dead_launchers[l_name]
+            await blob.delete_blob()
+        self.dead_launchers = {}
+
+        await self.upload_queue(tasks, lease=lease)
+        await lease.release()
+        await asyncio.sleep(1)
 
     def _print_progress(self, tasks):
         total = len(tasks)
@@ -208,35 +254,70 @@ class JobQueue:
             tasks = await self.download_queue()
             self._print_progress(tasks)
             await asyncio.sleep(30)
-            # sleep(10)
 
-    async def get_lease(self, n_retries=15):
+    @retry(
+        stop=stop_after_attempt(100),
+        wait=wait_fixed(1),
+        retry=retry_if_exception(
+            lambda e: "There is already a lease present." in str(e)
+        ),
+        reraise=True,
+        before=lambda rs: (
+            print(f"Lease acquisition attempt {rs.attempt_number}")
+            if rs.attempt_number > 1
+            else None
+        ),
+    )
+    async def get_lease(self, blob_client):
         """
         Acquire a lease on the referenced blob before operating.
-        This mimics the azure sample's acquire_lease_on_blob_async approach.
         """
-        lease_client = None
-        n_retried = 0
-        should_continue = True
-        while should_continue:
-            try:
-                # Acquire a lease on the blob
-                lease_client = await self.blob_client.acquire_lease(lease_duration=-1)
-                print("Acquired Lease")
-                return lease_client
-            except Exception as e:
-                if "There is already a lease present." in str(e):
-                    print(f"Lease already present. {n_retried} / {n_retries}")
-                else:
-                    print("Unkown error : ", e)
+        try:
+            lease_client = await blob_client.acquire_lease(
+                lease_duration=30, lease_id=self.launcher_id
+            )
+            return lease_client
+        except Exception as e:
+            if "There is already a lease present." in str(e):
+                raise e
+            else:
+                print("Unknown error:", e)
+                raise e
 
-                n_retried += 1
-                should_continue = n_retried < n_retries
-                await asyncio.sleep(30)
+    async def heartbeat(self):
+        while True:
+            # No need for lease, as the launcher_id is unique to this launcher
 
-        raise Exception(
-            f"Failed to acquire lease on {self.queue_file} after {n_retries} retries."
-        )
+            logger.info(f"Heartbeat for {self.launcher_id}")
+            await self.heartbeat_client.upload_blob(
+                str(time.time()).encode("utf-8"), overwrite=True
+            )
+            await asyncio.sleep(30)
+
+    async def cleanup_dead_launchers(self):
+        while True:
+            repo_files = [
+                f.name
+                async for f in self.container_client.list_blobs()
+                if "launcher" in f.name and self.launcher_id not in f.name
+            ]
+            for fn in repo_files:
+                blob_client = self.blob_service_client.get_blob_client(
+                    container=self.container, blob=fn
+                )
+                blob_properties = await blob_client.get_blob_properties()
+                last_modified = blob_properties.last_modified
+                delta = time.time() - last_modified.timestamp()
+
+                # if file last modified more than 5 minutes ago, delete it
+                if delta > 360:
+                    launch_id = fn.split("launcher-")[1].split(".")[0]
+                    self.dead_launchers[launch_id] = blob_client
+
+            # f len(self.dead_launchers) > 0:
+            print(f"Tracked {len(self.dead_launchers)} dead launchers")
+
+            await asyncio.sleep(60)
 
 
 async def run_job(gpu_id, doc_id, config_file, output_dir, train_file, config_id):
@@ -254,8 +335,6 @@ async def run_job(gpu_id, doc_id, config_file, output_dir, train_file, config_id
         "-k",
         f"output_dir={output_dir}/{doc_id}",
     ]
-    # TODO: Remove this
-    # command = ['python', 'dummy_train.py']
     print(f"Assigning DOC_ID={doc_id} to GPU_ID={gpu_id}")
 
     async def stream_output(stream, prefix, job_name):
@@ -351,15 +430,17 @@ async def main():
     # create a folder for this on the blob
     blob_engine = BlobStorageEngine()
     blob_engine.create_repo(f"mttl4879355322/{config_id}", exist_ok=True)
-    print("created blob")
 
     job_queue = JobQueue(job_file, queue_file, n_retries)
-    await job_queue.initialize_queue_file()
+    print("created blob with launcher id ", job_queue.launcher_id)
+    await job_queue.initialize()
 
     gpu_usage = {i: 0 for i in range(num_gpus)}
     running_tasks = []
 
     monitor_task = asyncio.create_task(job_queue.print_progress())
+    heartbeat_task = asyncio.create_task(job_queue.heartbeat())
+    cleanup_task = asyncio.create_task(job_queue.cleanup_dead_launchers())
 
     while True:
         # If we received an exit signal (SIGTERM or SIGINT), shut down gracefully
@@ -368,15 +449,23 @@ async def main():
                 "Confirmed exit signal, proceeding with graceful shutdown..."
             )
 
-            for completed_task, gpu_id, doc_id in running_tasks:
-                # Since these tasks are cancelled, mark them as crashed
-                await job_queue.update_job_status(doc_id, "crashed")
+            doc_ids = [doc_id for _, _, doc_id in running_tasks]
+            # Since these tasks are cancelled, mark them as crashed
+            await job_queue.update_job_status(doc_ids, "crashed")
 
             logger.warning("Marked running jobs as crashed during exit process.")
 
             # Cancel all running tasks
-            for t, gpu_id, doc_id in running_tasks + [monitor_task]:
+            for t, gpu_id, doc_id in running_tasks:
                 t.cancel()
+
+            # Cancel all background tasks
+            monitor_task.cancel()
+            heartbeat_task.cancel()
+            cleanup_task.cancel()
+
+            # Close the job queue
+            await job_queue.close()
 
             # Wait for all tasks to be cancelled
             done, pending = await asyncio.wait(
@@ -401,13 +490,14 @@ async def main():
 
         if not running_tasks:
             monitor_task.cancel()
+            heartbeat_task.cancel()
+            cleanup_task.cancel()
             print("No more jobs to process. Exiting.")
             # print progress one last time
             tasks = await job_queue.download_queue()
             job_queue._print_progress(tasks)
+            await job_queue.close()
             break
-
-        asyncio.create_task(job_queue.print_progress())
 
         logger.info(f"waiting for {len(running_tasks)} tasks to complete")
         done, pending = await asyncio.wait(
