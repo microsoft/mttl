@@ -37,6 +37,7 @@ from mttl.utils import create_library, remote_login, seed_everything, upload_lib
 from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator
 from projects.kms.utils.quality_evaluator import QualityEvaluator
 from projects.kms.utils.simple_utils import (
+    EarlyStopper,
     SimpleLogger,
     dcd_loss,
     do_evaluation,
@@ -90,7 +91,9 @@ class KMArguments(ExpertConfig):
     hidden_factor: float = 1.0
     temp: float = 1.0
     loss_on_topk: float = None
-    callback_during_training: bool = True
+    callback_during_training: bool = False
+    eval_after_training: bool = True
+    patience: int = None
 
 
 def train_km(training_args: KMArguments):
@@ -171,6 +174,11 @@ def train_km(training_args: KMArguments):
     eval_score_so_far = []
     met_logger = SimpleLogger(training_args.output_dir)
 
+    # early stopper
+    early_stopper = None
+    if training_args.patience is not None:
+        early_stopper = EarlyStopper(patience=training_args.patience, mode="min")
+
     if training_args.eval_before_training:
         val_loss, eval_score = do_evaluation(
             datamodule,
@@ -178,6 +186,8 @@ def train_km(training_args: KMArguments):
             loss_function,
             evaluator if training_args.callback_during_training else None,
         )
+        # if early_stopper: early_stopper(val_loss)
+
         met_logger.log_metrics(
             {"val_loss": val_loss, eval_metric: eval_score}, step=global_step
         )
@@ -266,6 +276,10 @@ def train_km(training_args: KMArguments):
                 evaluator if training_args.callback_during_training else None,
             )
 
+            if early_stopper and early_stopper(val_loss):
+                logger.info(f"Early stopping after {global_step} steps")
+                break
+
             met_logger.log_metrics(
                 {"val_loss": val_loss, eval_metric: eval_score}, step=global_step
             )
@@ -293,7 +307,7 @@ def train_km(training_args: KMArguments):
     raw_model.save_pretrained(training_args.output_dir + "/last_model")
     training_args.save_config(training_args.output_dir + "/last_model")
 
-    if not training_args.callback_during_training:
+    if not training_args.callback_during_training and training_args.eval_after_training:
         model = (
             type(model)
             .from_pretrained(training_args.output_dir + "/best_model")
@@ -306,6 +320,12 @@ def train_km(training_args: KMArguments):
         met_logger.log_metrics(
             {"cv_val_loss": val_loss, eval_metric: eval_score}, step=global_step
         )
+
+    # Make sure to clean up the process group
+    if is_dist_avail_and_initialized():
+        destroy_process_group()
+
+    torch.cuda.empty_cache()
 
 
 if __name__ == "__main__":

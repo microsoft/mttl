@@ -402,3 +402,39 @@ class SimpleLogger:
                     f.write(json.dumps(l) + "\n")
         except Exception as e:
             logger.error(f"Failed to log metrics: {e}")
+
+
+class EarlyStopper:
+    def __init__(self, patience, mode="min", delta=0.0):
+        self.patience = patience
+        self.mode = mode
+        self.delta = delta
+        self.counter = 0
+        self.best_score = None
+        self.early_stop = False
+
+        if mode == "min":
+            self.best_score = float("inf")
+        elif mode == "max":
+            self.best_score = float("-inf")
+        else:
+            raise ValueError("mode must be 'min' or 'max'")
+
+    def __call__(self, score):
+        if self.mode == "min":
+            if score < self.best_score - self.delta:
+                self.best_score = score
+                self.counter = 0
+            else:
+                self.counter += 1
+        elif self.mode == "max":
+            if score > self.best_score + self.delta:
+                self.best_score = score
+                self.counter = 0
+            else:
+                self.counter += 1
+
+        if self.counter >= self.patience:
+            self.early_stop = True
+
+        return self.early_stop
