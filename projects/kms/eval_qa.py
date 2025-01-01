@@ -25,7 +25,7 @@ from projects.kms.train_km_simple import (
     evaluate_datasets,
     evaluate_metrics,
 )
-from projects.kms.train_qa import KEArguments
+from projects.kms.train_qa import KEArguments, train_datasets
 from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator
 from projects.kms.utils.quality_evaluator import QualityEvaluator
 from projects.kms.utils.wiki_mmlu_evaluator import WikiMMLUEvaluator
@@ -70,7 +70,11 @@ def eval_qa(training_args):
 
     if training_args.library_id:
         # Add only the experts we need
-        test_tasks = set(evaluator.datamodule.test_dataset["document_id"])
+        test_tasks = set(
+            getattr(evaluator.datamodule, f"{training_args.split}_dataset")[
+                "document_id"
+            ]
+        )
         expert_lib = ExpertLibrary.get_expert_library(
             training_args.library_id, selection=list(test_tasks)
         )
@@ -100,6 +104,25 @@ if __name__ == "__main__":
     # Callback actually reads from `args.dataset`
     args.dataset = args.nqa_dataset
     """
+    if args.use_rag:
+        args.dataset = train_datasets[args.evaluate_on + "-rag"]
+        args.include_context = True
+    else:
+        args.dataset = train_datasets[args.evaluate_on]
+        args.include_context = False
+
+    dataset = args.evaluate_on.split("-")[0]
+    dataset_type = {"nqa": "narrativeqa", "quality": "quality"}[dataset]
+    if args.dataset_type != dataset_type:
+        logger.warning(f"Overwriting `dataset_type` to {dataset_type}")
+        args.dataset_type = dataset_type
+
+    if dataset == "quality" and args.split != "dev":
+        logger.warning(
+            f"Quality has not labelled test split. Overwriting `split` to dev"
+        )
+        args.split = "dev"
+        args.subsample_dev = args.subsample_test
 
     # Allow to set trainable tasks from a json split file (e.g. nqa_mini_split.json)
     if isinstance(args.finetune_task_name, str) and args.finetune_task_name.endswith(
@@ -114,9 +137,7 @@ if __name__ == "__main__":
         with open(args.finetune_task_name, "r") as f:
             split_dict = json.load(f)
 
-        tasks = split_dict[
-            {"train": "train", "dev": "valid", "test": "test"}[args.split]
-        ]
+        tasks = split_dict[args.split]
         logger.info(f"Setting finetune_task_name to {tasks}")
         args.finetune_task_name = tasks
 
