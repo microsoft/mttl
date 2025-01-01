@@ -8,11 +8,9 @@ import torch
 from lightning_fabric import seed_everything
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm import tqdm
-from transformers import EarlyStoppingCallback
 
 # register this datamodule!
 from projects.kms.utils.km_datamodule import KMDatasetModule
-from projects.kms.utils.nqa_datamodule import NQADatamodule
 
 # isort: split
 
@@ -42,9 +40,7 @@ from projects.kms.utils.simple_utils import (
 # isort: split
 
 # import Selector before args
-from mttl.models.containers.selectors.km_selector import KnowledgeExtractorSelector
 from mttl.models.expert_model import ExpertModel, ExpertModelConfig
-from mttl.models.hf.trainer import LMTrainer
 from mttl.models.km_model import KEMoEModel, KEMoEModelConfig
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.utils import remote_login
@@ -53,6 +49,13 @@ from projects.kms.train_km_simple import KMArguments
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
+train_datasets = {
+    "nqa": "az://mttldata/narrativeqa-sanitized",
+    "nqa-rag": "pclucas14/nqa-RAG-64",
+    "quality": "az://mttldata/quality-sanitized",
+    "quality-rag": "pclucas14/quality-RAG-64",
+}
+
 
 @dataclass
 class KEArguments(MultiExpertConfig, KMArguments):
@@ -60,6 +63,12 @@ class KEArguments(MultiExpertConfig, KMArguments):
     nqa_dataset: str = None
     # Where to save the KE expert
     ke_hf_path: str = None
+    # Whether to retrieve passages
+    use_rag: bool = False
+    # offload experts
+    offload_experts: bool = False
+    # max kms
+    max_kms: int = None
 
 
 def train_ke(training_args):
@@ -83,6 +92,7 @@ def train_ke(training_args):
             library_id=training_args.library_id,
             expert_selection=args.finetune_task_name,
             selector_config=training_args.selector_config,
+            offload_experts=training_args.offload_experts,
         )
         model = KEMoEModel(model_config)
 
@@ -153,7 +163,10 @@ def train_ke(training_args):
 
     if training_args.eval_before_training:
         val_loss, eval_score = do_evaluation(
-            datamodule, model, loss_function, evaluator
+            datamodule,
+            model,
+            loss_function,
+            None if training_args.offload_experts else evaluator,
         )
         met_logger.log_metrics(
             {"val_loss": val_loss, eval_metric: eval_score}, step=global_step
@@ -226,7 +239,9 @@ def train_ke(training_args):
         global_step += 1
 
         do_eval_on_step = (
-            training_args.eval_every and global_step % training_args.eval_every == 0
+            training_args.eval_every
+            and training_args.eval_every > 0
+            and global_step % training_args.eval_every == 0
         )
         do_eval_on_epoch = (
             training_args.eval_every_n_epoch
@@ -235,7 +250,10 @@ def train_ke(training_args):
         )
         if do_eval_on_step or do_eval_on_epoch:
             val_loss, eval_score = do_evaluation(
-                datamodule, model, loss_function, evaluator
+                datamodule,
+                model,
+                loss_function,
+                None if training_args.offload_experts else evaluator,
             )
 
             met_logger.log_metrics(
@@ -264,12 +282,14 @@ def train_ke(training_args):
     training_args.save_config(training_args.output_dir + "/last_model")
 
     # Can we load the best model and evaluate it ?
-    best_model = type(model).from_pretrained(training_args.output_dir + "/best_model")
+    model_class = type(model)
+    del model
+    model = model_class.from_pretrained(training_args.output_dir + "/best_model")
 
     # Maybe save to Expert Library
     if args.ke_hf_path:
         # TODO: make sure that pushing expert in MoE works
-        if isinstance(model, KMMoEModel):
+        if isinstance(model, KEMoEModel):
             ke_expert = model.get_expert_instance(model.ke_expert_name)
         else:
             ke_expert = model.as_expert()
@@ -284,9 +304,25 @@ if __name__ == "__main__":
     args = KEArguments.parse()
     assert args.dataset_config
 
-    if args.nqa_dataset is None:
-        logger.info(f"Setting callback dataset to {args.dataset}")
-        args.nqa_dataset = args.dataset
+    if args.use_rag:
+        args.dataset = train_datasets[args.evaluate_on + "-rag"]
+        args.include_context = True
+    else:
+        args.dataset = train_datasets[args.evaluate_on]
+        args.include_context = False
+
+    eval_on = args.evaluate_on.split("-")[0]
+    dataset_type = {"nqa": "narrativeqa", "quality": "quality"}[eval_on]
+    if args.dataset_type != dataset_type:
+        logger.warning(f"Overwriting `dataset_type` to {dataset_type}")
+        args.dataset_type = dataset_type
+
+    if args.finetune_task_name is None:
+        args.finetune_task_name = {
+            "quality": "splits/quality/quality_full.json",
+            "nqa": "splits/nqa/nqa_full.json",
+        }[eval_on]
+        logger.warning(f"Overwriting `finetune_task_name` to {args.finetune_task_name}")
 
     # Allow to set trainable tasks from a json split file (e.g. nqa_mini_split.json)
     if isinstance(args.finetune_task_name, str) and args.finetune_task_name.endswith(
@@ -298,5 +334,12 @@ if __name__ == "__main__":
         tasks = split_dict["train"] + split_dict["dev"]
         logger.info(f"Setting finetune_task_name to {tasks}")
         args.finetune_task_name = tasks
+
+    if args.max_kms is not None:
+        import random
+
+        random.shuffle(args.finetune_task_name)
+        logger.info(f"Selecting {args.max_kms} tasks to finetune on")
+        args.finetune_task_name = args.finetune_task_name[: args.max_kms]
 
     train_ke(args)
