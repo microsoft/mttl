@@ -48,11 +48,9 @@ class QualityDatamodule(MultiChoiceDataModule):
                     options = examples["options"][i][j]
                     gold_label = examples["gold_label"][i][j]
                     if gold_label == -1:
-                        raise ValueError(
-                            "Trying to evaluated on the test set for which we don't have labels."
-                        )
-
-                    label_index = gold_label - 1
+                        gold_label = label_index = None
+                    else:
+                        label_index = gold_label - 1
 
                     if self.config.include_context:
                         context = examples["text"][i]
