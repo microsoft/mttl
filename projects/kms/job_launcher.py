@@ -2,36 +2,18 @@ import asyncio
 import json
 import os
 import signal
-import subprocess
-import sys
 import time
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
 from time import sleep
 
-from azure.storage.blob.aio import BlobClient as AsyncBlobClient
-from azure.storage.blob.aio import BlobLeaseClient
-from filelock import AsyncFileLock
-from tenacity import (
-    retry,
-    retry_if_exception,
-    stop_after_attempt,
-    wait_exponential,
-    wait_fixed,
-)
+from tenacity import retry, retry_if_exception, stop_after_attempt, wait_fixed
 
 from mttl.models.library.backend_engine import BlobStorageEngine
 from mttl.utils import logger
 
-got_sigterm = False
 got_exit_signal = False
-
-# Async functions we need to handle
-# 1) check if a blob exists
-# 2) download a blob
-# 3) upload a blob
-# Let's first define them as synchronous functions
 
 
 def handle_exit_signal(signum, frame):
@@ -81,6 +63,10 @@ class JobQueue:
         # keep track of dead runners
         self.dead_launchers = {}
 
+    @property
+    def has_dead_launchers(self):
+        return len(self.dead_launchers) > 0
+
     async def close(self):
         # close all azure stuff
         await self.queue_client.close()
@@ -110,13 +96,7 @@ class JobQueue:
             data = await download_stream.readall()
             blob_file.write(data)
 
-        try:
-            print("local_filename", local_filename)
-            out = json.load(open(local_filename, "r"))
-        except json.JSONDecodeError:
-            print(f"Error reading {local_filename}")
-            raise json.JSONDecodeError()
-        return out
+        return json.load(open(local_filename, "r"))
 
     async def upload_queue(self, python_dict, lease=None):
         buffer = json.dumps(python_dict, indent=2).encode("utf-8")
@@ -159,6 +139,7 @@ class JobQueue:
 
         tasks = await self.download_queue(lease=lease)
         doc_id = None
+
         # Find the first job that is still queued
         for task in tasks:
             if task["status"] == "queued":
@@ -202,6 +183,7 @@ class JobQueue:
         blobs_to_delete = set()
 
         self._print_progress(tasks)
+
         # Update the status of the job with the given doc_id
         for task in tasks:
             if task["doc_id"] in doc_id:
@@ -225,13 +207,25 @@ class JobQueue:
                 print(
                     f"Removing running job {task['doc_id']} from dead launcher {task['launcher_id']}"
                 )
-                task["status"] = "queued"
+                task["status"] = "crashed"
                 task["launcher_id"] = None
 
         for l_name in list(blobs_to_delete):
             print(f"Deleting dead launcher {l_name}")
             blob = self.dead_launchers[l_name]
-            await blob.delete_blob()
+            try:
+                await blob.delete_blob()
+            except Exception as e:
+                # NOTE: My understanding is that this would not be required, as only the
+                # launchers responsible to jobs *not* already marked as crashed are being deleted
+                # But somehow we have a race condition here, where multiple runners are attempting to
+                # delete the same blob. So we need to handle this exception.
+                # My guess is that the lease has expired
+                if "The specified blob does not exist" in str(e):
+                    print(f"Blob {l_name} already deleted")
+                else:
+                    raise e
+
         self.dead_launchers = {}
 
         await self.upload_queue(tasks, lease=lease)
@@ -274,7 +268,7 @@ class JobQueue:
         """
         try:
             lease_client = await blob_client.acquire_lease(
-                lease_duration=30, lease_id=self.launcher_id
+                lease_duration=60, lease_id=self.launcher_id
             )
             return lease_client
         except Exception as e:
@@ -314,7 +308,6 @@ class JobQueue:
                     launch_id = fn.split("launcher-")[1].split(".")[0]
                     self.dead_launchers[launch_id] = blob_client
 
-            # f len(self.dead_launchers) > 0:
             print(f"Tracked {len(self.dead_launchers)} dead launchers")
 
             await asyncio.sleep(60)
@@ -391,51 +384,57 @@ def parse_arguments():
     parser.add_argument(
         "--n-retries", type=int, default=0, help="Number of times to retry a failed job"
     )
-    args = parser.parse_args()
-    return (
-        args.num_gpus,
-        args.jobs_per_gpu,
-        args.tasks_file,
-        args.config_id,
-        args.train_file,
-        args.n_retries,
+    parser.add_argument(
+        "--local-km-dir",
+        type=str,
+        default=os.getenv("LOCAL_KM_DIR", "<na>"),
+        help="Local directory for knowledge modules",
     )
+    parser.add_argument(
+        "--mounted-km-dir",
+        type=str,
+        default=os.getenv("MOUNTED_KM_DIR", "<na>"),
+        help="Mounted directory for knowledge modules",
+    )
+    parser.add_argument(
+        "--storage-account",
+        type=str,
+        default=os.getenv("STORAGE_ACCOUNT"),
+        help="Azure Storage Account",
+    )
+    args = parser.parse_args()
+    return args
 
 
 async def main():
-    num_gpus, jobs_per_gpu, job_file, config_id, train_file, n_retries = (
-        parse_arguments()
-    )
-    config_file = f"configs/{config_id}.json"
-    output_dir = f"/mnt/output/kms/{config_id}"
+    args = parse_arguments()
+    # iterate over args and print
+    for arg in vars(args):
+        print(f"{arg}: {getattr(args, arg)}")
+    config_file = f"configs/{args.config_id}.json"
+    output_dir = f"{args.mounted_km_dir}/{args.config_id}"
 
     # if running locally, change the output_dir
-    if os.path.exists("/data/lucas"):
+    if os.path.exists(args.local_km_dir):
         output_dir = f"/data/lucas/{output_dir}"
-
-    env_vars = {
-        "WANDB_PROJECT": f"knowledge-modules-{config_id}",
-        "WANDB_MODE": "online",
-    }
-    os.environ.update(env_vars)
 
     loop = asyncio.get_running_loop()
     # Register signal handlers for graceful shutdown
     loop.add_signal_handler(signal.SIGTERM, handle_exit_signal, signal.SIGTERM, None)
     loop.add_signal_handler(signal.SIGINT, handle_exit_signal, signal.SIGINT, None)
 
-    use_blob_storage = True  # not os.path.exists("/data/lucas")
-    queue_file = f"mttl4879355322/{config_id}/task_queue.json"
+    queue_file = f"{args.storage_account}/{args.config_id}/task_queue.json"
+    print(f"queue file :  {queue_file}")
 
     # create a folder for this on the blob
     blob_engine = BlobStorageEngine()
-    blob_engine.create_repo(f"mttl4879355322/{config_id}", exist_ok=True)
+    blob_engine.create_repo(f"{args.storage_account}/{args.config_id}", exist_ok=True)
 
-    job_queue = JobQueue(job_file, queue_file, n_retries)
+    job_queue = JobQueue(args.tasks_file, queue_file, args.n_retries)
     print("created blob with launcher id ", job_queue.launcher_id)
     await job_queue.initialize()
 
-    gpu_usage = {i: 0 for i in range(num_gpus)}
+    gpu_usage = {i: 0 for i in range(args.num_gpus)}
     running_tasks = []
 
     monitor_task = asyncio.create_task(job_queue.print_progress())
@@ -475,51 +474,62 @@ async def main():
             break
 
         # Assign new jobs to free GPUs
-        for gpu_id in range(num_gpus):
-            while gpu_usage[gpu_id] < jobs_per_gpu:
+        for gpu_id in range(args.num_gpus):
+            while gpu_usage[gpu_id] < args.jobs_per_gpu:
                 doc_id = await job_queue.get_next_job()
                 if not doc_id:
                     break
                 task = asyncio.create_task(
                     run_job(
-                        gpu_id, doc_id, config_file, output_dir, train_file, config_id
+                        gpu_id,
+                        doc_id,
+                        config_file,
+                        output_dir,
+                        args.train_file,
+                        args.config_id,
                     )
                 )
                 running_tasks.append((task, gpu_id, doc_id))
                 gpu_usage[gpu_id] += 1
 
         if not running_tasks:
-            monitor_task.cancel()
-            heartbeat_task.cancel()
-            cleanup_task.cancel()
-            print("No more jobs to process. Exiting.")
-            # print progress one last time
-            tasks = await job_queue.download_queue()
-            job_queue._print_progress(tasks)
-            await job_queue.close()
-            break
+            # Before exiting, let's make sure we had a chance to cleanup dead launchers
+            if job_queue.has_dead_launchers:
+                await job_queue.update_job_status([], "")
+            else:
+                monitor_task.cancel()
+                heartbeat_task.cancel()
+                cleanup_task.cancel()
+                print("No more jobs to process. Exiting.")
+                # print progress one last time
+                tasks = await job_queue.download_queue()
+                job_queue._print_progress(tasks)
+                await job_queue.close()
+                break
 
-        logger.info(f"waiting for {len(running_tasks)} tasks to complete")
-        done, pending = await asyncio.wait(
-            [task for task, _, _ in running_tasks], return_when=asyncio.FIRST_COMPLETED
-        )
+        if running_tasks:
+            logger.info(f"waiting for {len(running_tasks)} tasks to complete")
+            done, pending = await asyncio.wait(
+                [task for task, _, _ in running_tasks],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
 
-        for completed_task in done:
-            # Find which task completed
-            for idx, (task, gpu_id, doc_id) in enumerate(running_tasks):
-                if task == completed_task:
-                    gpu_usage[gpu_id] -= 1
-                    running_tasks.pop(idx)
-                    result_doc_id, return_code = completed_task.result()
-                    # Update job status based on return code
-                    if return_code == 0:
-                        new_status = "done"
-                    elif return_code < 0:
-                        new_status = "crashed"
-                    else:
-                        new_status = "failed"
-                    await job_queue.update_job_status(result_doc_id, new_status)
-                    break
+            for completed_task in done:
+                # Find which task completed
+                for idx, (task, gpu_id, doc_id) in enumerate(running_tasks):
+                    if task == completed_task:
+                        gpu_usage[gpu_id] -= 1
+                        running_tasks.pop(idx)
+                        result_doc_id, return_code = completed_task.result()
+                        # Update job status based on return code
+                        if return_code == 0:
+                            new_status = "done"
+                        elif return_code < 0:
+                            new_status = "crashed"
+                        else:
+                            new_status = "failed"
+                        await job_queue.update_job_status(result_doc_id, new_status)
+                        break
 
 
 if __name__ == "__main__":
