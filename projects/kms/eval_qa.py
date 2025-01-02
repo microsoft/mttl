@@ -124,6 +124,14 @@ if __name__ == "__main__":
         args.split = "dev"
         args.subsample_dev = args.subsample_test
 
+    eval_on = args.evaluate_on.split("-")[0]
+    if args.finetune_task_name is None:
+        args.finetune_task_name = {
+            "quality": "splits/quality/quality_full.json",
+            "nqa": "splits/nqa/nqa_full.json",
+        }[eval_on]
+        logger.warning(f"Overwriting `finetune_task_name` to {args.finetune_task_name}")
+
     # Allow to set trainable tasks from a json split file (e.g. nqa_mini_split.json)
     if isinstance(args.finetune_task_name, str) and args.finetune_task_name.endswith(
         ".json"
