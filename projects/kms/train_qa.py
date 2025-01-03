@@ -69,6 +69,60 @@ class KEArguments(MultiExpertConfig, KMArguments):
     offload_experts: bool = False
     # max kms
     max_kms: int = None
+    # split file for subsampling
+    subsample_file: str = None
+
+    def __post_init__(self):
+        super().__post_init__()
+
+        # Automating some args
+        if self.use_rag:
+            if not self.evaluate_on.endswith("-rag"):
+                logger.warning(f"Overwriting `evaluate_on` to {self.evaluate_on}-rag")
+                self.evaluate_on += "-rag"
+            self.include_context = True
+        else:
+            self.include_context = False
+
+        self.dataset = train_datasets[self.evaluate_on]
+        eval_on = self.evaluate_on.split("-")[0]
+        dataset_type = {"nqa": "narrativeqa", "quality": "quality"}[eval_on]
+        if self.dataset_type != dataset_type:
+            logger.warning(f"Overwriting `dataset_type` to {dataset_type}")
+            self.dataset_type = dataset_type
+
+        if self.finetune_task_name is None:
+            self.finetune_task_name = {
+                "quality": "splits/quality/quality_full.json",
+                "nqa": "splits/nqa/nqa_full.json",
+            }[eval_on]
+            logger.warning(
+                f"Overwriting `finetune_task_name` to {self.finetune_task_name}"
+            )
+
+        # Allow to set trainable tasks from a json split file (e.g. nqa_mini_split.json)
+        if isinstance(
+            self.finetune_task_name, str
+        ) and self.finetune_task_name.endswith(".json"):
+            if self.finetune_task_name != self.subsample_file:
+                logger.warning(
+                    f"Overwriting `subsample_file` to {self.finetune_task_name}"
+                )
+                self.subsample_file = self.finetune_task_name
+
+            with open(self.finetune_task_name, "r") as f:
+                split_dict = json.load(f)
+
+            tasks = split_dict["train"] + split_dict["dev"]
+            logger.info(f"Setting finetune_task_name to {tasks}")
+            self.finetune_task_name = tasks
+
+        if self.max_kms is not None:
+            import random
+
+            random.shuffle(self.finetune_task_name)
+            logger.info(f"Selecting {self.max_kms} tasks to finetune on")
+            self.finetune_task_name = self.finetune_task_name[: self.max_kms]
 
 
 def train_ke(training_args):
@@ -166,7 +220,12 @@ def train_ke(training_args):
             datamodule,
             model,
             loss_function,
-            None if training_args.offload_experts else evaluator,
+            (
+                evaluator
+                if training_args.callback_during_training
+                and not training_args.offload_experts
+                else None
+            ),
         )
         met_logger.log_metrics(
             {"val_loss": val_loss, eval_metric: eval_score}, step=global_step
@@ -253,7 +312,12 @@ def train_ke(training_args):
                 datamodule,
                 model,
                 loss_function,
-                None if training_args.offload_experts else evaluator,
+                (
+                    evaluator
+                    if training_args.callback_during_training
+                    and not training_args.offload_experts
+                    else None
+                ),
             )
 
             met_logger.log_metrics(
@@ -303,45 +367,4 @@ def train_ke(training_args):
 if __name__ == "__main__":
     args = KEArguments.parse()
     assert args.dataset_config
-
-    if args.use_rag:
-        if not args.evaluate_on.endswith("-rag"):
-            logger.warning(f"Overwriting `evaluate_on` to {args.evaluate_on}-rag")
-            args.evaluate_on += "-rag"
-        args.include_context = True
-    else:
-        args.include_context = False
-
-    args.dataset = train_datasets[args.evaluate_on]
-    eval_on = args.evaluate_on.split("-")[0]
-    dataset_type = {"nqa": "narrativeqa", "quality": "quality"}[eval_on]
-    if args.dataset_type != dataset_type:
-        logger.warning(f"Overwriting `dataset_type` to {dataset_type}")
-        args.dataset_type = dataset_type
-
-    if args.finetune_task_name is None:
-        args.finetune_task_name = {
-            "quality": "splits/quality/quality_full.json",
-            "nqa": "splits/nqa/nqa_full.json",
-        }[eval_on]
-        logger.warning(f"Overwriting `finetune_task_name` to {args.finetune_task_name}")
-
-    # Allow to set trainable tasks from a json split file (e.g. nqa_mini_split.json)
-    if isinstance(args.finetune_task_name, str) and args.finetune_task_name.endswith(
-        ".json"
-    ):
-        with open(args.finetune_task_name, "r") as f:
-            split_dict = json.load(f)
-
-        tasks = split_dict["train"] + split_dict["dev"]
-        logger.info(f"Setting finetune_task_name to {tasks}")
-        args.finetune_task_name = tasks
-
-    if args.max_kms is not None:
-        import random
-
-        random.shuffle(args.finetune_task_name)
-        logger.info(f"Selecting {args.max_kms} tasks to finetune on")
-        args.finetune_task_name = args.finetune_task_name[: args.max_kms]
-
     train_ke(args)
