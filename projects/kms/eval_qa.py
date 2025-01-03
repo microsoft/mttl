@@ -105,12 +105,14 @@ if __name__ == "__main__":
     args.dataset = args.nqa_dataset
     """
     if args.use_rag:
-        args.dataset = train_datasets[args.evaluate_on + "-rag"]
+        if not args.evaluate_on.endswith("-rag"):
+            logger.warning(f"Overwriting `evaluate_on` to {args.evaluate_on}-rag")
+            args.evaluate_on += "-rag"
         args.include_context = True
     else:
-        args.dataset = train_datasets[args.evaluate_on]
         args.include_context = False
 
+    args.dataset = train_datasets[args.evaluate_on]
     dataset = args.evaluate_on.split("-")[0]
     dataset_type = {"nqa": "narrativeqa", "quality": "quality"}[dataset]
     if args.dataset_type != dataset_type:
