@@ -60,6 +60,7 @@ train_datasets = {
 
 evaluate_datasets = {
     "nqa": "az://mttldata/narrativeqa-sanitized",
+    "nqa-rag": "pclucas14/nqa-RAG-64",
     "wiki": "az://mttldata/wiki-top-20-sanitized",
     "wiki-rag": "az://mttldata/wiki-top-20-sanitized-rag",
     "quality": "az://mttldata/quality-sanitized",
@@ -68,6 +69,7 @@ evaluate_datasets = {
 
 evaluate_class = {
     "nqa": NQAZeroShotEvaluator,
+    "nqa-rag": NQAZeroShotEvaluator,
     "wiki": WikiMMLUEvaluator,
     "wiki-rag": WikiMMLUEvaluator,
     "quality": QualityEvaluator,
@@ -76,6 +78,7 @@ evaluate_class = {
 
 evaluate_metrics = {
     "nqa": "rougeL",
+    "nqa-rag": "rougeL",
     "wiki": "accuracy",
     "wiki-rag": "accuracy",
     "quality": "accuracy",
@@ -330,4 +333,9 @@ def train_km(training_args: KMArguments):
 
 if __name__ == "__main__":
     args = KMArguments.parse()
+
+    if os.path.exists(args.output_dir + "/last_model/mttl_weights.bin"):
+        logger.info("Model already trained, skipping")
+        exit(0)
+
     train_km(args)
