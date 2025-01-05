@@ -26,172 +26,119 @@ def handle_exit_signal(signum, frame):
 
 
 class JobQueue:
-    def __init__(self, job_file, lock_file, n_retries):
+    def __init__(self, job_file, output_dir, n_retries, seconds_to_crashed):
         self.job_file = job_file
-        self.lock_file = lock_file
-        self.queue_file = lock_file.replace(".lock", "_queue.json")
-
         self.n_retries = n_retries
-        print(f"queue file : {self.queue_file}")
-
+        self.output_dir = output_dir
         self.launcher_id = f"{random.randint(1000, 9999)}-{os.getpid()}"
-        self.heartbeat_file = os.path.join(
-            os.path.dirname(lock_file), f"launcher_{self.launcher_id}.txt"
-        )
-        with open(self.heartbeat_file, "w") as f:
-            f.write("heartbeat")
+        self.seconds_to_crashed = seconds_to_crashed
 
-    async def keep_heartbeat_alive(self):
-        while True:
-            with open(self.heartbeat_file, "a") as f:
-                f.write(f"{time.time()}\n")
-            await asyncio.sleep(30)
+        # copy the original job file to the queue file
+        # convert the queue_file to the desired format
+        data = json.load(open(self.job_file, "r"))
 
-    async def mark_launcher_as_crashed(self, dead_id):
-        async with AsyncFileLock(self.lock_file):
-            if os.path.exists(self.queue_file):
-                print(f"marking launcher {dead_id} as crashed")
-                with open(self.queue_file, "r") as f:
-                    tasks = json.load(f)
-                for task in tasks:
-                    if (
-                        task.get("launcher_id") == dead_id
-                        and task["status"] == "running"
-                    ):
-                        task["status"] = "crashed"
-                        task["launcher_id"] = None
-                with open(self.queue_file, "w") as f:
-                    json.dump(tasks, f, indent=2)
+        # If data is a dict with train/valid/test keys, flatten it.
+        if isinstance(data, dict):
+            doc_ids = []
+            for value in data.values():
+                doc_ids += value
+        else:
+            # If data is already a single list, just use it directly.
+            doc_ids = data
 
-    async def initialize_queue_file(self):
-        async with AsyncFileLock(self.lock_file):
-            if not os.path.exists(self.queue_file):
-                # copy the original job file to the queue file
-                subprocess.run(["cp", self.job_file, self.queue_file])
+        self.tasks = doc_ids
 
-                # convert the queue_file to the desired format
-                with open(self.queue_file, "r") as f:
-                    data = json.load(f)
+    def get_run_status(self, task):
+        task_output_dir = os.path.join(self.output_dir, task)
+        if os.path.exists(task_output_dir) and len(os.listdir(task_output_dir)) > 0:
+            done_file = os.path.join(task_output_dir, "done.txt")
+            if os.path.exists(done_file):
+                with open(done_file, "r") as f:
+                    lines = f.readlines()
+                    return_code = int(lines[-1].strip())
+                    if return_code == 0:
+                        return "done"
+                    else:
+                        return "failed"
+            else:
+                # check all the files in `task_output_dir`, and get a timestamp of the most recent file
+                # IF nothing happened in the last 15 minutes, we assume the job crashed
+                if time.time() - self.get_timestamp(task) > self.seconds_to_crashed:
+                    return "crashed"
 
-                # If data is a dict with train/valid/test keys, flatten it.
-                if isinstance(data, dict):
-                    doc_ids = []
-                    for value in data.values():
-                        doc_ids += value
-                else:
-                    # If data is already a single list, just use it directly.
-                    doc_ids = data
+                # If the job is still running, we assume it's still in progress
+                return "running"
+        else:
+            return "queued"
 
-                # Convert to list of {"doc_id": ..., "status": "queued", "retries": 0, "launcher_id": None}
-                tasks = [
-                    {
-                        "doc_id": doc_id,
-                        "status": "queued",
-                        "retries": 0,
-                        "launcher_id": None,
-                    }
-                    for doc_id in doc_ids
-                ]
+    def get_timestamp(self, task):
+        task_output_dir = os.path.join(self.output_dir, task)
+        files = os.listdir(task_output_dir)
 
-                with open(self.queue_file, "w") as f:
-                    json.dump(tasks, f, indent=2)
+        if len(files) > 0:
+            return max(
+                os.path.getmtime(os.path.join(task_output_dir, f)) for f in files
+            )
 
-    async def get_next_job(self):
-        async with AsyncFileLock(self.lock_file):
+    def get_next_job(self):
 
-            with open(self.queue_file, "r") as f:
-                tasks = json.load(f)
+        # shuffle the tasks
+        tasks = self.tasks.copy()
+        random.shuffle(tasks)
 
-            doc_id = None
-            # Find the first job that is still queued
+        doc_id = None
+        for task in tasks:
+            status = self.get_run_status(task)
+
+            if status == "queued":
+                doc_id = task
+                break
+
+        if doc_id is None:
+            # Let's look for crashed jobs
             for task in tasks:
-                if task["status"] == "queued":
-                    # Mark as running
-                    task["status"] = "running"
-                    task["launcher_id"] = self.launcher_id
-                    doc_id = task["doc_id"]
+                status = self.get_run_status(task)
+                if status == "crashed":
+                    doc_id = task
+                    # clean out the task directory
+                    task_output_dir = os.path.join(self.output_dir, task)
+                    timestamp = self.get_timestamp(task)
+                    # convert timestsamp to DD-MM-MM-YYYY HH:MM:SS
+                    timestamp_str = time.strftime(
+                        "%d-%m-%Y %H:%M:%S", time.localtime(timestamp)
+                    )
+                    logger.warning(f"Cleaning up crashed job {task}: {timestamp_str}")
+                    os.system(f"rm -rf {task_output_dir}")
                     break
 
-            if doc_id is None:
-                # Now, let's see if are some crashed of failed jobs we can retry
-                for task in tasks:
-                    if task["status"] == "crashed":
-                        if task["retries"] < self.n_retries:
-                            # Mark as running
-                            task["status"] = "running"
-                            task["launcher_id"] = self.launcher_id
-                            task["retries"] += 1
-                            doc_id = task["doc_id"]
-                            break
+        return doc_id
 
-            if doc_id is not None:
-                with open(self.queue_file, "w") as f:
-                    json.dump(tasks, f, indent=2)
+    def _print_progress(self):
+        all_status = {"done": 0, "failed": 0, "queued": 0, "crashed": 0, "running": 0}
 
-            return doc_id
+        for task in self.tasks:
+            status = self.get_run_status(task)
+            all_status[status] += 1
 
-    async def update_job_status(self, doc_id, new_status):
-
-        if not isinstance(doc_id, list):
-            doc_id = [doc_id]
-
-        async with AsyncFileLock(self.lock_file):
-            if not os.path.exists(self.queue_file):
-                return
-
-            with open(self.queue_file, "r") as f:
-                tasks = json.load(f)
-
-            # Update the status of the job with the given doc_id
-            for task in tasks:
-                if task["doc_id"] in doc_id:
-                    # For other statuses, set the status directly
-                    task["status"] = new_status
-                    if new_status != "running":
-                        task["launcher_id"] = None
-
-                    if len(doc_id) == 1:
-                        break
-
-            with open(self.queue_file, "w") as f:
-                json.dump(tasks, f, indent=2)
-
-    def _print_progress(self, tasks):
-        total = len(tasks)
-        done = len([task for task in tasks if task["status"] == "done"])
-        running = len([task for task in tasks if task["status"] == "running"])
-        queued = len([task for task in tasks if task["status"] == "queued"])
-        failed = len([task for task in tasks if task["status"] == "failed"])
-        crashed = len([task for task in tasks if task["status"] == "crashed"])
-        basedir = os.path.dirname(self.lock_file)
-        active_launchers_count = sum(
-            1
-            for f in os.listdir(basedir)
-            if f.startswith("launcher_") and f.endswith(".txt")
-        )
-        print(
-            f"***\t\t [{self.launcher_id}, {active_launchers_count}] Progress: {done}/{total} done, {running} running, {queued} queued, {failed} failed, {crashed} crashed\t\t***"
-        )
-
-    async def read_queue_file(self):
-        async with AsyncFileLock(self.lock_file):
-            with open(self.queue_file, "r") as f:
-                tasks = json.load(f)
-        return tasks
+        # build a single line string will all the statuses
+        status_str = " | ".join([f"{k}: {v}" for k, v in all_status.items()])
+        print(f"*** [Progress : {self.launcher_id}]   {status_str}     ***")
 
     async def print_progress(self):
+        print("starting print progress task")
         while True:
-            tasks = await self.read_queue_file()
-            self._print_progress(tasks)
+            self._print_progress()
             await asyncio.sleep(5)
 
 
-async def run_job(gpu_id, doc_id, config_file, output_dir, train_file, config_id):
+async def run_job(
+    gpu_id, doc_id, config_file, output_dir, train_script, config_id, launcher_id
+):
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = str(int(env.get("GPU_OFFSET", 0)) + int(gpu_id))
     command = [
         "python",
-        f"{train_file}.py",
+        f"{train_script}.py",
         "-c",
         config_file,
         "-k",
@@ -213,6 +160,19 @@ async def run_job(gpu_id, doc_id, config_file, output_dir, train_file, config_id
             # Stream output cancelled, just return
             return
 
+    heartbeat_file = os.path.join(output_dir, doc_id, "heartbeat.txt")
+
+    async def doc_heartbeat(launcher_id):
+        while True:
+            with open(heartbeat_file, "a") as f:
+                f.write(f"{time.time()} - {launcher_id}\n")
+            await asyncio.sleep(30)
+
+    # Make sure doc_id directory exists
+    os.makedirs(os.path.join(output_dir, doc_id), exist_ok=True)
+
+    heartbeat_task = asyncio.create_task(doc_heartbeat(launcher_id))
+
     process = await asyncio.create_subprocess_exec(
         *command,
         env=env,
@@ -232,9 +192,17 @@ async def run_job(gpu_id, doc_id, config_file, output_dir, train_file, config_id
             process.terminate()
             await process.wait()
         raise
+    finally:
+        heartbeat_task.cancel()
 
     return_code = await process.wait()
     print(f"Process finished with exit code: {return_code} for DOC_ID={doc_id}")
+
+    done_file = os.path.join(output_dir, doc_id, "done.txt")
+
+    with open(done_file, "a") as f:
+        f.write(str(return_code))
+
     return doc_id, return_code
 
 
@@ -249,7 +217,7 @@ def parse_arguments():
     )
     parser.add_argument("--config-id", type=str, required=True, help="Configuration ID")
     parser.add_argument(
-        "--train-file",
+        "--train-script",
         type=str,
         required=True,
         help="Training script filename without extension",
@@ -260,78 +228,38 @@ def parse_arguments():
         default=2,
         help="Number of times to retry a crashed job",
     )
-    args = parser.parse_args()
-    return (
-        args.num_gpus,
-        args.jobs_per_gpu,
-        args.tasks_file,
-        args.config_id,
-        args.train_file,
-        args.n_retries,
+    parser.add_argument(
+        "--seconds-to-crashed",
+        type=int,
+        default=15 * 60,
     )
-
-
-async def cleanup_dead_launchers(lock_file, job_queue):
-    basedir = os.path.dirname(lock_file)
-    while True:
-        for fn in os.listdir(basedir):
-            if fn.startswith("launcher_") and fn.endswith(".txt"):
-                path = os.path.join(basedir, fn)
-                st = os.stat(path)
-                last_touched = st.st_mtime
-                current_time = time.time()
-                if (current_time - last_touched) > 600:
-                    dead_id = fn[len("launcher_") : -4]
-                    print(
-                        f"Cleaning up heartbeat file {fn} for launcher {dead_id}. Last touched {last_touched} & current time {current_time}"
-                    )
-                    if dead_id == job_queue.launcher_id:
-                        print(f"Current launcher {dead_id} is dead !!??")
-                        continue
-
-                    await job_queue.mark_launcher_as_crashed(dead_id)
-                    new_name = f"trace_{dead_id}__{job_queue.launcher_id}.txt"
-                    os.rename(path, os.path.join(basedir, new_name))
-                    print(f"Renamed {fn} to {new_name}")
-
-        await asyncio.sleep(60)
+    args = parser.parse_args()
+    return args
 
 
 async def main():
-    num_gpus, jobs_per_gpu, job_file, config_id, train_file, n_retries = (
-        parse_arguments()
-    )
-    config_file = f"configs/{config_id}.json"
-    output_dir = f"/mnt/output/kms/{config_id}"
+    args = parse_arguments()
+    config_file = f"configs/{args.config_id}.json"
+    output_dir = f"/mnt/output/kms/{args.config_id}"
 
     # if running locally, change the output_dir
     if os.path.exists("/data/lucas"):
         output_dir = f"/data/lucas/{output_dir}"
 
     os.makedirs(output_dir, exist_ok=True)
-
-    env_vars = {
-        "WANDB_PROJECT": f"knowledge-modules-{config_id}",
-        "WANDB_MODE": "online",
-    }
-    os.environ.update(env_vars)
-
     loop = asyncio.get_running_loop()
+
     # Register signal handlers for graceful shutdown
     loop.add_signal_handler(signal.SIGTERM, handle_exit_signal, signal.SIGTERM, None)
     loop.add_signal_handler(signal.SIGINT, handle_exit_signal, signal.SIGINT, None)
+    job_queue = JobQueue(
+        args.tasks_file, output_dir, args.n_retries, args.seconds_to_crashed
+    )
 
-    lock_file = os.path.join(output_dir, "dispatcher.lock")
-
-    job_queue = JobQueue(job_file, lock_file, n_retries)
-    await job_queue.initialize_queue_file()
-
-    gpu_usage = {i: 0 for i in range(num_gpus)}
+    gpu_usage = {i: 0 for i in range(args.num_gpus)}
     running_tasks = []
 
     monitor_task = asyncio.create_task(job_queue.print_progress())
-    hearbeat_task = asyncio.create_task(job_queue.keep_heartbeat_alive())
-    cleanup_task = asyncio.create_task(cleanup_dead_launchers(lock_file, job_queue))
 
     while True:
         # If we received an exit signal (SIGTERM or SIGINT), shut down gracefully
@@ -339,8 +267,6 @@ async def main():
             logger.warning("Received exit signal, initiating graceful shutdown...")
 
             running_doc_ids = [doc_id for _, _, doc_id in running_tasks]
-            await job_queue.update_job_status(running_doc_ids, "crashed")
-
             logger.warning("All running tasks marked as crashed. Cancelling jobs.")
 
             # Cancel all running tasks and mark as crashed
@@ -348,12 +274,7 @@ async def main():
                 t.cancel()
 
             monitor_task.cancel()
-            hearbeat_task.cancel()
-            cleanup_task.cancel()
-
-            # print one more time job status
-            tasks = await job_queue.read_queue_file()
-            job_queue._print_progress(tasks)
+            job_queue._print_progress()
 
             if running_tasks:
                 # Wait for all tasks to be cancelled
@@ -368,14 +289,20 @@ async def main():
             break
 
         # Assign new jobs to free GPUs
-        for gpu_id in range(num_gpus):
-            while gpu_usage[gpu_id] < jobs_per_gpu:
-                doc_id = await job_queue.get_next_job()
+        for gpu_id in range(args.num_gpus):
+            while gpu_usage[gpu_id] < args.jobs_per_gpu:
+                doc_id = job_queue.get_next_job()
                 if not doc_id:
                     break
                 task = asyncio.create_task(
                     run_job(
-                        gpu_id, doc_id, config_file, output_dir, train_file, config_id
+                        gpu_id,
+                        doc_id,
+                        config_file,
+                        output_dir,
+                        args.train_script,
+                        args.config_id,
+                        job_queue.launcher_id,
                     )
                 )
                 running_tasks.append((task, gpu_id, doc_id))
@@ -384,6 +311,7 @@ async def main():
         if not running_tasks:
             monitor_task.cancel()
             print("No more jobs to process. Exiting.")
+            job_queue._print_progress()
             break
 
         done, pending = await asyncio.wait(
@@ -396,16 +324,6 @@ async def main():
                 if task == completed_task:
                     gpu_usage[gpu_id] -= 1
                     running_tasks.pop(idx)
-                    result_doc_id, return_code = completed_task.result()
-                    # Update job status based on return code
-                    if return_code == 0:
-                        new_status = "done"
-                    elif return_code < 0:
-                        new_status = "crashed"
-                    else:
-                        new_status = "failed"
-                    await job_queue.update_job_status(result_doc_id, new_status)
-                    break
 
 
 if __name__ == "__main__":
