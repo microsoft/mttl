@@ -11,7 +11,7 @@ from projects.kms.utils.nqa_datamodule import NQADatamodule
 
 # isort: split
 
-from mttl.logging import setup_logging
+from mttl.logging import logger, setup_logging
 from mttl.models.containers.selectors.km_selector import (
     KnowledgeExtractorSelectorConfig,
 )
@@ -30,14 +30,21 @@ from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator
 from projects.kms.utils.quality_evaluator import QualityEvaluator
 from projects.kms.utils.wiki_mmlu_evaluator import WikiMMLUEvaluator
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
 
 @dataclass
 class QAEvalArguments(KEArguments):
     ke_expert_name: str = "KE"
     split: str = "test"
+
+    def __post_init__(self):
+        if self.dataset_type == "quality" and self.split != "dev":
+            logger.warning(
+                f"Quality has not labelled test split. Overwriting `split` to valid"
+            )
+            self.split = "dev"
+            self.subsample_dev = self.subsample_test
+
+        super().__post_init__()
 
 
 def eval_qa(training_args):
