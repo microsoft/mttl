@@ -1,6 +1,7 @@
 import copy
 import json
 import logging
+import os
 from dataclasses import dataclass
 from functools import partial
 
@@ -22,7 +23,7 @@ from mttl.dist_utils import (
     is_dist_avail_and_initialized,
     is_main_process,
 )
-from mttl.logging import setup_logging
+from mttl.logging import logger, setup_logging
 from mttl.models.get_optimizer import get_optimizer_and_scheduler
 from mttl.models.utils import transfer_batch_to_device
 from projects.kms.train_km_simple import (
@@ -45,9 +46,6 @@ from mttl.models.km_model import KEMoEModel, KEMoEModelConfig
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.utils import remote_login
 from projects.kms.train_km_simple import KMArguments
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 train_datasets = {
     "nqa": "az://mttldata/narrativeqa-sanitized",
@@ -113,7 +111,11 @@ class KEArguments(MultiExpertConfig, KMArguments):
             with open(self.finetune_task_name, "r") as f:
                 split_dict = json.load(f)
 
-            tasks = split_dict["train"] + split_dict["dev"]
+            # HACK so that QAEvalArguments can still work
+            if hasattr(self, "split"):
+                tasks = split_dict[self.split]
+            else:
+                tasks = split_dict["train"] + split_dict["dev"]
             logger.info(f"Setting finetune_task_name to {tasks}")
             self.finetune_task_name = tasks
 
@@ -367,4 +369,9 @@ def train_ke(training_args):
 if __name__ == "__main__":
     args = KEArguments.parse()
     assert args.dataset_config
+
+    if os.path.exists(args.output_dir + "/last_model/mttl_weights.bin"):
+        logger.info("Model already trained, skipping")
+        exit(0)
+
     train_ke(args)
