@@ -122,7 +122,7 @@ class Evaluator(ABC):
             """<cropped for brevity>"""
 
             def default(self, obj):
-                if isinstance(obj, (np.ndarray, np.number)):
+                if isinstance(obj, (np.ndarray, np.number, torch.Tensor)):
                     return obj.tolist()
                 elif isinstance(obj, set):
                     return list(obj)
