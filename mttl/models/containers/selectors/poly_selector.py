@@ -104,12 +104,12 @@ class PolySelector(Selector):
                     )
                     if self.config.allow_unknown_tasks:
                         logger.warning(
-                            f"Tasks {not_found_tasks} not in taining tasks. Defaulting to average selector."
+                            f"Tasks {not_found_tasks} not in training tasks. Defaulting to average selector."
                         )
                         PolySelector.avg_selector_warned = True
                     else:
                         raise ValueError(
-                            f"Tasks {not_found_tasks} not in taining tasks."
+                            f"Tasks {not_found_tasks} not in training tasks."
                         )
 
                 assert not self.training, "Unknown tasks during training"
