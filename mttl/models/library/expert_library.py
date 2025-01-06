@@ -338,7 +338,7 @@ class ExpertLibrary:
                 f"Expert {expert_dump.expert_info.expert_name} already exists!"
             )
 
-        if "." in expert_dump.expert_info.expert_name:
+        if "." in str(expert_dump.expert_info.expert_name):
             raise ValueError("Expert name cannot contain dots.")
 
         # convert to metadata entry

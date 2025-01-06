@@ -46,7 +46,11 @@ class QualityDatamodule(MultiChoiceDataModule):
                     document_id = examples["document_id"][i]
                     question = examples["questions"][i][j]
                     options = examples["options"][i][j]
-                    label_index = examples["gold_label"][i][j] - 1
+                    gold_label = examples["gold_label"][i][j]
+                    if gold_label == -1:
+                        gold_label = label_index = None
+                    else:
+                        label_index = gold_label - 1
 
                     if self.config.include_context:
                         context = examples["text"][i]
@@ -95,9 +99,12 @@ class QualityDatamodule(MultiChoiceDataModule):
                     batch["document_id"].append(examples["document_id"][i])
             return batch
 
+        if self.tokenizer.chat_template is None:
+            self.tokenizer.apply_chat_template = lambda x, **kwargs: x[0]["content"]
+
         if "split" in train_dataset.features:
-            self.train_dataset, self.dev_dataset, _ = split_on_split_column(
-                train_dataset
+            self.train_dataset, self.dev_dataset, self.test_dataset = (
+                split_on_split_column(train_dataset)
             )
             self.train_dataset = self.train_dataset.map(
                 lambda examples: expand_questions(examples, self.tokenizer),
@@ -113,7 +120,13 @@ class QualityDatamodule(MultiChoiceDataModule):
                 num_proc=1,
                 remove_columns=train_dataset.column_names,
             )
-            self.test_dataset = None
+            self.test_dataset = self.test_dataset.map(
+                lambda examples: expand_questions(examples, self.tokenizer),
+                batched=True,
+                batch_size=1000,
+                num_proc=1,
+                remove_columns=train_dataset.column_names,
+            )
         else:
             train_dataset = train_dataset.map(
                 lambda examples: expand_questions(examples, self.tokenizer),

@@ -300,6 +300,7 @@ class DefaultCollator(PackedMixin):
                 return_tensors=self.return_tensors,
                 pad_to_multiple_of=self.pad_to_multiple_of,
             )
+
         label_mask = tokenized_labels["attention_mask"].bool()
         masked_labels = tokenized_labels["input_ids"].masked_fill(
             ~label_mask, self.label_pad_token_id
@@ -307,6 +308,20 @@ class DefaultCollator(PackedMixin):
         output_batch["input_ids"] = tokenized_sources["input_ids"]
         output_batch["attention_mask"] = tokenized_sources["attention_mask"]
         output_batch["labels"] = masked_labels
+
+        # NOTE: for future reference, we do not need to pass in `decoder_input_ids` if `labels` is passed.
+        # e.g. https://huggingface.co/docs/transformers/en/model_doc/t5
+        """
+        As you can see, only 2 inputs are required for the model in order to compute a loss: input_ids 
+        (which are the input_ids of the encoded input sequence) and labels (which are the input_ids of 
+        the encoded target sequence). The model will automatically create the decoder_input_ids based on 
+        the labels, by shifting them one position to the right and prepending the 
+        config.decoder_start_token_id, which for T5 is equal to 0 (i.e. the id of the pad token). 
+        Also note the task prefix: we prepend the input sequence with ‘translate English to German: ’ 
+        before encoding it. This will help in improving the performance, as this task prefix was used during 
+        T5’s pre-training.
+        """
+
         return output_batch
 
     def prepare_inputs_for_gpt_family(self, sources, labels):
@@ -492,8 +507,8 @@ class MultipleChoiceCollator(DefaultCollator):
         labels = [b["target"] for b in batch]
         label_index = [b["label_index"] for b in batch]
         task_ids = [b.get("task_id", None) for b in batch]
-        task_names = [b.get("task_name", None) for b in batch]
-        task_sources = [b.get("task_source", None) for b in batch]
+        task_names = [b.get(self.task_name_field, None) for b in batch]
+        task_sources = [b.get(self.task_source_field, None) for b in batch]
 
         if self.multisource:
             num_options = [len(t) for t in sources]

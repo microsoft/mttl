@@ -231,6 +231,8 @@ class BlobStorageEngine(BackendEngine):
         storage_account, container = repo_id.split("/")[:2]  # split at first "/"
         # The connection string is in the format:
         # https://<storage_account>.blob.core.windows.net/?<token>
+        # e.g. 'mttldata/narrativeqa-sanitized'
+        # becomes 'https://mttldata.blob.core.windows.net/', 'narrativeqa-sanitized'
         storage_uri = f"https://{storage_account}.blob.core.windows.net/"
         return storage_uri, container
 
@@ -342,8 +344,8 @@ class BlobStorageEngine(BackendEngine):
     def list_repo_files(self, repo_id):
         """List all files in a repository. The files might not be downloaded locally."""
         try:
-            container_client = self._get_container_client(repo_id)
-            return [b.name for b in container_client.list_blobs()]
+            with self._get_container_client(repo_id) as container_client:
+                return [b.name for b in container_client.list_blobs()]
         except ResourceNotFoundError as error:
             raise ValueError(f"Repository {repo_id} not found") from error
 
@@ -398,7 +400,9 @@ class BlobStorageEngine(BackendEngine):
         await asyncio.gather(*tasks)
         return filenames[0] if is_str else filenames
 
-    async def _async_upload_blob(self, repo_id, filename, buffer=None, overwrite=True):
+    async def _async_upload_blob(
+        self, repo_id, filename, buffer=None, overwrite=True, lease=None
+    ):
         storage_uri, container = self._parse_repo_id_to_storage_info(repo_id)
 
         async with self._get_blob_client(
@@ -408,11 +412,13 @@ class BlobStorageEngine(BackendEngine):
                 container=container, blob=filename
             )
             if buffer is not None:
-                await blob_client.upload_blob(buffer, overwrite=overwrite)
+                await blob_client.upload_blob(buffer, overwrite=overwrite, lease=lease)
             else:
                 local_cache = self._get_local_filepath(repo_id, filename)
                 with open(file=local_cache, mode="rb") as blob_file:
-                    await blob_client.upload_blob(blob_file, overwrite=overwrite)
+                    await blob_client.upload_blob(
+                        blob_file, overwrite=overwrite, lease=lease
+                    )
 
     async def async_download_blobs(
         self, repo_id: str, filesnames: Union[List[str], str]
@@ -427,6 +433,10 @@ class BlobStorageEngine(BackendEngine):
         return local_filenames[0] if is_str else local_filenames
 
     async def _async_download_blob(self, repo_id, filename):
+        # The connection string is in the format:
+        # https://<storage_account>.blob.core.windows.net/?<token>
+        # e.g. 'mttldata/narrativeqa-sanitized'
+        # becomes 'https://mttldata.blob.core.windows.net/', 'narrativeqa-sanitized'
         storage_uri, container = self._parse_repo_id_to_storage_info(repo_id)
         async with self._get_blob_client(
             repo_id, use_async=True
@@ -528,6 +538,25 @@ class BlobStorageEngine(BackendEngine):
                 container=container, blob=filename
             )
             await blob_client.delete_blob()
+
+    def _blob_exists(self, repo_id):
+        """When queried with a specific file, checks if file exists in the repo"""
+
+        # print(f'Checking if {repo_id} exists')
+        if len(repo_id.strip("/").split("/")) != 3:
+            message = f"`repo_id` should be in the format `storage_account/container/blob`. Got {repo_id}"
+            raise ValueError(message)
+
+        try:
+            file_name = repo_id.rstrip("/").split("/")[-1]
+            exists = file_name in self.list_repo_files(repo_id)
+            # print(f'File {file_name} exists in {repo_id}: {exists}')
+            return exists
+        except ValueError as error:
+            if "not found" in str(error):
+                return False
+            else:
+                raise error
 
 
 class LocalFSEngine(BackendEngine):

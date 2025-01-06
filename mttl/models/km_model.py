@@ -5,6 +5,7 @@ from typing import List
 import torch
 
 from mttl.logging import logger
+from mttl.models.containers.lora_containers import LoRAExpertContainer
 from mttl.models.containers.selectors.base import (
     AutoSelectorConfig,
     DefaultExpertSelectorConfig,
@@ -12,6 +13,7 @@ from mttl.models.containers.selectors.base import (
 from mttl.models.containers.selectors.km_selector import (
     KnowledgeExtractorSelectorConfig,
 )
+from mttl.models.containers.selectors.poly_selector import PolySelectorConfig
 from mttl.models.expert_model import (
     BaseExpertModel,
     ExpertModelConfig,
@@ -23,7 +25,7 @@ from mttl.models.modifiers.base import AutoModifierConfig
 
 
 @dataclass
-class KMMoEModelConfig(MoEModelConfig):
+class KEMoEModelConfig(MoEModelConfig):
     ke_expert_name: str = "KE"
     library_id: str = None
     expert_selection: List[str] = None
@@ -31,10 +33,11 @@ class KMMoEModelConfig(MoEModelConfig):
     selector_config: AutoSelectorConfig = None
     # if modifier_config is not None, then we create moe_num_experts with this modifier
     modifier_config: AutoModifierConfig = None
+    offload_experts: bool = False
 
 
-@BaseExpertModel.register("moe_km", config_cls=KMMoEModelConfig)
-class KMMoEModel(BaseExpertModel, MultiExpertMixin):
+@BaseExpertModel.register("moe_ke", config_cls=KEMoEModelConfig)
+class KEMoEModel(BaseExpertModel, MultiExpertMixin):
     """MoeModel that can accomodate a Knowledge Extractor"""
 
     def __init__(self, config, **kwargs):
@@ -75,6 +78,42 @@ class KMMoEModel(BaseExpertModel, MultiExpertMixin):
         )
         logger.info("Added KE expert: %s", self.ke_expert_name)
 
+    @property
+    def lora_containers(self):
+        return [mod for mod in self.modules() if isinstance(mod, LoRAExpertContainer)]
+
+    def forward(self, *args, **kwargs):
+        if self.config.offload_experts:
+            # get active expert numbers
+            active_experts = list(set(kwargs["task_names"] + [self.ke_expert_name]))
+            for lora_container in self.lora_containers:
+                for expert_name in lora_container.expert_names:
+                    device = "cuda" if expert_name in active_experts else "cpu"
+                    lora_container.lora_a[expert_name] = lora_container.lora_a[
+                        expert_name
+                    ].to(device)
+                    lora_container.lora_b[expert_name] = lora_container.lora_b[
+                        expert_name
+                    ].to(device)
+
+        return super().forward(*args, **kwargs)
+
+    # overwrite pytorch's `to(device)` method
+    def to(self, device):
+        if self.config.offload_experts:
+            for buf in self.model.buffers():
+                buf.data = buf.data.to(device)
+            for name, param in self.model.named_parameters():
+                if "lora_a" in name or "lora_b" in name:
+                    # logger.info(f'CPU: Offloading {name}')
+                    param.data = param.data.cpu()
+                else:
+                    logger.info(f"{device}: Offloading {name}")
+                    param.data = param.data.to(device)
+            return self
+        else:
+            return super().to(device)
+
 
 @dataclass
 class EMAExpertModelConfig(ExpertModelConfig, MoEModelConfig):
@@ -84,7 +123,7 @@ class EMAExpertModelConfig(ExpertModelConfig, MoEModelConfig):
     downscale_factor: int = 16
 
 
-@BaseExpertModel.register("ema_km", config_cls=KMMoEModelConfig)
+@BaseExpertModel.register("ema_km", config_cls=EMAExpertModelConfig)
 class EMAExpertModel(BaseExpertModel, MultiExpertMixin):
     """MoeModel that can accomodate a Knowledge Extractor"""
 
@@ -118,3 +157,22 @@ class EMAExpertModel(BaseExpertModel, MultiExpertMixin):
         for key in state_dict_keys:
             p, ema_p = expert.expert_weights[key], ema_expert.expert_weights[key]
             ema_p.data.mul_(ema_coef).add_(p.data, alpha=1 - ema_coef)
+
+
+@dataclass
+class KMMoEModelConfig(ExpertModelConfig, MoEModelConfig):
+    moe_num_experts: int = 8
+
+
+# For training models in a multitask setup
+@BaseExpertModel.register("moe_km", config_cls=KMMoEModelConfig)
+class KMMoEModel(BaseExpertModel, MultiExpertMixin):
+    def __init__(self, config, **kwargs):
+
+        assert config.selector_config is not None
+        assert isinstance(config.selector_config, PolySelectorConfig)
+
+        super().__init__(config, **kwargs)
+
+        for e_i in range(self.config.moe_num_experts):
+            self.add_empty_expert(f"e{e_i}", expert_config=config.modifier_config)

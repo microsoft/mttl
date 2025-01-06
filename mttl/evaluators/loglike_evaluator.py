@@ -105,7 +105,11 @@ class LogLikeEvaluator(Evaluator):
                 logger.info("Prediction:\n%s", labels_texts[predictions[0]])
 
             if all_accuracies:
-                pbar.set_description("Accuracy: {:.4f}".format(np.mean(all_accuracies)))
+                pbar.set_description(
+                    "Accuracy: {:.4f} \t Loss {:.4f}".format(
+                        np.mean(all_accuracies), np.mean(all_losses)
+                    )
+                )
 
         loss = distributed_mean(all_losses, device)
         all_accuracies = (

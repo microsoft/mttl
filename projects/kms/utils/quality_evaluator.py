@@ -28,7 +28,7 @@ class QualityEvaluator(LogLikeEvaluator):
     def evaluate(self, model, split=None, **kwargs):
 
         # splits in order of preference
-        splits = ["test", "dev", "train"]
+        splits = ["dev", "train", "test"]
 
         if split is not None:
             assert split in splits, f"Split {split} not found in {splits}"
@@ -45,4 +45,8 @@ class QualityEvaluator(LogLikeEvaluator):
                 if dataset and len(dataset):
                     break
 
-        return super().evaluate(model, split=split, **kwargs)
+        try:
+            return super().evaluate(model, split=split, **kwargs)
+        except Exception as e:
+            warn_once(f"Error evaluating split {split}: {e}")
+            return None
