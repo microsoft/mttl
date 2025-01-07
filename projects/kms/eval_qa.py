@@ -37,7 +37,9 @@ class QAEvalArguments(KEArguments):
     split: str = "test"
 
     def __post_init__(self):
-        if self.dataset_type == "quality" and self.split != "dev":
+        eval_on = self.evaluate_on.split("-")[0]
+        dataset_type = {"nqa": "narrativeqa", "quality": "quality"}[eval_on]
+        if dataset_type == "quality" and self.split == "test":
             logger.warning(
                 f"Quality has not labelled test split. Overwriting `split` to valid"
             )
