@@ -2,7 +2,6 @@ import argparse
 import gc
 import random
 
-import deepspeed
 import numpy as np
 import torch
 from datasets import load_dataset
