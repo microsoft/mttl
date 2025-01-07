@@ -90,6 +90,44 @@ def infogain_reward(
     return (log_probs - log_probs_no).cpu().tolist()
 
 
+@torch.no_grad()
+def logprobs_reward(
+    model, tokenizer, messages, responses, labels, temperature=DEFAULT_TEMP
+):
+    from projects.kms.deductron.data_utils import create_joint_tensors
+    from projects.kms.deductron.utils import get_logprobs
+
+    problems = [m[-1]["content"] for m in messages]
+    queries = [
+        [
+            {
+                "role": "user",
+                "content": "Read carefully the following paragraph:\n\n"
+                + problem
+                + "\n\nThese are additional considerations on the paragraph above:\n\n"
+                + response
+                + "\n\nTake into account the previous information and write a continuation to the paragraph:",
+            }
+        ]
+        for problem, response in zip(problems, responses)
+    ]
+    qr, qrm, rm = create_joint_tensors(
+        tokenizer,
+        queries,
+        labels,
+    )
+    log_probs = get_logprobs(
+        model,
+        qr,
+        qrm,
+        rm,
+        batch_size=2,
+        temperature=temperature,
+    )
+    torch.cuda.empty_cache()
+    return (log_probs).cpu().tolist()
+
+
 def summary_task_generator(prompts) -> List[Dict[str, str]]:
     return [
         [

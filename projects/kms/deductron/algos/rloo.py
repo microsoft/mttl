@@ -63,6 +63,8 @@ class RLOO(Algo):
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name,
         )
+        if not self.tokenizer.pad_token:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
 
     @rank_zero_only
     @torch.no_grad()

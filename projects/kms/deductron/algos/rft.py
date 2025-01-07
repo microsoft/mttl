@@ -50,10 +50,9 @@ class RFT(Algo):
         self.task_generator = task_generator
         self.temperature = temperature
         self.max_tokens = max_tokens
-
-        self.kl_ctl = algo_kwargs.get("kl_ctl", 0.001)
         self.stats = AccumulatorDict()
 
+        self.device = device
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name, torch_dtype=torch.bfloat16, device_map=device
         )
@@ -63,6 +62,8 @@ class RFT(Algo):
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name,
         )
+        if not self.tokenizer.pad_token:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
 
     @rank_zero_only
     @torch.no_grad()
@@ -112,6 +113,7 @@ class RFT(Algo):
         if self.reward_func == "infogain":
             from .utils import infogain_reward
 
+            self.ref_model.to(self.device)
             rewards = infogain_reward(
                 model=self.ref_model,
                 tokenizer=self.tokenizer,
@@ -119,6 +121,19 @@ class RFT(Algo):
                 responses=[r.response for r in evaluation_requests],
                 labels=[r.label for r in evaluation_requests],
             )
+            self.ref_model.to("cpu")
+        elif self.reward_func == "logprobs":
+            from .utils import logprobs_reward 
+
+            self.ref_model.to(self.device)
+            rewards = logprobs_reward(
+                model=self.ref_model,
+                tokenizer=self.tokenizer,
+                messages=[r.messages for r in evaluation_requests],
+                responses=[r.response for r in evaluation_requests],
+                labels=[r.label for r in evaluation_requests],
+            )
+            self.ref_model.to("cpu")
         else:
             raise ValueError(f"Unknown reward function: {self.reward_func}")
 
