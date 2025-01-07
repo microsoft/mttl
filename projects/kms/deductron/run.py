@@ -2,7 +2,6 @@ import argparse
 import gc
 import random
 
-import deepspeed
 import numpy as np
 import torch
 from datasets import load_dataset
@@ -266,7 +265,6 @@ if __name__ == "__main__":
         "--fast", action="store_true", help="Use fast mode (no eval on epoch 0)"
     )
     parser.add_argument("-d", type=str, help="Run description", default=None)
-    parser = deepspeed.add_config_arguments(parser)
 
     # parse known args first
     partial_args, unknown_args = parser.parse_known_args()
