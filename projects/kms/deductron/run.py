@@ -41,10 +41,6 @@ algos = {
 }
 
 
-def compute_infogain_reward(model, queries, labels, k=5, temperature=DEFAULT_TEMP):
-    pass
-
-
 def get_algo_kwargs(args, klass):
     parser = argparse.ArgumentParser()
     parser = klass.add_parser_args(parser)
@@ -79,7 +75,7 @@ def train(args):
         max_tokens=args.maxtok,
         device=ddp_state.device,
         task_generator="summary",
-        reward_function="infogain",
+        reward_function="logprobs",
         **get_algo_kwargs(args, algos[args.a]),
     )
 
@@ -155,12 +151,10 @@ def train(args):
                 total=len(dataloader),
                 desc="Offline epoch {}".format(off_epoch),
             ):
-                batch = [x.to(ddp_state.device) for x in batch]
-
                 loss_batch = 0
                 for step in range(0, batch[0].shape[0], inn_batch_size):
                     loss = algo.compute_loss(
-                        [x[step : step + inn_batch_size] for x in batch]
+                        [x[step : step + inn_batch_size].to(ddp_state.device) for x in batch]
                     )
                     loss = loss / off_batch_size
                     loss.backward()
