@@ -75,7 +75,7 @@ def infogain_reward(
         qr,
         qrm,
         rm,
-        batch_size=4,
+        batch_size=2,
         temperature=temperature,
     )
     log_probs_no = get_logprobs(
@@ -83,7 +83,7 @@ def infogain_reward(
         qr_no,
         qrm_no,
         rm_no,
-        batch_size=4,
+        batch_size=2,
         temperature=temperature,
     )
     torch.cuda.empty_cache()
@@ -97,7 +97,7 @@ def summary_task_generator(prompts) -> List[Dict[str, str]]:
                 "role": "user",
                 "content": "Read carefully the following text in order to gather all the important information.\n\n"
                 + prompt
-                + f"\n\nPlease, provide a summary of the text of no more than {len(prompt.split()) // 4} words:",
+                + f"\n\nPlease, provide a summary of the text of no more than {len(prompt) // 4} words:",
             }
         ]
         for prompt in prompts

@@ -174,6 +174,7 @@ def create_joint_tensors(
     queries: Union[List[Dict[str, str]]],
     responses: List[str],
     is_final=None,
+    max_length=4096,
 ):
     """
     For VPPO, messages can contain also a partial assistant message (the prefix so far),
@@ -221,6 +222,10 @@ def create_joint_tensors(
             padding_side="right",
         )
     )
+    if query_and_response_tensors.shape[1] > max_length:
+        query_and_response_tensors = query_and_response_tensors[:, :max_length]
+        query_and_response_mask = query_and_response_mask[:, :max_length]
+        response_mask = response_mask[:, :max_length]
     return query_and_response_tensors, query_and_response_mask, response_mask
 
 
@@ -256,7 +261,7 @@ def prepare_nqa_dataset(tokenizer, block_size=2048):
     def chunk_row(example):
         sources, labels, dids = [], [], []
         for text, did in zip(example["text"], example["document_id"]):
-            chunks = list(chunk_text(text, tokenizer, block_size=2048))
+            chunks = list(chunk_text(text, tokenizer, block_size=block_size))
             for i in range(len(chunks) - 1):
                 sources.append(chunks[i])
                 labels.append(chunks[i + 1])

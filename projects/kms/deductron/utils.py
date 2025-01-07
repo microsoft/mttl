@@ -364,6 +364,9 @@ def setup_output_directory(output_dir: str):
         os.makedirs(output_dir)
         form_code_zip(output_dir)
 
+    if ddp_state.ddp:
+        torch.distributed.barrier()
+
     return output_dir
 
 

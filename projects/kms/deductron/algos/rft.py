@@ -23,7 +23,7 @@ from projects.kms.deductron.utils import (
 from projects.kms.deductron.vllm_utils import VLLMGenerator
 
 
-class RLOO(Algo):
+class RFT(Algo):
     @classmethod
     def add_parser_args(self, parser):
         parser.add_argument(
@@ -147,36 +147,38 @@ class RLOO(Algo):
         print("Finished: ", (100.0 * np.sum(finished)) / len(finished), "%")
         print("====================================")
 
-        # rloo advantages
-        rewards = torch.tensor(rewards, dtype=torch.float32).reshape(-1, self.k)
-        max_rewards = torch.max(rewards, dim=1).values
-        baseline = (rewards.sum(1).unsqueeze(1) - rewards) / (self.k - 1)
-        advantages = (rewards - baseline).view(-1, 1)
+        # pick the best response for each query
+        rewards_t = torch.tensor(rewards, dtype=torch.float32).reshape(-1, self.k)
+        max_reward_indices = torch.argmax(rewards_t, dim=1)
+
+        best_messages, best_responses, best_rewards = [], [], []
+        rewards_flat = rewards_t.flatten()
+
+        # Collect best elements
+        for i, max_idx in enumerate(max_reward_indices.tolist()):
+            index = i * self.k + max_idx
+            best_messages.append(evaluation_requests[index].messages)
+            best_responses.append(evaluation_requests[index].response)
+            best_rewards.append(rewards_flat[index].item())
 
         print("====================================")
         print("Response 0 > Response -1:")
-        sorted_idx = torch.argsort(advantages[:5].flatten(), descending=True)
+        sorted_idx = torch.argsort(rewards_flat[:5], descending=True)
         best_idx = sorted_idx[0].item()
         last_idx = sorted_idx[-1].item()
         print(
-            f"Response 0, Reward {advantages[:5][best_idx].item():.4f}:\n{responses[best_idx]}"
+            f"Response 0, Reward {rewards_flat[best_idx].item():.4f}:\n{responses[best_idx]}"
         )
         print("------------------------------------")
         print(
-            f"Response -1, Reward {advantages[:5][last_idx].item():.4f}:\n{responses[last_idx]}"
+            f"Response -1, Reward {rewards_flat[last_idx].item():.4f}:\n{responses[last_idx]}"
         )
-
-        queries = []
-        responses = []
-        for request in evaluation_requests:
-            queries.append(request.messages)
-            responses.append(request.response)
 
         query_response_tensors, query_response_mask, response_mask = (
             create_joint_tensors(
                 self.tokenizer,
-                queries,
-                responses,
+                best_messages,
+                best_responses,
                 max_length=4096,
             )
         )
@@ -185,18 +187,7 @@ class RLOO(Algo):
             query_response_tensors,
             query_response_mask,
             response_mask,
-            advantages,
         )
-
-        ref_logprobs = get_logprobs(
-            self.ref_model,
-            query_response_tensors,
-            query_response_mask,
-            response_mask,
-            temperature=self.temperature,
-            reduction="none",
-        )
-        outputs += (ref_logprobs,)
         return outputs
 
     def compute_loss(self, episode_returns) -> float:
@@ -204,8 +195,7 @@ class RLOO(Algo):
             mb_query_response,
             mb_query_response_mask,
             mb_response_mask,
-            mb_advantage,
-        ) = episode_returns[:4]
+        ) = episode_returns[:3]
 
         with torch.autocast(
             device_type="cuda",
@@ -233,20 +223,10 @@ class RLOO(Algo):
                 shift_logits, 2, shift_labels.unsqueeze(-1)
             ).squeeze(-1)
 
-            loss = -mb_logprobs * mb_advantage
+            loss = -mb_logprobs
             loss = (loss * shift_labels_mask).sum() / shift_labels_mask.sum()
 
-            mb_ref_logprobs = episode_returns[-1]
-            mb_ref_logprobs = mb_ref_logprobs[:, : max_tokens - 1]
-            ref_kl = compute_kl_divergence(
-                mb_ref_logprobs, mb_logprobs, mask=shift_labels_mask
-            )
-            loss += self.kl_ctl * ref_kl
-            self.stats.accumulate("kl_loss", ref_kl.item())
-            del mb_ref_logprobs
-
             del (
-                mb_logprobs,
                 shift_logits,
                 shift_labels,
                 shift_labels_mask,

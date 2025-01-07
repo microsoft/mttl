@@ -9,6 +9,7 @@ from datasets import load_dataset
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm import tqdm
 
+from projects.kms.deductron.algos.rft import RFT
 from projects.kms.deductron.algos.rloo import RLOO
 from projects.kms.deductron.data_utils import (
     MultiTensorDataset,
@@ -31,9 +32,11 @@ from projects.kms.deductron.utils import (
 models = {
     "q1.5": "Qwen/Qwen2.5-1.5B-Instruct",
     "phi": "microsoft/Phi-3-mini-4k-instruct",
+    "ll8b": "meta-llama/Llama-3.1-8B-Instruct",
 }
 
 algos = {
+    "rft": RFT,
     "rloo": RLOO,
 }
 
@@ -107,7 +110,7 @@ def train(args):
     if ddp_state.is_master:
         GenerationBackend.init(args.b, model_name=models[args.m], seed=args.s)
 
-    dataset = prepare_nqa_dataset(algo.tokenizer, block_size=2048)
+    dataset = prepare_nqa_dataset(algo.tokenizer, block_size=1024)
 
     # Form a small subset of the training data for evaluation
     train_subsample = np.random.choice(len(dataset), 100, replace=False)
@@ -128,13 +131,15 @@ def train(args):
 
         # create dataset out of gathered episodes
         episode_data = algo.gather_episodes(queries_batch, labels_batch)
-        dataset = MultiTensorDataset(*episode_data)
-        dataloader = get_dataloader(dataset, off_batch_size // ddp_state.ddp_world_size)
+        epoch_dataset = MultiTensorDataset(*episode_data)
+        dataloader = get_dataloader(
+            epoch_dataset, off_batch_size // ddp_state.ddp_world_size
+        )
 
         if ddp_state.is_master:
             print("====================================")
             print("Beginning updating the policy")
-            print("Length of the dataset:", len(dataset))
+            print("Length of the dataset:", len(epoch_dataset))
 
         # offline steps
         train_iterator = iter(dataloader)
@@ -222,7 +227,7 @@ def train(args):
                 json.dump(training_stats, f)
 
             # save best model
-            if training_stats[-1]["avg_reward"] >= np.max(
+            if epoch == 0 or training_stats[-1]["avg_reward"] >= np.max(
                 [t["avg_reward"] for t in training_stats[:-1]]
             ):
                 if ddp_state.ddp:
@@ -231,7 +236,8 @@ def train(args):
                     algo.model.save_pretrained(f"{args.o}/model")
                 algo.tokenizer.save_pretrained(f"{args.o}/model")
 
-        torch.distributed.barrier()
+        if ddp_state.ddp:
+            torch.distributed.barrier()
 
     if ddp_state.is_master:
         GenerationBackend.get().shutdown()
@@ -244,7 +250,7 @@ if __name__ == "__main__":
     parser.add_argument("-s", type=int, help="Seed", default=42)
     parser.add_argument("-a", type=str, help="Algorithm")
     parser.add_argument("--lr", type=float, help="Learning rate", default=1e-5)
-    parser.add_argument("--epc", type=int, help="Number of epochs", default=10)
+    parser.add_argument("--epc", type=int, help="Number of epochs", default=20)
     parser.add_argument("--bsz", type=int, help="Online batch size", default=32)
     parser.add_argument(
         "--offepc", type=int, help="Number of offline epochs", default=4

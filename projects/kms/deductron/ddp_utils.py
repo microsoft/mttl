@@ -24,7 +24,7 @@ class DDPState:
     ddp_local_rank: int = 0
     ddp_world_size: int = 1
     is_master: bool = True
-    device: str = "cuda"
+    device: str = "cuda:0"
 
 
 ddp_state = DDPState()
@@ -44,6 +44,8 @@ def init_ddp():
         torch.cuda.set_device(ddp_state.device)
         ddp_state.is_master = ddp_state.ddp_rank == 0
     else:
+        ddp_state.device = f"cuda:0"
+        torch.cuda.set_device(ddp_state.device)
         print("Running in non-DDP mode!")
 
 
