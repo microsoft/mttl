@@ -61,6 +61,7 @@ class JobQueue:
         )
 
         # keep track of dead runners
+        self.active_launchers = {}
         self.dead_launchers = {}
 
     @property
@@ -209,6 +210,15 @@ class JobQueue:
                 )
                 task["status"] = "crashed"
                 task["launcher_id"] = None
+            elif (
+                task["status"] == "running"
+                and task["launcher_id"] not in self.active_launchers.keys()
+            ):
+                print(
+                    f"Cannot find launcher for running task {task['doc_id']}. Marking as crashed"
+                )
+                task["status"] = "crashed"
+                task["launcher_id"] = None
 
         for l_name in list(blobs_to_delete):
             print(f"Deleting dead launcher {l_name}")
@@ -226,6 +236,7 @@ class JobQueue:
                 else:
                     raise e
 
+        self.active_launchers = {}
         self.dead_launchers = {}
 
         await self.upload_queue(tasks, lease=lease)
@@ -307,6 +318,8 @@ class JobQueue:
                 if delta > 360:
                     launch_id = fn.split("launcher-")[1].split(".")[0]
                     self.dead_launchers[launch_id] = blob_client
+                else:
+                    self.active_launchers[launch_id] = blob_client
 
             print(f"Tracked {len(self.dead_launchers)} dead launchers")
 
@@ -495,6 +508,7 @@ async def main():
         if not running_tasks:
             # Before exiting, let's make sure we had a chance to cleanup dead launchers
             if job_queue.has_dead_launchers:
+                print("checking one last time for dead launchers")
                 await job_queue.update_job_status([], "")
             else:
                 monitor_task.cancel()
