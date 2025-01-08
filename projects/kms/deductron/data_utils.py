@@ -127,6 +127,8 @@ def pad_query_and_response(
     responses: list[torch.Tensor],
     padding_value: int = 0,
     padding_side: str = "right",
+    pad_to_length: int = None,
+    max_length: int = None,
 ) -> torch.Tensor:
     seq_len = max([q.shape[0] + r.shape[0] for q, r in zip(queries, responses)])
 
@@ -166,6 +168,37 @@ def pad_query_and_response(
         query_response[i][slices] = t
         query_response_mask[i][slices] = 1
         response_mask[i][response_slice] = 1
+    if pad_to_length and seq_len >= pad_to_length:
+        query_response = query_response[:, :pad_to_length]
+        query_response_mask = query_response_mask[:, :pad_to_length]
+        response_mask = response_mask[:, :pad_to_length]
+    elif pad_to_length and seq_len < pad_to_length:
+        pad_slice = torch.full(
+            (len(queries), pad_to_length - seq_len),
+            padding_value,
+            dtype=queries[0].dtype,
+            device=queries[0].device,
+        )
+        pad_slice_mask = torch.full(
+            (len(queries), pad_to_length - seq_len),
+            0,
+            dtype=queries[0].dtype,
+            device=queries[0].device,
+        )
+        if padding_side == "right":
+            query_response = torch.cat((query_response, pad_slice), 1)
+            query_response_mask = torch.cat((query_response_mask, pad_slice_mask), 1)
+            response_mask = torch.cat((response_mask, pad_slice_mask), 1)
+        elif padding_side == "left":
+            query_response = torch.cat((pad_slice, query_response), 1)
+            query_response_mask = torch.cat((pad_slice_mask, query_response_mask), 1)
+            response_mask = torch.cat((pad_slice_mask, response_mask), 1)
+    if max_length is not None:
+        return (
+            query_response[:, :max_length],
+            query_response_mask[:, :max_length],
+            response_mask[:, :max_length],
+        )
     return query_response, query_response_mask, response_mask
 
 
@@ -174,7 +207,8 @@ def create_joint_tensors(
     queries: Union[List[Dict[str, str]]],
     responses: List[str],
     is_final=None,
-    max_length=4096,
+    max_length=None,
+    pad_to_length=None,
 ):
     """
     For VPPO, messages can contain also a partial assistant message (the prefix so far),
@@ -220,12 +254,10 @@ def create_joint_tensors(
             tokenized_responses,
             tokenizer.pad_token_id,
             padding_side="right",
+            pad_to_length=pad_to_length,
+            max_length=max_length,
         )
     )
-    if query_and_response_tensors.shape[1] > max_length:
-        query_and_response_tensors = query_and_response_tensors[:, :max_length]
-        query_and_response_mask = query_and_response_mask[:, :max_length]
-        response_mask = response_mask[:, :max_length]
     return query_and_response_tensors, query_and_response_mask, response_mask
 
 
