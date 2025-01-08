@@ -127,7 +127,8 @@ def get_logprobs(
     all_logprobs = []
 
     for batch in tqdm(
-        range(0, len(query_response_mask), batch_size), desc="Gathering logprobs..."
+        range(0, len(query_response_mask), batch_size),
+        desc="Gathering logprobs...",
     ):
         with torch.autocast(
             device_type="cuda",

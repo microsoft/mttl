@@ -34,17 +34,22 @@ def infogain_reward(
 ):
     from projects.kms.deductron.data_utils import create_joint_tensors
     from projects.kms.deductron.utils import get_logprobs
+    from projects.kms.deductron.ddp_utils import ddp_state
+
+    old_device = model.device
+    model.to(ddp_state.device)
 
     problems = [m[-1]["content"] for m in messages]
     queries = [
         [
             {
                 "role": "user",
-                "content": "Read carefully the following paragraph:\n\n"
-                + problem
-                + "\n\nThese are additional considerations on the paragraph above:\n\n"
+                "content": "You will be given a paragraph and general information about it, your task is to come up with a continuation of it.\n\n"
+                + "This is general information about the document\n\n:"
                 + response
-                + "\n\nTake into account the previous information and write a continuation to the paragraph:",
+                + "\n\nThis is the paragraph:\n\n"
+                + problem
+                + "\n\nNow, write a continuation to the paragraph:",
             }
         ]
         for problem, response in zip(problems, responses)
@@ -53,12 +58,15 @@ def infogain_reward(
         [
             {
                 "role": "user",
-                "content": "Read carefully the following paragraph:\n\n"
+                "content": "You will be given a paragraph and general information about it, your task is to come up with a continuation of it.\n\n"
+                + "This is general information about the document\n\n:"
+                + "[EMPTY]"
+                + "\n\nThis is the paragraph:\n\n"
                 + problem
-                + "\n\nTake into account the previous information and write a continuation to the paragraph:",
+                + "\n\nNow, write a continuation to the paragraph:",
             }
         ]
-        for problem, response in zip(problems, responses)
+        for problem in problems
     ]
     qr, qrm, rm = create_joint_tensors(
         tokenizer,
@@ -75,7 +83,7 @@ def infogain_reward(
         qr,
         qrm,
         rm,
-        batch_size=2,
+        batch_size=4,
         temperature=temperature,
     )
     log_probs_no = get_logprobs(
@@ -83,10 +91,12 @@ def infogain_reward(
         qr_no,
         qrm_no,
         rm_no,
-        batch_size=2,
+        batch_size=4,
         temperature=temperature,
     )
+    del qr, qrm, rm, qr_no, qrm_no, rm_no
     torch.cuda.empty_cache()
+    model.to(old_device)
     return (log_probs - log_probs_no).cpu().tolist()
 
 

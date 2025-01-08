@@ -57,7 +57,7 @@ class RFT(Algo):
             model_name, torch_dtype=torch.bfloat16, device_map=device
         )
         self.ref_model = AutoModelForCausalLM.from_pretrained(
-            model_name, torch_dtype=torch.bfloat16, device_map=device
+            model_name, torch_dtype=torch.bfloat16, device_map="cpu"
         )
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name,
@@ -113,7 +113,6 @@ class RFT(Algo):
         if self.reward_func == "infogain":
             from .utils import infogain_reward
 
-            self.ref_model.to(self.device)
             rewards = infogain_reward(
                 model=self.ref_model,
                 tokenizer=self.tokenizer,
@@ -121,11 +120,9 @@ class RFT(Algo):
                 responses=[r.response for r in evaluation_requests],
                 labels=[r.label for r in evaluation_requests],
             )
-            self.ref_model.to("cpu")
         elif self.reward_func == "logprobs":
-            from .utils import logprobs_reward 
+            from .utils import logprobs_reward
 
-            self.ref_model.to(self.device)
             rewards = logprobs_reward(
                 model=self.ref_model,
                 tokenizer=self.tokenizer,
@@ -133,7 +130,6 @@ class RFT(Algo):
                 responses=[r.response for r in evaluation_requests],
                 labels=[r.label for r in evaluation_requests],
             )
-            self.ref_model.to("cpu")
         else:
             raise ValueError(f"Unknown reward function: {self.reward_func}")
 
@@ -169,7 +165,7 @@ class RFT(Algo):
         best_messages, best_responses, best_rewards = [], [], []
         rewards_flat = rewards_t.flatten()
 
-        # Collect best elements
+        # collect top-1 best element
         for i, max_idx in enumerate(max_reward_indices.tolist()):
             index = i * self.k + max_idx
             best_messages.append(evaluation_requests[index].messages)
@@ -194,7 +190,6 @@ class RFT(Algo):
                 self.tokenizer,
                 best_messages,
                 best_responses,
-                max_length=4096,
             )
         )
 
@@ -218,7 +213,6 @@ class RFT(Algo):
         ):
             # trim from mb_query_response everything that is after the last 1 token in mb_query_response_mask
             max_tokens = mb_query_response_mask.sum(dim=1).max()
-
             mb_query_response = mb_query_response[:, :max_tokens]
             mb_query_response_mask = mb_query_response_mask[:, :max_tokens]
             mb_response_mask = mb_response_mask[:, :max_tokens]
@@ -245,6 +239,9 @@ class RFT(Algo):
                 shift_logits,
                 shift_labels,
                 shift_labels_mask,
+                mb_query_response,
+                mb_query_response_mask,
+                mb_response_mask,
                 logits,
                 output,
             )
