@@ -44,6 +44,125 @@ def wait_for_server_shutdown(base_url: str, timeout: int = None) -> None:
             break
 
 
+class SGLGeneratorParallel:
+    _instance = None
+
+    @classmethod
+    def get(cls):
+        assert cls._instance is not None, "SGLGenerator not initialized"
+        return cls._instance
+
+    def __init__(
+        self,
+        model_name,
+        seed,
+    ):
+        self.model_name = model_name
+        self.seed = seed
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self.available_devices = torch.cuda.device_count()
+        self.world_size = ddp_state.ddp_world_size
+        self.rank = ddp_state.ddp_local_rank
+        self.port = str(30000 + self.rank)
+
+        free_gpus = self.available_devices - self.world_size
+        assert free_gpus > 0, "Not enough free GPUs"
+
+        self.start()
+        SGLGeneratorParallel._instance = self
+
+    def shutdown(self):
+        kill_sglang_container()
+
+        print("Process killed, waiting for shutdown.")
+        wait_for_server_shutdown(f"http://localhost:{self.port}")
+
+    def start(self):
+        import os
+        from sglang.utils import execute_shell_command, wait_for_server
+
+        hf_token = os.environ["HF_TOKEN"]
+        home = os.environ["HOME"]
+        server_process = execute_shell_command(
+            f"""docker run --gpus all \
+--shm-size 32g \
+-p {self.port}:{self.port} \
+-v {home}/.cache/huggingface:/root/.cache/huggingface \
+-v /tmp/saved_model_{self.rank}:/root/saved_model_{self.rank} \
+--ipc=host \
+--env HF_TOKEN={hf_token} \
+lmsysorg/sglang:latest \
+python3 -m sglang.launch_server \
+    --model-path {self.model_name} \
+    --host 0.0.0.0 --port {self.port} \
+    --log-level warning \
+    --base-gpu-id {self.rank + self.world_size} \
+    --random-seed {self.seed}
+"""
+        )
+
+        print("SGL Launched! Waiting for host")
+        wait_for_server(f"http://localhost:{self.port}")
+        self.process = server_process
+
+    def load_weights(self, model):
+        import requests
+
+        if hasattr(model, "module"):
+            model = model.module
+
+        model.save_pretrained(f"/tmp/saved_model_{self.rank}")
+        response = requests.post(
+            f"http://localhost:{self.port}/update_weights_from_disk",
+            json={"model_path": f"/root/saved_model_{self.rank}"},
+        )
+        assert response.json()["success"] is True
+
+    def chat(
+        self,
+        messages,
+        temperature=DEFAULT_TEMP,
+        top_p=1.0,
+        max_tokens=DEFAULT_MAX_TOKENS,
+        n=1,
+        return_finished=False,
+    ):
+        import requests
+
+        prompts = [
+            self.tokenizer.apply_chat_template(
+                message,
+                add_generation_prompt=message[-1]["role"] == "user",
+                continue_final_message=message[-1]["role"] == "assistant",
+                tokenize=False,
+            )
+            for message in messages
+        ]
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            results = list(
+                tqdm.tqdm(
+                    executor.map(
+                        partial(
+                            send_request, temperature, top_p, max_tokens, n, self.port
+                        ),
+                        prompts,
+                    ),
+                    total=len(prompts),
+                )
+            )
+
+        outputs = []
+        finished = []
+        for outputs_, finished_ in results:
+            outputs.append(outputs_)
+            finished.append(finished_)
+
+        if return_finished:
+            return outputs, finished
+        return outputs
+
+
 class SGLGenerator:
     _instance = None
 
@@ -90,13 +209,18 @@ class SGLGenerator:
 
     def start(self):
         from sglang.utils import execute_shell_command, wait_for_server
+        import os
 
+        hf_token = os.environ["HF_TOKEN"]
+        home = os.environ["HOME"]
         server_process = execute_shell_command(
             f"""docker run --gpus "device={self.devices_str}" \
 --shm-size 32g \
 -p 30000:30000 \
 -v /tmp/saved_model:/root/saved_model \
+-v {home}/.cache/huggingface:/root/.cache/huggingface \
 --ipc=host \
+--env HF_TOKEN={hf_token} \
 lmsysorg/sglang:latest \
 python3 -m sglang.launch_server \
     --model-path {self.model_name} \
@@ -148,7 +272,9 @@ python3 -m sglang.launch_server \
             results = list(
                 tqdm.tqdm(
                     executor.map(
-                        partial(send_request, temperature, top_p, max_tokens, n),
+                        partial(
+                            send_request, temperature, top_p, max_tokens, n, port=30000
+                        ),
                         prompts,
                     ),
                     total=len(prompts),
@@ -164,30 +290,6 @@ python3 -m sglang.launch_server \
         if return_finished:
             return outputs, finished
         return outputs
-
-
-def send_request(temperature, top_p, max_tokens, n, prompt):
-    import requests
-
-    response = requests.post(
-        "http://localhost:30000/generate",
-        json={
-            "text": prompt,
-            "sampling_params": {
-                "temperature": temperature,
-                "max_new_tokens": max_tokens,
-                "n": n,
-                "top_p": top_p,
-            },
-        },
-    )
-    response = response.json()
-    if type(response) != list:
-        response = [response]
-
-    outputs = [r["text"] for r in response]
-    finished = [r["meta_info"]["finish_reason"]["type"] == "stop" for r in response]
-    return outputs, finished
 
 
 def kill_sglang_container():
@@ -217,3 +319,27 @@ def kill_sglang_container():
                 print(f"Container '{container.id}' stopped gracefully.")
             except APIError as e:
                 container.kill()
+
+
+def send_request(temperature, top_p, max_tokens, n, port, prompt):
+    import requests
+
+    response = requests.post(
+        f"http://localhost:{port}/generate",
+        json={
+            "text": prompt,
+            "sampling_params": {
+                "temperature": temperature,
+                "max_new_tokens": max_tokens,
+                "n": n,
+                "top_p": top_p,
+            },
+        },
+    )
+    response = response.json()
+    if type(response) != list:
+        response = [response]
+
+    outputs = [r["text"] for r in response]
+    finished = [r["meta_info"]["finish_reason"]["type"] == "stop" for r in response]
+    return outputs, finished

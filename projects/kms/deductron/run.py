@@ -16,7 +16,7 @@ from projects.kms.deductron.data_utils import (
     get_dataloader,
     prepare_nqa_dataset,
 )
-from projects.kms.deductron.ddp_utils import ddp_state, init_ddp
+from projects.kms.deductron.ddp_utils import ddp_state, init_ddp, gather_and_concatenate
 from projects.kms.deductron.gen_utils import GenerationBackend
 from projects.kms.deductron.utils import (
     DEFAULT_MAX_TOKENS,
@@ -74,7 +74,7 @@ def train(args):
         max_tokens=args.maxtok,
         device=ddp_state.device,
         task_generator="summary",
-        reward_function="logprobs",
+        reward_func="infogain",
         **get_algo_kwargs(args, algos[args.a]),
     )
 
@@ -99,7 +99,11 @@ def train(args):
         max_steps=total_steps,
     )
     if ddp_state.ddp:
-        algo.model = DDP(algo.model, device_ids=[ddp_state.ddp_local_rank])
+        algo.model = DDP(
+            algo.model,
+            device_ids=[ddp_state.ddp_local_rank],
+            find_unused_parameters=False,
+        )
 
     # Initialize the VLLM model after the DDP initialization
     if ddp_state.is_master:
@@ -124,8 +128,10 @@ def train(args):
         queries_batch = [dataset[int(i)]["source"] for i in sample_indices]
         labels_batch = [dataset[int(i)]["label"] for i in sample_indices]
 
-        # create dataset out of gathered episodes
         episode_data = algo.gather_episodes(queries_batch, labels_batch)
+        episode_data = [data.to("cpu") for data in episode_data]
+        torch.cuda.empty_cache()
+
         epoch_dataset = MultiTensorDataset(*episode_data)
         dataloader = get_dataloader(
             epoch_dataset, off_batch_size // ddp_state.ddp_world_size
@@ -152,14 +158,16 @@ def train(args):
             ):
                 loss_batch = 0
                 for step in range(0, batch[0].shape[0], inn_batch_size):
-                    loss = algo.compute_loss(
-                        [x[step : step + inn_batch_size].to(ddp_state.device) for x in batch]
-                    )
+                    innbatch = [
+                        x[step : step + inn_batch_size].to(ddp_state.device)
+                        for x in batch
+                    ]
+                    loss = algo.compute_loss(innbatch)
                     loss = loss / off_batch_size
                     loss.backward()
                     loss_batch += loss.item()
+                    del loss, innbatch
                     torch.cuda.empty_cache()
-                    del loss
 
                 epoch_stats.accumulate("loss", loss_batch)
                 torch.nn.utils.clip_grad_norm_(algo.model.parameters(), 1.0)
