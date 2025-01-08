@@ -35,7 +35,6 @@ def init_ddp():
 
     ddp_state.ddp = int(os.environ.get("RANK", -1)) != -1  # is this a ddp run?
     if ddp_state.ddp:
-        print("Running in DDP mode!")
         ddp_state.process_group = init_process_group(group_name="main_group")
         ddp_state.ddp_rank = int(os.environ["RANK"])
         ddp_state.ddp_local_rank = int(os.environ["LOCAL_RANK"])
@@ -43,6 +42,8 @@ def init_ddp():
         ddp_state.device = f"cuda:{ddp_state.ddp_local_rank}"
         torch.cuda.set_device(ddp_state.device)
         ddp_state.is_master = ddp_state.ddp_rank == 0
+        print("Running in DDP mode!")
+        print(ddp_state)
     else:
         ddp_state.device = f"cuda:0"
         torch.cuda.set_device(ddp_state.device)
@@ -66,12 +67,13 @@ def rank_zero_only(func):
         if ddp_state.is_master:
             # Execute the function on the master process
             result = func(*args, **kwargs)
-            # Prepare empty list to receive the broadcasted object
-            obj_list = [result]
-            # Receive the broadcasted object list from master
-            broadcast_object_list(obj_list, src=0, group=ddp_state.process_group)
-            # Retrieve the result
-            result = obj_list[0]
+            if ddp_state.ddp:
+                # Prepare empty list to receive the broadcasted object
+                obj_list = [result]
+                # Receive the broadcasted object list from master
+                broadcast_object_list(obj_list, src=0, group=ddp_state.process_group)
+                # Retrieve the result
+                result = obj_list[0]
             return result
         else:
             # Prepare empty list to receive the broadcasted object
@@ -84,3 +86,16 @@ def rank_zero_only(func):
             return result  # Or some default value if needed
 
     return wrapper
+
+
+def gather_and_concatenate(data, dim=0):
+    world_size = ddp_state.ddp_world_size
+    gathered_data = []
+    for tensor in data:
+        # Prepare a list to hold one tensor per process
+        gathered_tensors = [torch.zeros_like(tensor) for _ in range(world_size)]
+        torch.distributed.all_gather(
+            gathered_tensors, tensor
+        )  # Each rank populates gathered_tensors
+        gathered_data.append(torch.cat(gathered_tensors, dim=dim))
+    return gathered_data
