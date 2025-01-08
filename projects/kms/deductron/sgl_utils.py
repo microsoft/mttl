@@ -273,7 +273,7 @@ python3 -m sglang.launch_server \
                 tqdm.tqdm(
                     executor.map(
                         partial(
-                            send_request, temperature, top_p, max_tokens, n, port=30000
+                            send_request, temperature, top_p, max_tokens, n, 30000
                         ),
                         prompts,
                     ),
