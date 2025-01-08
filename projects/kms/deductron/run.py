@@ -1,5 +1,6 @@
 import argparse
 import gc
+import math
 import random
 
 import numpy as np
@@ -73,8 +74,7 @@ def train(args):
         temperature=args.t,
         max_tokens=args.maxtok,
         device=ddp_state.device,
-        task_generator="summary",
-        reward_func="infogain",
+        task="summary_autoencoder",
         **get_algo_kwargs(args, algos[args.a]),
     )
 
@@ -91,6 +91,15 @@ def train(args):
 
     training_stats = []
     optimizer = torch.optim.AdamW(algo.model.parameters(), lr=args.lr)
+
+    if args.a == "rft":
+        total_steps = math.ceil(
+            (onl_batch_size * args.offepc * args.epc) / off_batch_size
+        )
+    elif args.a == "rloo":
+        total_steps = math.ceil(
+            (onl_batch_size * args.offepc * args.epc * args.k) / off_batch_size
+        )
     scheduler = CosineWarmupScheduler(
         optimizer,
         max_lr=args.lr,
@@ -176,16 +185,15 @@ def train(args):
                 optimizer.zero_grad()
                 torch.cuda.empty_cache()
                 global_step += 1
+                scheduler.step()
 
-            if ddp_state.is_master:
-                print(
-                    f"Epoch: {epoch}, Off Epoch: {off_epoch}, "
-                    f"Step: {global_step}, {algo.__class__.__name__}, "
-                    f"Loss: {epoch_stats.mean('loss'):.4f}, "
-                    f"Lr: {scheduler.get_last_lr()[0]:.6f}"
-                )
-
-            scheduler.step()
+                if ddp_state.is_master:
+                    print(
+                        f"Epoch: {epoch}, Off Epoch: {off_epoch}, "
+                        f"Step: {global_step}, {algo.__class__.__name__}, "
+                        f"Loss: {epoch_stats.mean('loss'):.4f}, "
+                        f"Lr: {scheduler.get_last_lr()[0]:.6f}"
+                    )
 
         del dataloader
 

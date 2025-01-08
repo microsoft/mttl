@@ -40,14 +40,12 @@ class RFT(Algo):
         k=5,
         temperature=DEFAULT_TEMP,
         max_tokens=DEFAULT_MAX_TOKENS,
-        task_generator="summary",
-        reward_func="infogain",
+        task="summary_autoencoder",
         device="cuda",
         **algo_kwargs,
     ):
         self.k = k
-        self.reward_func = reward_func
-        self.task_generator = task_generator
+        self.task = task
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.stats = AccumulatorDict()
@@ -72,14 +70,13 @@ class RFT(Algo):
         prompts: List[str],
         labels: List[str],
     ):
+        from .utils import get_task
+        from projects.kms.deductron.ddp_utils import ddp_state
+
         vllm = GenerationBackend.get()
 
-        if self.task_generator == "summary":
-            from projects.kms.deductron.algos.utils import summary_task_generator
-
-            messages = summary_task_generator(prompts)
-        else:
-            raise ValueError(f"Unknown task generator: {self.task_generator}")
+        task = get_task(self.task)
+        messages = task.encode_template(prompts)
 
         # Gather first set of completions
         responses, finished = vllm.chat(
@@ -110,28 +107,16 @@ class RFT(Algo):
                 )
             )
 
-        if self.reward_func == "infogain":
-            from .utils import infogain_reward
-
-            rewards = infogain_reward(
-                model=self.ref_model,
-                tokenizer=self.tokenizer,
-                messages=[r.messages for r in evaluation_requests],
-                responses=[r.response for r in evaluation_requests],
-                labels=[r.label for r in evaluation_requests],
-            )
-        elif self.reward_func == "logprobs":
-            from .utils import logprobs_reward
-
-            rewards = logprobs_reward(
-                model=self.ref_model,
-                tokenizer=self.tokenizer,
-                messages=[r.messages for r in evaluation_requests],
-                responses=[r.response for r in evaluation_requests],
-                labels=[r.label for r in evaluation_requests],
-            )
-        else:
-            raise ValueError(f"Unknown reward function: {self.reward_func}")
+        self.ref_model.to(ddp_state.device)
+        rewards = task.get_rewards(
+            model=self.ref_model,
+            tokenizer=self.tokenizer,
+            messages=[r.messages for r in evaluation_requests],
+            responses=[r.response for r in evaluation_requests],
+            labels=labels,
+            temperature=self.temperature,
+        )
+        self.ref_model.to("cpu")
 
         RequestUtils.populate(evaluation_requests, rewards, "reward")
 
