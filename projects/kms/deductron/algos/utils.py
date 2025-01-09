@@ -42,7 +42,6 @@ class SummaryAutoencoderTask:
     ):
         from projects.kms.deductron.data_utils import create_joint_tensors
         from projects.kms.deductron.utils import get_logprobs
-        from projects.kms.deductron.ddp_utils import ddp_state
 
         problems = [m[-1]["content"] for m in messages]
         queries = [
@@ -100,9 +99,11 @@ class SummaryAutoencoderTask:
             [
                 {
                     "role": "user",
-                    "content": "Read carefully the following text in order to gather all the important information.\n\n"
+                    "content": f"Summarize the following text in around {int(len(prompt) / 4)} words without omitting any important details.\n"
+                    + "The summary should be grammatically correct and summarize all the different sections in the text.\n"
+                    + "********** Text **********\n"
                     + prompt
-                    + f"\n\nPlease, provide a summary of the text of no more than {len(prompt) // 4} words:",
+                    + "\n********************",
                 }
             ]
             for prompt in prompts
