@@ -223,7 +223,8 @@ class SGLGenerator:
 --host 0.0.0.0 --port 30000 \
 --log-level warning \
 --random-seed {self.seed} \
---base-gpu-id {self.world_size}
+--base-gpu-id {self.world_size} \
+--dp-size 1
 """)
 
         wait_for_server("http://localhost:30000")

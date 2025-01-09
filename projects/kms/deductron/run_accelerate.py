@@ -269,8 +269,7 @@ def train(args):
                     algo.model.save_pretrained(f"{args.o}/model")
                 algo.tokenizer.save_pretrained(f"{args.o}/model")
 
-        if acc_state.is_initialized:
-            torch.distributed.barrier()
+        acc_state.wait_for_everyone()
 
     GenerationBackend.get().shutdown()
 
