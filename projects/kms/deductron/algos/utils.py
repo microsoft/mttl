@@ -78,7 +78,8 @@ class SummaryAutoencoderTask:
             temperature=temperature,
         )
         torch.cuda.empty_cache()
-        return (log_probs - log_probs_base).cpu().tolist()
+        rewards = (log_probs - log_probs_base).cpu().tolist()
+        return rewards
 
     def decode_template(self, problem: str, summary: str) -> List[Dict[str, str]]:
         return [

@@ -165,6 +165,85 @@ class SGLGeneratorParallel:
         return outputs
 
 
+class SGLGeneratorClient:
+    _instance = None
+
+    def __init__(self, model_name, **kwargs):
+        self.port = 30000
+        self.model_name = model_name
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        SGLGeneratorClient._instance = self
+
+    @state.on_main_process
+    def save_model(self, model):
+        if hasattr(model, "module"):
+            model = model.module
+
+        print("Serializing model...")
+        model.save_pretrained(f"/tmp/saved_model")
+
+    @classmethod
+    def get(cls):
+        assert cls._instance is not None, "SGLGeneratorClient not initialized"
+        return cls._instance
+
+    def load_weights(self, model):
+        import requests
+
+        self.save_model(model)
+        state.wait_for_everyone()
+
+        response = requests.post(
+            f"http://localhost:{self.port}/update_weights_from_disk",
+            json={"model_path": f"/tmp/saved_model"},
+        )
+        assert response.json()["success"] is True
+
+    def chat(
+        self,
+        messages,
+        temperature=DEFAULT_TEMP,
+        top_p=1.0,
+        max_tokens=DEFAULT_MAX_TOKENS,
+        n=1,
+        return_finished=False,
+    ):
+        import requests
+
+        prompts = [
+            self.tokenizer.apply_chat_template(
+                message,
+                add_generation_prompt=message[-1]["role"] == "user",
+                continue_final_message=message[-1]["role"] == "assistant",
+                tokenize=False,
+            )
+            for message in messages
+        ]
+
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            results = list(
+                tqdm.tqdm(
+                    executor.map(
+                        partial(
+                            send_request, temperature, top_p, max_tokens, n, self.port
+                        ),
+                        prompts,
+                    ),
+                    total=len(prompts),
+                )
+            )
+
+        outputs = []
+        finished = []
+        for outputs_, finished_ in results:
+            outputs.append(outputs_)
+            finished.append(finished_)
+
+        if return_finished:
+            return outputs, finished
+        return outputs
+
+
 class SGLGenerator:
     _instance = None
 

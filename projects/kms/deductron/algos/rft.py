@@ -7,7 +7,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from projects.kms.deductron.algos.algo import Algo, Request, RequestUtils
 from projects.kms.deductron.data_utils import create_joint_tensors
-from projects.kms.deductron.ddp_utils import rank_zero_only
 from projects.kms.deductron.gen_utils import GenerationBackend
 from projects.kms.deductron.sgl_utils import SGLGenerator
 from projects.kms.deductron.utils import (
@@ -67,7 +66,6 @@ class RFT(Algo):
         if not self.tokenizer.pad_token:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-    @rank_zero_only
     @torch.no_grad()
     def gather_episodes(
         self,
@@ -150,19 +148,28 @@ class RFT(Algo):
         # pick the best response for each query
         rewards = torch.tensor(rewards, dtype=torch.float32).reshape(-1, self.k)
         max_reward = torch.argmax(rewards, dim=1)
+        for i, idx in enumerate(max_reward):
+            if rewards[i, idx] > 0:
+                max_reward[i] = (i * self.k + idx)
+            else:
+                max_reward[i] = -1
+        max_reward = max_reward.tolist()
 
         print("====================================")
         print("Response 0 > Response -1:")
-        sorted_idx = torch.argsort(advantages.flatten()[:5], descending=True)
+        sorted_idx = torch.argsort(rewards.flatten()[:5], descending=True)
         best_idx = sorted_idx[0].item()
         last_idx = sorted_idx[-1].item()
         print(
-            f"Response 0, Reward {advantages[best_idx].item():.4f}:\n{responses[best_idx]}"
+            f"Response 0, Reward {rewards[best_idx].item():.4f}:\n{responses[best_idx]}"
         )
         print("------------------------------------")
         print(
-            f"Response -1, Reward {advantages[last_idx].item():.4f}:\n{responses[last_idx]}"
+            f"Response -1, Reward {rewards[last_idx].item():.4f}:\n{responses[last_idx]}"
         )
+
+        messages = [messages[idx] for idx in max_reward if idx != -1]
+        responses = [responses[idx] for idx in max_reward if idx != -1]
 
         query_response_tensors, query_response_mask, response_mask = (
             create_joint_tensors(
@@ -177,7 +184,6 @@ class RFT(Algo):
             query_response_tensors,
             query_response_mask,
             response_mask,
-            advantages,
         )
         return outputs
 
@@ -186,7 +192,6 @@ class RFT(Algo):
             mb_query_response,
             mb_query_response_mask,
             mb_response_mask,
-            mb_rewards,
         ) = episode_returns
 
         # trim from mb_query_response everything that is after the last 1 token in mb_query_response_mask
@@ -210,7 +215,7 @@ class RFT(Algo):
             -1
         )
 
-        loss = -mb_logprobs * mb_rewards
+        loss = -mb_logprobs
         loss = (loss * shift_labels_mask).sum() / shift_labels_mask.sum()
 
         del (

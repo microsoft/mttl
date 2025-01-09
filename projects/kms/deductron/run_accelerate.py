@@ -280,7 +280,7 @@ if __name__ == "__main__":
     parser.add_argument("-o", type=str, help="Output directory")
     parser.add_argument("-s", type=int, help="Seed", default=42)
     parser.add_argument("-a", type=str, help="Algorithm")
-    parser.add_argument("--lr", type=float, help="Learning rate", default=1e-5)
+    parser.add_argument("--lr", type=float, help="Learning rate", default=1e-6)
     parser.add_argument("--epc", type=int, help="Number of epochs", default=20)
     parser.add_argument("--bsz", type=int, help="Online batch size", default=32)
     parser.add_argument(

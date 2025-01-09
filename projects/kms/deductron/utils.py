@@ -124,11 +124,15 @@ def get_logprobs(
     reduction="mean",
     temperature=DEFAULT_TEMP,
 ):
+    from accelerate.state import PartialState
+
+    acc_state = PartialState()
     all_logprobs = []
 
     for batch in tqdm(
         range(0, len(query_response_mask), batch_size),
         desc="Gathering logprobs...",
+        disable=not acc_state.is_main_process
     ):
         with torch.autocast(
             device_type="cuda",
