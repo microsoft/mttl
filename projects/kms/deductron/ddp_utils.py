@@ -64,14 +64,18 @@ def rank_zero_only(func):
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        if ddp_state.is_master:
+        from accelerate.state import AcceleratorState
+        from accelerate.utils import broadcast_object_list
+
+        acc_state = AcceleratorState()
+        if acc_state.is_main_process:
             # Execute the function on the master process
             result = func(*args, **kwargs)
-            if ddp_state.ddp:
+            if acc_state.initialized:
                 # Prepare empty list to receive the broadcasted object
                 obj_list = [result]
                 # Receive the broadcasted object list from master
-                broadcast_object_list(obj_list, src=0, group=ddp_state.process_group)
+                broadcast_object_list(obj_list)
                 # Retrieve the result
                 result = obj_list[0]
             return result
@@ -79,7 +83,7 @@ def rank_zero_only(func):
             # Prepare empty list to receive the broadcasted object
             obj_list = [None]
             # Receive the broadcasted object list from master
-            broadcast_object_list(obj_list, src=0, group=ddp_state.process_group)
+            broadcast_object_list(obj_list)
             # Retrieve the result
             result = obj_list[0]
             # Optionally, perform alternative actions or simply pass
@@ -89,7 +93,11 @@ def rank_zero_only(func):
 
 
 def gather_and_concatenate(data, dim=0):
-    world_size = ddp_state.ddp_world_size
+    from accelerate.state import AcceleratorState
+    
+    state = AcceleratorState()
+    world_size = state.num_processes
+
     gathered_data = []
     for tensor in data:
         # Prepare a list to hold one tensor per process

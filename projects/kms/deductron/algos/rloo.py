@@ -19,6 +19,8 @@ from projects.kms.deductron.utils import (
     get_logprobs,
     print_metrics,
     repeat,
+    get_shifted_logprobs,
+    masked_mean,
 )
 from projects.kms.deductron.vllm_utils import VLLMGenerator
 
@@ -56,7 +58,7 @@ class RLOO(Algo):
             model_name, torch_dtype=torch.bfloat16, device_map=device
         )
         self.ref_model = AutoModelForCausalLM.from_pretrained(
-            model_name, torch_dtype=torch.bfloat16, device_map=device
+            model_name, torch_dtype=torch.bfloat16, device_map="cpu"
         )
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name,
@@ -64,7 +66,6 @@ class RLOO(Algo):
         if not self.tokenizer.pad_token:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-    @rank_zero_only
     @torch.no_grad()
     def gather_episodes(
         self,
@@ -72,9 +73,10 @@ class RLOO(Algo):
         labels: List[str],
     ):
         from .utils import get_task
-        from projects.kms.deductron.ddp_utils import ddp_state
+        from accelerate.state import AcceleratorState
 
-        self.ref_model.to(ddp_state.device)
+        acc_state = AcceleratorState()
+        self.ref_model.to(acc_state.device)
 
         vllm = GenerationBackend.get()
 
@@ -133,7 +135,7 @@ class RLOO(Algo):
         baseline = (rewards.sum(1).unsqueeze(1) - rewards) / (self.k - 1)
         advantages = (rewards - baseline).view(-1, 1)
 
-        if ddp_state.is_master:
+        if acc_state.is_main_process:
             print("====================================")
             print("Optimistic reward:", max_reward)
             print("Average reward:", avg_reward)
@@ -164,18 +166,21 @@ class RLOO(Algo):
                 f"Response -1, Reward {advantages[:5][last_idx].item():.4f}:\n{responses[last_idx]}"
             )
 
-        queries = []
-        responses = []
-        for request in evaluation_requests:
-            queries.append(request.messages)
-            responses.append(request.response)
-
         query_response_tensors, query_response_mask, response_mask = (
-            create_joint_tensors(self.tokenizer, queries, responses, max_length=4096)
+            create_joint_tensors(self.tokenizer, messages, responses, pad_to_length=4096)
         )
 
         ref_logprobs = get_logprobs(
             self.ref_model,
+            query_response_tensors,
+            query_response_mask,
+            response_mask,
+            temperature=self.temperature,
+            reduction="none",
+        )
+
+        old_logprobs = get_logprobs(
+            self.model,
             query_response_tensors,
             query_response_mask,
             response_mask,
@@ -188,7 +193,8 @@ class RLOO(Algo):
             query_response_mask,
             response_mask,
             advantages,
-            ref_logprobs
+            ref_logprobs,
+            old_logprobs,
         )
 
         self.ref_model.to("cpu")
@@ -201,53 +207,44 @@ class RLOO(Algo):
             mb_response_mask,
             mb_advantage,
             mb_ref_logprobs,
+            mb_old_logprobs,
         ) = episode_returns
 
-        with torch.autocast(
-            device_type="cuda",
-            dtype=torch.bfloat16,
-        ):
-            # trim from mb_query_response everything that is after the last 1 token in mb_query_response_mask
-            max_tokens = mb_query_response_mask.sum(dim=1).max()
+        # trim from mb_query_response everything that is after the last 1 token in mb_query_response_mask
+        max_tokens = mb_query_response_mask.sum(dim=1).max()
+        mb_query_response = mb_query_response[:, :max_tokens]
+        mb_query_response_mask = mb_query_response_mask[:, :max_tokens]
+        mb_response_mask = mb_response_mask[:, :max_tokens]
+        mb_ref_logprobs = mb_ref_logprobs[:, : max_tokens - 1]
+        mb_old_logprobs = mb_old_logprobs[:, : max_tokens - 1]
 
-            mb_query_response = mb_query_response[:, :max_tokens]
-            mb_query_response_mask = mb_query_response_mask[:, :max_tokens]
-            mb_response_mask = mb_response_mask[:, :max_tokens]
+        output = self.model(
+            input_ids=mb_query_response,
+            attention_mask=mb_query_response_mask,
+            return_dict=True,
+        )
 
-            output = self.model(
-                input_ids=mb_query_response,
-                attention_mask=mb_query_response_mask,
-                return_dict=True,
-            )
-            logits = output.logits / (self.temperature + 1e-7)
-            logits = torch.nn.functional.log_softmax(logits, dim=-1)
+        mb_logprobs = get_shifted_logprobs(
+            output.logits,
+            mb_query_response,
+            mb_response_mask,
+            temperature=self.temperature,
+        )
 
-            shift_logits = logits[:, :-1]
-            shift_labels = mb_query_response[:, 1:]
-            shift_labels_mask = mb_response_mask[:, 1:]
-            mb_logprobs = torch.gather(
-                shift_logits, 2, shift_labels.unsqueeze(-1)
-            ).squeeze(-1)
+        # Compute the PPO-clip loss
+        action_mask = mb_response_mask[:, 1:]
+        log_ratio = (mb_logprobs - mb_old_logprobs) * action_mask
+        ratio = torch.exp(log_ratio)
 
-            loss = -mb_logprobs * mb_advantage
-            loss = (loss * shift_labels_mask).sum() / shift_labels_mask.sum()
+        pg_losses1 = -mb_advantage.unsqueeze(1) * ratio
+        pg_losses2 = -mb_advantage.unsqueeze(1) * torch.clamp(ratio, 1.0, 1.0)
+        pg_losses = torch.max(pg_losses1, pg_losses2)
+        pg_loss = masked_mean(pg_losses, action_mask)
 
-            mb_ref_logprobs = episode_returns[-1]
-            mb_ref_logprobs = mb_ref_logprobs[:, : max_tokens - 1]
-            ref_kl = compute_kl_divergence(
-                mb_ref_logprobs, mb_logprobs, mask=shift_labels_mask
-            )
-            loss += self.kl_ctl * ref_kl
-            self.stats.accumulate("kl_loss", ref_kl.item())
+        kl_loss = compute_kl_divergence(
+            mb_ref_logprobs, mb_logprobs, action_mask, kl_min=0, kl_max=10
+        )
+        pg_loss = pg_loss + self.kl_ctl * kl_loss
 
-            del (
-                mb_ref_logprobs,
-                mb_logprobs,
-                shift_logits,
-                shift_labels,
-                shift_labels_mask,
-                logits,
-                output,
-            )
-            torch.cuda.empty_cache()
-            return loss
+        self.stats.accumulate("kl_loss", kl_loss.item())
+        return pg_loss

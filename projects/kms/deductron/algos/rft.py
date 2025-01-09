@@ -21,6 +21,7 @@ from projects.kms.deductron.utils import (
     repeat,
 )
 from projects.kms.deductron.vllm_utils import VLLMGenerator
+from accelerate.state import AcceleratorState
 
 
 class RFT(Algo):
@@ -48,11 +49,14 @@ class RFT(Algo):
         self.task = task
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.acc_state = AcceleratorState()
         self.stats = AccumulatorDict()
 
         self.device = device
         self.model = AutoModelForCausalLM.from_pretrained(
-            model_name, torch_dtype=torch.bfloat16, device_map=device
+            model_name,
+            torch_dtype=torch.bfloat16,
+            device_map=device,
         )
         self.ref_model = AutoModelForCausalLM.from_pretrained(
             model_name, torch_dtype=torch.bfloat16, device_map="cpu"
@@ -71,7 +75,6 @@ class RFT(Algo):
         labels: List[str],
     ):
         from .utils import get_task
-        from projects.kms.deductron.ddp_utils import ddp_state
 
         vllm = GenerationBackend.get()
 
@@ -107,7 +110,7 @@ class RFT(Algo):
                 )
             )
 
-        self.ref_model.to(ddp_state.device)
+        self.ref_model.to(self.acc_state.device)
         rewards = task.get_rewards(
             model=self.ref_model,
             tokenizer=self.tokenizer,
@@ -117,6 +120,7 @@ class RFT(Algo):
             temperature=self.temperature,
         )
         self.ref_model.to("cpu")
+        torch.cuda.empty_cache()
 
         RequestUtils.populate(evaluation_requests, rewards, "reward")
 
@@ -144,37 +148,28 @@ class RFT(Algo):
         print("====================================")
 
         # pick the best response for each query
-        rewards_t = torch.tensor(rewards, dtype=torch.float32).reshape(-1, self.k)
-        max_reward_indices = torch.argmax(rewards_t, dim=1)
-
-        best_messages, best_responses, best_rewards = [], [], []
-        rewards_flat = rewards_t.flatten()
-
-        # collect top-1 best element
-        for i, max_idx in enumerate(max_reward_indices.tolist()):
-            index = i * self.k + max_idx
-            best_messages.append(evaluation_requests[index].messages)
-            best_responses.append(evaluation_requests[index].response)
-            best_rewards.append(rewards_flat[index].item())
+        rewards = torch.tensor(rewards, dtype=torch.float32).reshape(-1, self.k)
+        max_reward = torch.argmax(rewards, dim=1)
 
         print("====================================")
         print("Response 0 > Response -1:")
-        sorted_idx = torch.argsort(rewards_flat[:5], descending=True)
+        sorted_idx = torch.argsort(advantages.flatten()[:5], descending=True)
         best_idx = sorted_idx[0].item()
         last_idx = sorted_idx[-1].item()
         print(
-            f"Response 0, Reward {rewards_flat[best_idx].item():.4f}:\n{responses[best_idx]}"
+            f"Response 0, Reward {advantages[best_idx].item():.4f}:\n{responses[best_idx]}"
         )
         print("------------------------------------")
         print(
-            f"Response -1, Reward {rewards_flat[last_idx].item():.4f}:\n{responses[last_idx]}"
+            f"Response -1, Reward {advantages[last_idx].item():.4f}:\n{responses[last_idx]}"
         )
 
         query_response_tensors, query_response_mask, response_mask = (
             create_joint_tensors(
                 self.tokenizer,
-                best_messages,
-                best_responses,
+                messages,
+                responses,
+                max_length=4096,
             )
         )
 
@@ -182,6 +177,7 @@ class RFT(Algo):
             query_response_tensors,
             query_response_mask,
             response_mask,
+            advantages,
         )
         return outputs
 
@@ -190,45 +186,42 @@ class RFT(Algo):
             mb_query_response,
             mb_query_response_mask,
             mb_response_mask,
-        ) = episode_returns[:3]
+            mb_rewards,
+        ) = episode_returns
 
-        with torch.autocast(
-            device_type="cuda",
-            dtype=torch.bfloat16,
-        ):
-            # trim from mb_query_response everything that is after the last 1 token in mb_query_response_mask
-            max_tokens = mb_query_response_mask.sum(dim=1).max()
-            mb_query_response = mb_query_response[:, :max_tokens]
-            mb_query_response_mask = mb_query_response_mask[:, :max_tokens]
-            mb_response_mask = mb_response_mask[:, :max_tokens]
+        # trim from mb_query_response everything that is after the last 1 token in mb_query_response_mask
+        max_tokens = mb_query_response_mask.sum(dim=1).max()
+        mb_query_response = mb_query_response[:, :max_tokens]
+        mb_query_response_mask = mb_query_response_mask[:, :max_tokens]
+        mb_response_mask = mb_response_mask[:, :max_tokens]
 
-            output = self.model(
-                input_ids=mb_query_response,
-                attention_mask=mb_query_response_mask,
-                return_dict=True,
-            )
-            logits = output.logits / (self.temperature + 1e-7)
-            logits = torch.nn.functional.log_softmax(logits, dim=-1)
+        output = self.model(
+            input_ids=mb_query_response,
+            attention_mask=mb_query_response_mask,
+            return_dict=True,
+        )
+        logits = output.logits / (self.temperature + 1e-7)
+        logits = torch.nn.functional.log_softmax(logits, dim=-1)
 
-            shift_logits = logits[:, :-1]
-            shift_labels = mb_query_response[:, 1:]
-            shift_labels_mask = mb_response_mask[:, 1:]
-            mb_logprobs = torch.gather(
-                shift_logits, 2, shift_labels.unsqueeze(-1)
-            ).squeeze(-1)
+        shift_logits = logits[:, :-1]
+        shift_labels = mb_query_response[:, 1:]
+        shift_labels_mask = mb_response_mask[:, 1:]
+        mb_logprobs = torch.gather(shift_logits, 2, shift_labels.unsqueeze(-1)).squeeze(
+            -1
+        )
 
-            loss = -mb_logprobs
-            loss = (loss * shift_labels_mask).sum() / shift_labels_mask.sum()
+        loss = -mb_logprobs * mb_rewards
+        loss = (loss * shift_labels_mask).sum() / shift_labels_mask.sum()
 
-            del (
-                shift_logits,
-                shift_labels,
-                shift_labels_mask,
-                mb_query_response,
-                mb_query_response_mask,
-                mb_response_mask,
-                logits,
-                output,
-            )
-            torch.cuda.empty_cache()
-            return loss
+        del (
+            shift_logits,
+            shift_labels,
+            shift_labels_mask,
+            mb_query_response,
+            mb_query_response_mask,
+            mb_response_mask,
+            logits,
+            output,
+        )
+        torch.cuda.empty_cache()
+        return loss

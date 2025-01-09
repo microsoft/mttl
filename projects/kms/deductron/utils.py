@@ -10,7 +10,7 @@ from torch.optim.lr_scheduler import _LRScheduler
 from tqdm import tqdm
 
 DEFAULT_TEMP = 0.5
-DEFAULT_MAX_TOKENS = 1024
+DEFAULT_MAX_TOKENS = 768
 
 
 class AccumulatorDict:
