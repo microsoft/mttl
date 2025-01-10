@@ -116,9 +116,7 @@ class RLOO(Algo):
         rewards = task.get_rewards(
             model=self.ref_model,
             tokenizer=self.tokenizer,
-            messages=[r.messages for r in evaluation_requests],
-            responses=[r.response for r in evaluation_requests],
-            labels=labels,
+            requests=evaluation_requests,
             temperature=self.temperature,
         )
 
@@ -146,9 +144,50 @@ class RLOO(Algo):
         self.stats.accumulate("max_reward", max_reward)
         self.stats.accumulate("finished", (100.0 * np.sum(finished) / len(finished)))
 
-        # rloo advantages
+        query_response_tensors, query_response_mask, response_mask = (
+            create_joint_tensors(
+                self.tokenizer,
+                messages,
+                responses,
+                finished,
+                max_length=4096,
+                pad_to_length=4096,
+            )
+        )
+
+        ref_logprobs = get_logprobs(
+            self.ref_model,
+            query_response_tensors,
+            query_response_mask,
+            response_mask,
+            temperature=self.temperature,
+            reduction="none",
+        )
+        self.ref_model.to("cpu")
+
+        self.model.eval()
+        old_logprobs = get_logprobs(
+            self.model,
+            query_response_tensors,
+            query_response_mask,
+            response_mask,
+            temperature=self.temperature,
+            reduction="none",
+        )
+        self.model.train()
+
+        # trl adds this to the rewards
+        action_mask = response_mask[:, 1:]
+        kl = old_logprobs - ref_logprobs
+        kl_loss = (kl * action_mask).sum(1)
+        kl_rewards = (-kl_loss).tolist()
+
+        self.stats.accumulate('kl_loss', kl_loss.mean().item())
+        self.stats.accumulate('kl_reward', np.mean(kl_rewards))
+
+        rewards = [r + self.kl_ctl * nr for r, nr in zip(rewards, kl_rewards)]
         rewards = torch.tensor(rewards, dtype=torch.float32).view(-1, self.k)
-        baseline = (rewards.sum(1) - rewards) / (self.k - 1)
+        baseline = (rewards.sum(1).unsqueeze(-1) - rewards) / (self.k - 1)
         advantages = (rewards - baseline).view(-1, 1)
 
         if acc_state.is_main_process:
@@ -182,42 +221,11 @@ class RLOO(Algo):
                 f"Response -1, Reward {rewards[:5].flatten()[last_idx].item():.4f}:\n{responses[last_idx]}"
             )
 
-        query_response_tensors, query_response_mask, response_mask = (
-            create_joint_tensors(
-                self.tokenizer,
-                messages,
-                responses,
-                max_length=4096,
-            )
-        )
-
-        ref_logprobs = get_logprobs(
-            self.ref_model,
-            query_response_tensors,
-            query_response_mask,
-            response_mask,
-            temperature=self.temperature,
-            reduction="none",
-        )
-        self.ref_model.to("cpu")
-
-        self.model.eval()
-        old_logprobs = get_logprobs(
-            self.model,
-            query_response_tensors,
-            query_response_mask,
-            response_mask,
-            temperature=self.temperature,
-            reduction="none",
-        )
-        self.model.train()
-
         outputs = (
             query_response_tensors,
             query_response_mask,
             response_mask,
             advantages,
-            ref_logprobs,
             old_logprobs,
         )
         return outputs
@@ -228,7 +236,6 @@ class RLOO(Algo):
             mb_query_response_mask,
             mb_response_mask,
             mb_advantage,
-            mb_ref_logprobs,
             mb_old_logprobs,
         ) = episode_returns
 
@@ -237,7 +244,6 @@ class RLOO(Algo):
         mb_query_response = mb_query_response[:, :max_tokens]
         mb_query_response_mask = mb_query_response_mask[:, :max_tokens]
         mb_response_mask = mb_response_mask[:, :max_tokens]
-        mb_ref_logprobs = mb_ref_logprobs[:, : max_tokens - 1]
         mb_old_logprobs = mb_old_logprobs[:, : max_tokens - 1]
 
         output = self.model(
@@ -262,11 +268,4 @@ class RLOO(Algo):
         pg_losses2 = -mb_advantage * torch.clamp(ratio, 1.2, 1.2)
         pg_losses = torch.max(pg_losses1, pg_losses2)
         pg_loss = masked_mean(pg_losses, action_mask)
-
-        kl_loss = compute_kl_divergence(
-            mb_ref_logprobs, mb_logprobs, action_mask, kl_min=0, kl_max=10
-        )
-        pg_loss = pg_loss + self.kl_ctl * kl_loss
-
-        self.stats.accumulate("kl_loss", kl_loss.item())
         return pg_loss

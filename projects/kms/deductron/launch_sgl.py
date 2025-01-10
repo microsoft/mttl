@@ -74,7 +74,7 @@ class SGLGenerator:
             f"""python3 -m sglang.launch_server \
 --model-path {self.model_name} \
 --host 0.0.0.0 --port 30000 \
---log-level info \
+--log-level warning \
 --random-seed {self.seed} \
 --base-gpu-id 2 \
 --dp-size {self.dp_size}
@@ -114,6 +114,7 @@ def kill_sglang_container():
                 container.kill()
 
 
-SGLGenerator(model_name="meta-llama/Llama-3.1-8B-Instruct", seed=42)
-while True:
-    time.sleep(5)
+if __name__ == '__main__':
+    SGLGenerator(model_name="meta-llama/Llama-3.1-8B-Instruct", seed=42)
+    while True:
+        time.sleep(5)

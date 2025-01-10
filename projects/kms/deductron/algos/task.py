@@ -31,6 +31,8 @@ from projects.kms.deductron.utils import DEFAULT_TEMP
 def get_task(task_name: str):
     if task_name == "summary_autoencoder":
         task = SummaryAutoencoderTask()
+    elif task_name == "summary_next_chunk_prediction":
+        task = SummaryNextChunkPredictionTask()
     else:
         raise ValueError("Task not known!")
     return task
@@ -119,66 +121,85 @@ class SummaryAutoencoderTask:
         ]
 
 
-def next_chunk_prediction_task(problem, response):
-    return [
-        {
-            "role": "user",
-            "content": "You will be given a paragraph and general information about it, your task is to come up with a continuation of it.\n\n"
-            + "This is general information about the paragraph\n\n:"
-            + response
-            + "\n\nThis is the paragraph:\n\n"
-            + problem
-            + "\n\nNow, utilize your best judgment and write a continuation to the paragraph:",
-        }
-    ]
+class SummaryNextChunkPredictionTask:
+    def get_rewards(self, model, tokenizer, requests, temperature=DEFAULT_TEMP):
+        from projects.kms.deductron.data_utils import create_joint_tensors
+        from projects.kms.deductron.utils import get_logprobs
 
+        messages = [r.messages for r in requests]
+        responses = [r.response for r in requests]
+        labels = [r.label for r in requests]
+        finished = [r.finished for r in requests]
 
-@torch.no_grad()
-def infogain_reward(
-    model, tokenizer, messages, responses, labels, temperature=DEFAULT_TEMP
-):
-    from projects.kms.deductron.data_utils import create_joint_tensors
-    from projects.kms.deductron.utils import get_logprobs
-    from projects.kms.deductron.ddp_utils import ddp_state
+        problems = [m[-1]["content"] for m in messages]
+        queries = [
+            self.decode_template(problem, response, label)
+            for problem, response, label in zip(problems, responses, labels)
+        ]
+        # for auto-encoding, we are trying to reconstruct the paragraph itself!
+        qr, qrm, rm = create_joint_tensors(
+            tokenizer, queries, problems, finished, max_length=4096, pad_to_length=4096
+        )
+        log_probs = get_logprobs(
+            model,
+            qr,
+            qrm,
+            rm,
+            batch_size=2,
+            temperature=temperature,
+        )
+        del qr, qrm, rm
+        torch.cuda.empty_cache()
+        queries_empty = [
+            self.decode_template(problem, "[EMPTY]") for problem in problems
+        ]
+        # for auto-encoding, we are trying to reconstruct the paragraph itself!
+        qr, qrm, rm = create_joint_tensors(
+            tokenizer,
+            queries_empty,
+            problems,
+            finished,
+            max_length=4096,
+            pad_to_length=4096,
+        )
+        log_probs_base = get_logprobs(
+            model,
+            qr,
+            qrm,
+            rm,
+            batch_size=2,
+            temperature=temperature,
+        )
+        del qr, qrm, rm
+        torch.cuda.empty_cache()
+        rewards = (log_probs - log_probs_base).cpu().tolist()
+        return rewards
 
-    old_device = model.device
-    model.to(ddp_state.device)
+    def decode_template(problem, response, label):
+        return [
+            {
+                "role": "user",
+                "content": "You are provided with a summary created from a hidden paragraph of text, and the last few sentences of the paragraph to give you a rough idea."
+                + " Your task is to write a continuation of the hidden paragraph from the information contained in the summary.\n"
+                + "This is the summary of the paragraph\n\n:"
+                + response
+                + "\n\nThese are the last few sentences of the paragraph:"
+                + "\n".join(problem.split("\n")[-10:])
+                + "\n\nNow, utilize your best judgment and try to write the continuation of the hidden paragraph:",
+            }
+        ]
 
-    problems = [m[-1]["content"] for m in messages]
-    queries = [
-        next_chunk_prediction_task(problem, response)
-        for problem, response in zip(problems, responses)
-    ]
-    queries_no_response = [
-        next_chunk_prediction_task(problem, "[EMPTY]") for problem in problems
-    ]
-    qr, qrm, rm = create_joint_tensors(
-        tokenizer,
-        queries,
-        labels,
-    )
-    qr_no, qrm_no, rm_no = create_joint_tensors(
-        tokenizer,
-        queries_no_response,
-        labels,
-    )
-    log_probs = get_logprobs(
-        model,
-        qr,
-        qrm,
-        rm,
-        batch_size=4,
-        temperature=temperature,
-    )
-    log_probs_no = get_logprobs(
-        model,
-        qr_no,
-        qrm_no,
-        rm_no,
-        batch_size=4,
-        temperature=temperature,
-    )
-    del qr, qrm, rm, qr_no, qrm_no, rm_no
-    torch.cuda.empty_cache()
-    model.to(old_device)
-    return (log_probs - log_probs_no).cpu().tolist()
+    def encode_template(self, prompts) -> List[Dict[str, str]]:
+        return [
+            [
+                {
+                    "role": "user",
+                    "content": f"Summarize the following text in around {int(len(prompt) / 4)} words without omitting any important details.\n"
+                    + "The summary should be grammatically correct and summarize all the different sections in the text.\n"
+                    + "********** Text **********\n"
+                    + prompt
+                    + "\n********************",
+                }
+            ]
+            for prompt in prompts
+        ]

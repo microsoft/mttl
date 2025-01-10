@@ -1,7 +1,13 @@
 import argparse
 import gc
 import math
+from multiprocessing import Process
+import os
 import random
+import signal
+import subprocess
+import sys
+import time
 
 import numpy as np
 import torch
@@ -81,9 +87,8 @@ def train(args):
         mixed_precision="bf16",
         gradient_accumulation_steps=acc_steps,
     )
-
-    acc_state = AcceleratorState()
     part_state = PartialState()
+    acc_state = AcceleratorState()
 
     assert (
         onl_batch_size % acc_state.num_processes == 0
@@ -125,9 +130,15 @@ def train(args):
         lr=args.lr,
     )
 
-    total_steps = (max_epochs * max_off_epochs * onl_batch_size) // (
+    if args.a == 'rloo':
+        num_ex = onl_batch_size * args.k
+    else:
+        num_ex = onl_batch_size
+
+    total_steps = (max_epochs * max_off_epochs * num_ex) // (
         acc_steps * acc_state.num_processes
     )
+    
     scheduler = CosineWarmupScheduler(
         optimizer,
         max_lr=args.lr,
@@ -225,6 +236,7 @@ def train(args):
                 torch.cuda.empty_cache()
                 global_step += 1
                 scheduler.step()
+
             accelerator.print(
                 f"Epoch: {epoch}, Off Epoch: {off_epoch}, "
                 f"Step: {global_step}, {algo.__class__.__name__}, "
@@ -330,4 +342,5 @@ if __name__ == "__main__":
 
     # Parse final args
     final_args = parser.parse_args()
+
     train(final_args)
