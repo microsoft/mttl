@@ -3,17 +3,11 @@ import json
 import os
 import random
 import signal
-import subprocess
-import sys
 import time
-from contextlib import asynccontextmanager
 from time import sleep
-
-from filelock import AsyncFileLock
 
 from mttl.utils import logger
 
-got_sigterm = False
 got_exit_signal = False
 
 
@@ -46,7 +40,18 @@ class JobQueue:
             # If data is already a single list, just use it directly.
             doc_ids = data
 
-        self.tasks = doc_ids
+        # keep track of tasks needing execution
+        self.tasks = []
+        self.finished = []
+
+        for task in doc_ids:
+            status = self.get_run_status(task)
+            if status == "finished":
+                print(f"adding {task} to finished")
+                self.finished.append(task)
+            else:
+                self.tasks.append(task)
+                print(f"adding {task} to tasks")
 
     def task_is_done(self, task):
         done_file = os.path.join(self.output_dir, task, "done.txt")
@@ -94,7 +99,7 @@ class JobQueue:
                     return_code = self.get_return_code(task)
 
                     if return_code == 0:
-                        return "done"
+                        return "finished"
                     elif return_code < 0:
                         return "crashed_rt"
                     else:
@@ -121,67 +126,88 @@ class JobQueue:
 
     def get_next_job(self):
 
-        # shuffle the tasks
-        tasks = self.tasks.copy()
-        random.shuffle(tasks)
+        while True:
+            # shuffle the tasks
+            doc_id = None
+            for priority_status in ["queued", "crashed", "failed"]:
 
-        doc_id = None
-        for task in tasks:
-            status = self.get_run_status(task)
+                tasks = self.tasks.copy()
+                random.shuffle(tasks)
 
-            if status == "queued":
-                doc_id = task
-                break
-
-        if doc_id is None:
-            # Let's look for crashed jobs
-            for task in tasks:
-                status = self.get_run_status(task)
-                if status.startswith("crashed"):
-                    doc_id = task
-                    # clean out the task directory
-                    task_output_dir = os.path.join(self.output_dir, task)
-                    timestamp = self.get_timestamp(task)
-                    # convert timestsamp to DD-MM-MM-YYYY HH:MM:SS
-                    timestamp_str = time.strftime(
-                        "%d-%m-%Y %H:%M:%S", time.localtime(timestamp)
-                    )
-                    logger.warning(
-                        f"Crashed job {task} (status): {timestamp_str} \t {self.get_timestamp(task)}"
+                for task in tasks:
+                    status = self.get_run_status(task)
+                    print(
+                        f"task : {task} - status : {status} - priority_status : {priority_status}"
                     )
 
-                    # actually, let's print the name and timestamp of every file in the task directory
-                    for f in os.listdir(task_output_dir):
-                        timestamp = os.path.getmtime(os.path.join(task_output_dir, f))
+                    if status == "finished":
+                        self.finished.append(task)
+                        self.tasks.remove(task)
+                        continue
+
+                    if status.startswith("crashed"):
+                        doc_id = task
+                        # clean out the task directory
+                        timestamp = self.get_timestamp(task)
+                        # convert timestsamp to DD-MM-MM-YYYY HH:MM:SS
                         timestamp_str = time.strftime(
                             "%d-%m-%Y %H:%M:%S", time.localtime(timestamp)
                         )
-                        print(f"{f} - {timestamp_str}")
-                    # logger.warning(f"Cleaning up crashed job {task}: {timestamp_str}")
-                    # os.system(f"rm -rf {task_output_dir}")
-                    break
-
-        if doc_id is None:
-            # finally, let's look for failed jobs, and potentially retry them
-            for task in tasks:
-                status = self.get_run_status(task)
-                if status == "failed":
-                    # check how many retries have been done
-                    n_retries = self.count_retries(task)
-                    if n_retries < self.n_retries:
-                        doc_id = task
-                        # create a file called `retry_{timestamp}.txt` to indicate that the task is being retried
-                        retry_file = os.path.join(
-                            self.output_dir, task, f"retry_{time.time()}.txt"
+                        current_time = time.strftime(
+                            "%d-%m-%Y %H:%M:%S", time.localtime(time.time())
                         )
-                        with open(retry_file, "a") as f:
-                            f.write(f"{time.time()} - {self.launcher_id}\n")
-                        break
+                        logger.warning(
+                            f"Crashed job {task} ({status}): {timestamp_str} \t current time {current_time}"
+                        )
 
-        return doc_id, status
+                        # actually, let's print the name and timestamp of every file in the task directory
+                        task_output_dir = os.path.join(self.output_dir, task)
+                        task_files = os.listdir(task_output_dir)
+                        for f in task_files:
+                            timestamp = os.path.getmtime(
+                                os.path.join(task_output_dir, f)
+                            )
+                            timestamp_str = time.strftime(
+                                "%d-%m-%Y %H:%M:%S", time.localtime(timestamp)
+                            )
+                            print(f"{f} - {timestamp_str}")
+                        if len(task_files) == 0:
+                            print(f"Task {task} has Empty directory")
+
+                    if status == "failed" == priority_status:
+                        # check how many retries have been done
+                        n_retries = self.count_retries(task)
+                        if n_retries < self.n_retries:
+                            doc_id = task
+                            # create a file called `retry_{timestamp}.txt` to indicate that the task is being retried
+                            retry_file = os.path.join(
+                                self.output_dir, task, f"retry_{time.time()}.txt"
+                            )
+                            with open(retry_file, "a") as f:
+                                f.write(f"{time.time()} - {self.launcher_id}\n")
+                        else:
+                            continue
+
+                    if status.startswith(priority_status):
+                        doc_id = task
+                        yield doc_id, status
+
+                print(
+                    f"no more {priority_status} tasks for launcher {self.launcher_id}"
+                )
+
+            if doc_id is None:
+                print("No more tasks to run. Exiting.")
+                raise StopIteration
 
     def _print_progress(self):
-        all_status = {"done": 0, "failed": 0, "queued": 0, "crashed": 0, "running": 0}
+        all_status = {
+            "finished": len(self.finished),
+            "failed": 0,
+            "queued": 0,
+            "crashed": 0,
+            "running": 0,
+        }
 
         for task in self.tasks:
             status = self.get_run_status(task).split("_")[0]
@@ -194,12 +220,32 @@ class JobQueue:
     async def print_progress(self):
         while True:
             self._print_progress()
-            await asyncio.sleep(60)
+            await asyncio.sleep(30)
 
 
 async def run_job(
     gpu_id, doc_id, config_file, output_dir, train_script, config_id, launcher_id
 ):
+
+    # print('starting job for doc_id : ', doc_id)
+    # Because the file system is on the network, when creating a file one the network,
+    # it may take a while for the file creation to be visible to other nodes.
+    # Therefore, let's wait 15 seconds before starting the job, to see if other
+    # job runners also picked this job to run. If that's the case, we forfeit this job
+    # to the newest runner.
+    # sleep command for io job
+    await asyncio.sleep(15)
+    task_output_dir = os.path.join(output_dir, doc_id)
+    started_file = os.path.join(task_output_dir, f"started_{launcher_id}.txt")
+    started_file_timestamp = os.path.getmtime(started_file)
+    for afile in os.listdir(task_output_dir):
+        if afile.startswith("started_") and afile != f"started_{launcher_id}.txt":
+            other_started_file = os.path.join(task_output_dir, afile)
+            other_started_file_timestamp = os.path.getmtime(other_started_file)
+            if other_started_file_timestamp > started_file_timestamp:
+                print(f"Another runner has started this job. Exiting.")
+                return doc_id, 0
+
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = str(int(env.get("GPU_OFFSET", 0)) + int(gpu_id))
     command = [
@@ -330,6 +376,7 @@ async def main():
     running_tasks = []
 
     monitor_task = asyncio.create_task(job_queue.print_progress())
+    next_job_iter = iter(job_queue.get_next_job())
 
     while True:
         # If we received an exit signal (SIGTERM or SIGINT), shut down gracefully
@@ -357,19 +404,35 @@ async def main():
             logger.warning("All running tasks cancelled. Exiting.")
             break
 
-        # Assign new jobs to free GPUs
-        for gpu_id in range(args.num_gpus):
-            while gpu_usage[gpu_id] < args.jobs_per_gpu:
-                doc_id, previous_status = job_queue.get_next_job()
-
-                if not doc_id:
-                    break
+        # Round-robin assignment: each GPU gets 1 job per round
+        for round_idx in range(args.jobs_per_gpu):
+            for gpu_id in range(args.num_gpus):
+                if gpu_usage[gpu_id] >= args.jobs_per_gpu:
+                    continue
+                if gpu_usage[gpu_id] < (round_idx + 1):
+                    try:
+                        out = next(next_job_iter)
+                        doc_id, previous_status = out
+                    except:
+                        break
 
                 print(f"Next job : {doc_id} - with status {previous_status}")
+
+                if previous_status == "failed":
+                    # need to delete `done.txt` file
+                    done_file = os.path.join(output_dir, doc_id, "done.txt")
+                    print(f"deleting done file : {done_file}")
+                    try:
+                        os.remove(done_file)
+                    except FileNotFoundError:
+                        print(f"File {done_file} not found")
+
                 # create a directory for the task ASAP
                 os.makedirs(os.path.join(output_dir, doc_id), exist_ok=True)
                 # create a file called `started.txt` to indicate that the task has started
-                started_file = os.path.join(output_dir, doc_id, "started.txt")
+                started_file = os.path.join(
+                    output_dir, doc_id, f"started_{job_queue.launcher_id}.txt"
+                )
                 with open(started_file, "a") as f:
                     f.write(f"{time.time()} - {job_queue.launcher_id}\n")
 
@@ -384,8 +447,10 @@ async def main():
                         job_queue.launcher_id,
                     )
                 )
+                sleep(5)
                 running_tasks.append((task, gpu_id, doc_id))
                 gpu_usage[gpu_id] += 1
+                print(f"gpu usage : {gpu_usage}")
 
         if not running_tasks:
             monitor_task.cancel()
