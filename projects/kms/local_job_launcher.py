@@ -10,6 +10,12 @@ from mttl.utils import logger
 
 got_exit_signal = False
 
+# Some error codes
+JOB_ALREADY_STARTED = 1_000
+FINISHED = 0
+FAILED = 1
+CRASHED = -1
+
 
 def handle_exit_signal(signum, frame):
     logger.warning(
@@ -244,7 +250,7 @@ async def run_job(
             other_started_file_timestamp = os.path.getmtime(other_started_file)
             if other_started_file_timestamp > started_file_timestamp:
                 print(f"Another runner has started this job. Exiting.")
-                return doc_id, 0
+                return doc_id, JOB_ALREADY_STARTED
 
     env = os.environ.copy()
     env["CUDA_VISIBLE_DEVICES"] = str(int(env.get("GPU_OFFSET", 0)) + int(gpu_id))
@@ -353,6 +359,27 @@ def parse_arguments():
     return args
 
 
+class GPUMonitor:
+    def __init__(self, num_gpus, jobs_per_gpu):
+        self.num_gpus = num_gpus
+        self.jobs_per_gpu = jobs_per_gpu
+        self.gpu_usage = [0 for _ in range(num_gpus)]
+
+    def assign_job(self):
+        # Round-robin assignment: each GPU gets 1 job per round
+        assert self.has_free_gpu(), "No free GPU available"
+        argmin = lambda vals: min(enumerate(vals), key=lambda nv: nv[1])[0]
+        gpu_id = argmin(self.gpu_usage)
+        self.gpu_usage[gpu_id] += 1
+        return gpu_id
+
+    def remove_job(self, gpu_id):
+        self.gpu_usage[gpu_id] -= 1
+
+    def has_free_gpu(self):
+        return any(v < self.jobs_per_gpu for v in self.gpu_usage)
+
+
 async def main():
     args = parse_arguments()
     config_file = f"configs/{args.config_id}.json"
@@ -372,13 +399,14 @@ async def main():
         args.tasks_file, output_dir, args.n_retries, args.seconds_to_crashed
     )
 
-    gpu_usage = {i: 0 for i in range(args.num_gpus)}
+    gpu_monitor = GPUMonitor(args.num_gpus, args.jobs_per_gpu)
     running_tasks = []
 
     monitor_task = asyncio.create_task(job_queue.print_progress())
-    next_job_iter = iter(job_queue.get_next_job())
+    next_job_iter = job_queue.get_next_job()
+    done_training = False
 
-    while True:
+    while not done_training:
         # If we received an exit signal (SIGTERM or SIGINT), shut down gracefully
         if got_exit_signal:
             logger.warning("Received exit signal, initiating graceful shutdown...")
@@ -405,52 +433,50 @@ async def main():
             break
 
         # Round-robin assignment: each GPU gets 1 job per round
-        for round_idx in range(args.jobs_per_gpu):
-            for gpu_id in range(args.num_gpus):
-                if gpu_usage[gpu_id] >= args.jobs_per_gpu:
-                    continue
-                if gpu_usage[gpu_id] < (round_idx + 1):
-                    try:
-                        out = next(next_job_iter)
-                        doc_id, previous_status = out
-                    except:
-                        break
+        while gpu_monitor.has_free_gpu():
+            gpu_id = gpu_monitor.assign_job()
+            try:
+                out = next(next_job_iter)
+                doc_id, previous_status = out
+            except:
+                done_training = True
+                print(f"No more jobs to process. Training is done.")
+                break
 
-                print(f"Next job : {doc_id} - with status {previous_status}")
+            print(f"Next job : {doc_id} - with status {previous_status}")
 
-                if previous_status == "failed":
-                    # need to delete `done.txt` file
-                    done_file = os.path.join(output_dir, doc_id, "done.txt")
-                    print(f"deleting done file : {done_file}")
-                    try:
-                        os.remove(done_file)
-                    except FileNotFoundError:
-                        print(f"File {done_file} not found")
+            if previous_status == "failed":
+                # need to delete `done.txt` file
+                done_file = os.path.join(output_dir, doc_id, "done.txt")
+                print(f"deleting done file : {done_file}")
+                try:
+                    os.remove(done_file)
+                except FileNotFoundError:
+                    print(f"File {done_file} not found")
 
-                # create a directory for the task ASAP
-                os.makedirs(os.path.join(output_dir, doc_id), exist_ok=True)
-                # create a file called `started.txt` to indicate that the task has started
-                started_file = os.path.join(
-                    output_dir, doc_id, f"started_{job_queue.launcher_id}.txt"
+            # create a directory for the task ASAP
+            os.makedirs(os.path.join(output_dir, doc_id), exist_ok=True)
+            # create a file called `started.txt` to indicate that the task has started
+            started_file = os.path.join(
+                output_dir, doc_id, f"started_{job_queue.launcher_id}.txt"
+            )
+            with open(started_file, "a") as f:
+                f.write(f"{time.time()} - {job_queue.launcher_id}\n")
+
+            task = asyncio.create_task(
+                run_job(
+                    gpu_id,
+                    doc_id,
+                    config_file,
+                    output_dir,
+                    args.train_script,
+                    args.config_id,
+                    job_queue.launcher_id,
                 )
-                with open(started_file, "a") as f:
-                    f.write(f"{time.time()} - {job_queue.launcher_id}\n")
-
-                task = asyncio.create_task(
-                    run_job(
-                        gpu_id,
-                        doc_id,
-                        config_file,
-                        output_dir,
-                        args.train_script,
-                        args.config_id,
-                        job_queue.launcher_id,
-                    )
-                )
-                sleep(5)
-                running_tasks.append((task, gpu_id, doc_id))
-                gpu_usage[gpu_id] += 1
-                print(f"gpu usage : {gpu_usage}")
+            )
+            sleep(5)
+            running_tasks.append((task, gpu_id, doc_id))
+            print(f"gpu usage : {gpu_monitor.gpu_usage}")
 
         if not running_tasks:
             monitor_task.cancel()
@@ -459,21 +485,25 @@ async def main():
             break
 
         done, pending = await asyncio.wait(
-            [task for task, _, _ in running_tasks], return_when=asyncio.FIRST_COMPLETED
+            [task for task, _, _ in running_tasks],
+            return_when=(
+                asyncio.ALL_COMPLETED if done_training else asyncio.FIRST_COMPLETED
+            ),
         )
 
         for completed_task in done:
             # Find which task completed
             for idx, (task, gpu_id, doc_id) in enumerate(running_tasks):
                 if task == completed_task:
-                    gpu_usage[gpu_id] -= 1
+                    gpu_monitor.remove_job(gpu_id)
                     running_tasks.pop(idx)
                     result_doc_id, return_code = completed_task.result()
-                    new_return_code = job_queue.get_return_code(doc_id)
-                    if new_return_code != return_code:
-                        print(
-                            f"Task {doc_id} has a mismatch return code: {new_return_code} != {return_code}"
-                        )
+                    if return_code != JOB_ALREADY_STARTED:
+                        new_return_code = job_queue.get_return_code(doc_id)
+                        if new_return_code != return_code:
+                            print(
+                                f"Task {doc_id} has a mismatch return code: {new_return_code} != {return_code}"
+                            )
 
 
 if __name__ == "__main__":
