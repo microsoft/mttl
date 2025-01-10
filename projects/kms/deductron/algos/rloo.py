@@ -21,8 +21,9 @@ from projects.kms.deductron.utils import (
     repeat,
     get_shifted_logprobs,
     masked_mean,
+    masked_whiten,
 )
-from projects.kms.deductron.vllm_utils import VLLMGenerator
+from accelerate.state import AcceleratorState
 
 
 class RLOO(Algo):
@@ -60,23 +61,21 @@ class RLOO(Algo):
         self.ref_model = AutoModelForCausalLM.from_pretrained(
             model_name, torch_dtype=torch.bfloat16, device_map="cpu"
         )
+        self.ref_model.eval()
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name,
         )
         if not self.tokenizer.pad_token:
             self.tokenizer.pad_token = self.tokenizer.eos_token
+        self.acc_state = AcceleratorState()
 
-    @torch.no_grad()
-    def gather_episodes(
+    def compute_rewards(
         self,
         prompts: List[str],
         labels: List[str],
-    ):
+        k=1,
+    ) -> List[Request]:
         from .task import get_task
-        from accelerate.state import AcceleratorState
-
-        acc_state = AcceleratorState()
-        self.ref_model.to(acc_state.device)
 
         vllm = GenerationBackend.get()
 
@@ -87,16 +86,16 @@ class RLOO(Algo):
         responses, finished = vllm.chat(
             messages,
             temperature=self.temperature,
-            n=self.k,
+            n=k,
             max_tokens=self.max_tokens,
             return_finished=True,
         )
 
         responses = flatten(responses)
         finished = flatten(finished)
-        query_ids = repeat(range(len(messages)), self.k)
-        labels = repeat(labels, self.k)
-        messages = repeat(messages, self.k)
+        query_ids = repeat(range(len(messages)), k)
+        labels = repeat(labels, k)
+        messages = repeat(messages, k)
 
         evaluation_requests = []
         for query_id, query_messages, query_response, label, finish in zip(
@@ -112,6 +111,8 @@ class RLOO(Algo):
                 )
             )
 
+        self.ref_model.to(self.acc_state.device)
+
         rewards = task.get_rewards(
             model=self.ref_model,
             tokenizer=self.tokenizer,
@@ -122,6 +123,22 @@ class RLOO(Algo):
         )
 
         RequestUtils.populate(evaluation_requests, rewards, "reward")
+        return evaluation_requests
+
+    @torch.no_grad()
+    def gather_episodes(
+        self,
+        prompts: List[str],
+        labels: List[str],
+    ):
+        acc_state = AcceleratorState()
+
+        self.ref_model.to(self.acc_state.device)
+        evaluation_requests = self.compute_rewards(prompts, labels, k=self.k)
+        rewards = [r.reward for r in evaluation_requests]
+        finished = [r.finished for r in evaluation_requests]
+        messages = [r.messages for r in evaluation_requests]
+        responses = [r.response for r in evaluation_requests]
 
         max_reward, avg_reward = RequestUtils.gather_max_avg_reward(evaluation_requests)
 
@@ -130,9 +147,8 @@ class RLOO(Algo):
         self.stats.accumulate("finished", (100.0 * np.sum(finished) / len(finished)))
 
         # rloo advantages
-        rewards = torch.tensor(rewards, dtype=torch.float32).reshape(-1, self.k)
-        max_rewards = torch.max(rewards, dim=1).values
-        baseline = (rewards.sum(1).unsqueeze(1) - rewards) / (self.k - 1)
+        rewards = torch.tensor(rewards, dtype=torch.float32).view(self.k, -1)
+        baseline = (rewards.sum(0) - rewards) / (self.k - 1)
         advantages = (rewards - baseline).view(-1, 1)
 
         if acc_state.is_main_process:
@@ -155,19 +171,24 @@ class RLOO(Algo):
 
             print("====================================")
             print("Response 0 > Response -1:")
-            sorted_idx = torch.argsort(advantages[:5].flatten(), descending=True)
+            sorted_idx = torch.argsort(rewards[:5].flatten(), descending=True)
             best_idx = sorted_idx[0].item()
             last_idx = sorted_idx[-1].item()
             print(
-                f"Response 0, Reward {advantages[:5][best_idx].item():.4f}:\n{responses[best_idx]}"
+                f"Response 0, Reward {rewards[:5].flatten()[best_idx].item():.4f}:\n{responses[best_idx]}"
             )
             print("------------------------------------")
             print(
-                f"Response -1, Reward {advantages[:5][last_idx].item():.4f}:\n{responses[last_idx]}"
+                f"Response -1, Reward {rewards[:5].flatten()[last_idx].item():.4f}:\n{responses[last_idx]}"
             )
 
         query_response_tensors, query_response_mask, response_mask = (
-            create_joint_tensors(self.tokenizer, messages, responses, pad_to_length=4096)
+            create_joint_tensors(
+                self.tokenizer,
+                messages,
+                responses,
+                max_length=4096,
+            )
         )
 
         ref_logprobs = get_logprobs(
@@ -178,7 +199,9 @@ class RLOO(Algo):
             temperature=self.temperature,
             reduction="none",
         )
+        self.ref_model.to("cpu")
 
+        self.model.eval()
         old_logprobs = get_logprobs(
             self.model,
             query_response_tensors,
@@ -187,6 +210,7 @@ class RLOO(Algo):
             temperature=self.temperature,
             reduction="none",
         )
+        self.model.train()
 
         outputs = (
             query_response_tensors,
@@ -196,8 +220,6 @@ class RLOO(Algo):
             ref_logprobs,
             old_logprobs,
         )
-
-        self.ref_model.to("cpu")
         return outputs
 
     def compute_loss(self, episode_returns) -> float:
@@ -236,8 +258,8 @@ class RLOO(Algo):
         log_ratio = (mb_logprobs - mb_old_logprobs) * action_mask
         ratio = torch.exp(log_ratio)
 
-        pg_losses1 = -mb_advantage.unsqueeze(1) * ratio
-        pg_losses2 = -mb_advantage.unsqueeze(1) * torch.clamp(ratio, 1.0, 1.0)
+        pg_losses1 = -mb_advantage * ratio
+        pg_losses2 = -mb_advantage * torch.clamp(ratio, 1.2, 1.2)
         pg_losses = torch.max(pg_losses1, pg_losses2)
         pg_loss = masked_mean(pg_losses, action_mask)
 

@@ -120,7 +120,7 @@ def get_logprobs(
     query_response,
     query_response_mask,
     response_mask,
-    batch_size=4,
+    batch_size=2,
     reduction="mean",
     temperature=DEFAULT_TEMP,
 ):
@@ -151,10 +151,10 @@ def get_logprobs(
             )
 
         all_logprobs.append(logprobs.cpu())
-        del output
+        del output.logits, output
+        torch.cuda.empty_cache()
 
     logprobs = torch.cat(all_logprobs, 0)
-    torch.cuda.empty_cache()
     return logprobs
 
 

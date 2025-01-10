@@ -50,14 +50,14 @@ class SummaryAutoencoderTask:
         ]
         # for auto-encoding, we are trying to reconstruct the paragraph itself!
         qr, qrm, rm = create_joint_tensors(
-            tokenizer, queries, problems, max_length=4096
+            tokenizer, queries, problems, pad_to_length=4096
         )
         log_probs = get_logprobs(
             model,
             qr,
             qrm,
             rm,
-            batch_size=4,
+            batch_size=2,
             temperature=temperature,
         )
         del qr, qrm, rm
@@ -67,16 +67,17 @@ class SummaryAutoencoderTask:
         ]
         # for auto-encoding, we are trying to reconstruct the paragraph itself!
         qr, qrm, rm = create_joint_tensors(
-            tokenizer, queries_empty, problems, max_length=4096
+            tokenizer, queries_empty, problems, pad_to_length=4096
         )
         log_probs_base = get_logprobs(
             model,
             qr,
             qrm,
             rm,
-            batch_size=4,
+            batch_size=2,
             temperature=temperature,
         )
+        del qr, qrm, rm
         torch.cuda.empty_cache()
         rewards = (log_probs - log_probs_base).cpu().tolist()
         return rewards

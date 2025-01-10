@@ -168,11 +168,8 @@ def pad_query_and_response(
         query_response[i][slices] = t
         query_response_mask[i][slices] = 1
         response_mask[i][response_slice] = 1
-    if pad_to_length and seq_len >= pad_to_length:
-        query_response = query_response[:, :pad_to_length]
-        query_response_mask = query_response_mask[:, :pad_to_length]
-        response_mask = response_mask[:, :pad_to_length]
-    elif pad_to_length and seq_len < pad_to_length:
+
+    if pad_to_length and seq_len < pad_to_length:
         pad_slice = torch.full(
             (len(queries), pad_to_length - seq_len),
             padding_value,
@@ -193,11 +190,18 @@ def pad_query_and_response(
             query_response = torch.cat((pad_slice, query_response), 1)
             query_response_mask = torch.cat((pad_slice_mask, query_response_mask), 1)
             response_mask = torch.cat((pad_slice_mask, response_mask), 1)
-    if max_length is not None:
+
+    if max_length is not None and padding_side == 'right':
         return (
             query_response[:, :max_length],
             query_response_mask[:, :max_length],
             response_mask[:, :max_length],
+        )
+    elif max_length is not None and padding_side == 'left':
+        return (
+            query_response[:, -max_length:],
+            query_response_mask[:, -max_length:],
+            response_mask[:, -max_length:],
         )
     return query_response, query_response_mask, response_mask
 
@@ -289,6 +293,9 @@ def prepare_nqa_dataset(tokenizer, block_size=2048):
     from datasets import load_dataset
 
     dataset = load_dataset("sordonia/narrativeqa_sanitized", split="train")
+    train_dataset = dataset.filter(lambda x: x['split'] == 'train', num_proc=16)
+    valid_dataset = dataset.filter(lambda x: x['split'] == 'validation', num_proc=16)
+    test_dataset = dataset.filter(lambda x: x['split'] == 'test', num_proc=16)
 
     def chunk_row(example):
         sources, labels, dids = [], [], []
@@ -300,11 +307,25 @@ def prepare_nqa_dataset(tokenizer, block_size=2048):
                 dids.append(did)
         return {"source": sources, "label": labels, "document_id": dids}
 
-    new_dataset = dataset.map(
+    train_dataset = train_dataset.map(
         chunk_row,
         batched=True,
         remove_columns=dataset.column_names,
         batch_size=100,
         num_proc=16,
     )
-    return new_dataset
+    valid_dataset = valid_dataset.map(
+        chunk_row,
+        batched=True,
+        remove_columns=dataset.column_names,
+        batch_size=100,
+        num_proc=16,
+    )
+    test_dataset = test_dataset.map(
+        chunk_row,
+        batched=True,
+        remove_columns=dataset.column_names,
+        batch_size=100,
+        num_proc=16,
+    )
+    return train_dataset, valid_dataset, test_dataset

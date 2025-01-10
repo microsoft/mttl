@@ -71,7 +71,8 @@ def train(args):
 
     max_epochs = args.epc
     max_off_epochs = args.offepc
-    onl_batch_size = args.bsz
+    onl_batch_size = args.onlbsz
+    # this is *per device*
     off_batch_size = args.offbsz
     inn_batch_size = args.innbsz
     acc_steps = off_batch_size // inn_batch_size
@@ -103,9 +104,6 @@ def train(args):
         **get_algo_kwargs(args, algos[args.a]),
     )
 
-    training_stats = []
-
-    algo.model.gradient_checkpointing_enable()
     decay_parameters = get_parameter_names(algo.model, [torch.nn.LayerNorm])
     decay_parameters = [name for name in decay_parameters if "bias" not in name]
     optimizer_grouped_parameters = [
@@ -130,11 +128,11 @@ def train(args):
 
     if args.a == "rft":
         total_steps = math.ceil(
-            (onl_batch_size * args.offepc * args.epc) / off_batch_size
+            (args.offepc * args.epc)
         )
     elif args.a == "rloo":
         total_steps = math.ceil(
-            (onl_batch_size * args.offepc * args.epc * args.k) / off_batch_size
+            (args.offepc * args.epc)
         )
     scheduler = CosineWarmupScheduler(
         optimizer,
@@ -145,10 +143,27 @@ def train(args):
     )
 
     algo.model = accelerator.prepare(algo.model)
+    scheduler = accelerator.prepare(scheduler)
     GenerationBackend.init(args.b, model_name=models[args.m], seed=args.s)
 
     with accelerator.main_process_first():
-        dataset = prepare_nqa_dataset(algo.tokenizer, block_size=2048)
+        train_dataset, val_dataset, test_dataset = prepare_nqa_dataset(algo.tokenizer, block_size=2048)
+
+    sample_indices = np.random.choice(len(val_dataset), onl_batch_size, replace=False)
+    val_queries = [val_dataset[int(i)]["source"] for i in sample_indices]
+    val_labels = [val_dataset[int(i)]["label"] for i in sample_indices]
+
+    training_stats = []
+    if acc_state.is_main_process:
+        val_requests = algo.compute_rewards(val_queries, val_labels, k=1)
+        val_reward = np.mean([r.reward for r in val_requests])
+        training_stats.append(
+            {
+                "val_reward": val_reward,
+            }
+        )
+        print("Val Reward at Init: ", val_reward)
+    acc_state.wait_for_everyone()
 
     assert (
         onl_batch_size >= args.subs
@@ -158,9 +173,9 @@ def train(args):
     for epoch in range(max_epochs):
         epoch_stats = AccumulatorDict()
 
-        sample_indices = np.random.choice(len(dataset), onl_batch_size, replace=False)
-        queries_batch = [dataset[int(i)]["source"] for i in sample_indices]
-        labels_batch = [dataset[int(i)]["label"] for i in sample_indices]
+        sample_indices = np.random.choice(len(train_dataset), onl_batch_size, replace=False)
+        queries_batch = [train_dataset[int(i)]["source"] for i in sample_indices]
+        labels_batch = [train_dataset[int(i)]["label"] for i in sample_indices]
 
         # create dataset out of gathered episodes
         with part_state.split_between_processes(
@@ -172,10 +187,11 @@ def train(args):
         epoch_dataset = MultiTensorDataset(*episode_data)
         dataloader = get_dataloader(epoch_dataset, inn_batch_size)
 
-        if acc_state.is_main_process:
-            print("====================================")
-            print("Beginning updating the policy")
-            print("Length of the dataset:", len(epoch_dataset))
+        accelerator.print("====================================")
+        accelerator.print("Beginning updating the policy")
+        accelerator.print("Length of the dataset:", len(epoch_dataset))
+
+        torch.save(episode_data, f"{args.o}/episode_data_{acc_state.local_process_index}_{epoch}.pt")
 
         # offline steps
         train_iterator = iter(dataloader)
@@ -204,50 +220,41 @@ def train(args):
                 optimizer.step()
                 torch.cuda.synchronize()
                 optimizer.zero_grad()
+                del batch
                 torch.cuda.empty_cache()
-                scheduler.step()
                 global_step += 1
 
-                if acc_state.is_main_process:
-                    print(
-                        f"Epoch: {epoch}, Off Epoch: {off_epoch}, "
-                        f"Step: {global_step}, {algo.__class__.__name__}, "
-                        f"Loss: {epoch_stats.mean('loss'):.4f}, "
-                        f"Lr: {scheduler.get_last_lr()[0]:.6f}"
-                    )
+                accelerator.print(
+                    f"Epoch: {epoch}, Off Epoch: {off_epoch}, "
+                    f"Step: {global_step}, {algo.__class__.__name__}, "
+                    f"Loss: {epoch_stats.mean('loss'):.4f}, "
+                    f"Lr: {scheduler.get_last_lr()[0]:.6f}"
+                )
+
+            scheduler.step()
 
         del dataloader
-
+        del episode_data
         gc.collect()
         torch.cuda.empty_cache()
-
-        # update the weights of the data generator after the epoch
-        GenerationBackend.get().load_weights(algo.model)
-
-        # append a bunch of training stats
-        training_stats.append(
-            {
-                "epoch": epoch,
-                "step": global_step,
-                "lr": scheduler.get_last_lr()[0],
-                **epoch_stats.get(),
-                **algo.stats.get(),
-            }
-        )
+        acc_state.wait_for_everyone()
 
         if acc_state.is_main_process:
-            print("====================================")
-            print(f"Epoch {epoch}, Avg Reward: {training_stats[-1]['avg_reward']:.4f}")
-            print(training_stats[-1])
-            print(
-                "Reward So Far:",
-                print_metrics([t.get("avg_reward", 0) for t in training_stats]),
+            val_requests = algo.compute_rewards(val_queries, val_labels, k=1)
+            val_reward = np.mean([r.reward for r in val_requests])
+
+            # append a bunch of training stats
+            training_stats.append(
+                {
+                    "epoch": epoch,
+                    "step": global_step,
+                    "lr": scheduler.get_last_lr()[0],
+                    "val_reward": val_reward,
+                    **epoch_stats.get(),
+                    **algo.stats.get(),
+                }
             )
-            print("====================================")
-
-            # save data
-            torch.save(episode_data, f"{args.o}/episode_data_{epoch}.pt")
-
+            
             # save stats
             with open(f"{args.o}/training_stats.json", "w") as f:
                 import json
@@ -255,8 +262,8 @@ def train(args):
                 json.dump(training_stats, f)
 
             # save best model
-            if epoch == 0 or training_stats[-1]["avg_reward"] >= np.max(
-                [t["avg_reward"] for t in training_stats[:-1]]
+            if epoch == 0 or training_stats[-1]["val_reward"] >= np.max(
+                [t["val_reward"] for t in training_stats[:-1]]
             ):
                 if acc_state.num_processes > 1:
                     algo.model.module.save_pretrained(f"{args.o}/model")
@@ -264,6 +271,21 @@ def train(args):
                     algo.model.save_pretrained(f"{args.o}/model")
                 algo.tokenizer.save_pretrained(f"{args.o}/model")
 
+            print("====================================")
+            print(f"Epoch {epoch}, Avg Reward: {training_stats[-1]['val_reward']:.4f}")
+            print(training_stats[-1])
+            print(
+                "Reward So Far:",
+                print_metrics([t.get("avg_reward", 0) for t in training_stats]),
+            )
+            print(
+                "Val So Far:",
+                print_metrics([t.get("val_reward", 0) for t in training_stats]),
+            )
+            print("====================================")
+
+        # update the weights of the data generator after the epoch
+        GenerationBackend.get().load_weights(algo.model)
         acc_state.wait_for_everyone()
 
     GenerationBackend.get().shutdown()
@@ -277,11 +299,11 @@ if __name__ == "__main__":
     parser.add_argument("-a", type=str, help="Algorithm")
     parser.add_argument("--lr", type=float, help="Learning rate", default=1e-6)
     parser.add_argument("--epc", type=int, help="Number of epochs", default=20)
-    parser.add_argument("--bsz", type=int, help="Online batch size", default=32)
+    parser.add_argument("--onlbsz", type=int, help="Online batch size", default=32)
     parser.add_argument(
         "--offepc", type=int, help="Number of offline epochs", default=4
     )
-    parser.add_argument("--offbsz", type=int, help="Offline batch size", default=8)
+    parser.add_argument("--offbsz", type=int, help="Offline batch size **per device**", default=8)
     parser.add_argument(
         "--innbsz", type=int, help="Inner/Grad accumulation batch size", default=1
     )

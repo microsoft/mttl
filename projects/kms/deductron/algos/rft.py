@@ -60,18 +60,19 @@ class RFT(Algo):
         self.ref_model = AutoModelForCausalLM.from_pretrained(
             model_name, torch_dtype=torch.bfloat16, device_map="cpu"
         )
+        self.ref_model.eval()
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name,
         )
         if not self.tokenizer.pad_token:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-    @torch.no_grad()
-    def gather_episodes(
+    def compute_rewards(
         self,
         prompts: List[str],
         labels: List[str],
-    ):
+        k=1,
+    ) -> List[Request]:
         from .task import get_task
 
         vllm = GenerationBackend.get()
@@ -83,16 +84,16 @@ class RFT(Algo):
         responses, finished = vllm.chat(
             messages,
             temperature=self.temperature,
-            n=self.k,
+            n=k,
             max_tokens=self.max_tokens,
             return_finished=True,
         )
 
         responses = flatten(responses)
         finished = flatten(finished)
-        query_ids = repeat(range(len(messages)), self.k)
-        labels = repeat(labels, self.k)
-        messages = repeat(messages, self.k)
+        query_ids = repeat(range(len(messages)), k)
+        labels = repeat(labels, k)
+        messages = repeat(messages, k)
 
         evaluation_requests = []
         for query_id, query_messages, query_response, label, finish in zip(
@@ -118,26 +119,29 @@ class RFT(Algo):
             temperature=self.temperature,
         )
         self.ref_model.to("cpu")
-        torch.cuda.empty_cache()
 
         RequestUtils.populate(evaluation_requests, rewards, "reward")
+        return evaluation_requests
 
+    @torch.no_grad()
+    def gather_episodes(
+        self,
+        prompts: List[str],
+        labels: List[str],
+    ):
+        evaluation_requests = self.compute_rewards(
+            prompts,
+            labels,
+            k=self.k
+        )
+
+        rewards = [r.reward for r in evaluation_requests]
+        finished = [r.finished for r in evaluation_requests]
         max_reward, avg_reward = RequestUtils.gather_max_avg_reward(evaluation_requests)
 
         self.stats.accumulate("avg_reward", avg_reward)
         self.stats.accumulate("max_reward", max_reward)
         self.stats.accumulate("finished", (100.0 * np.sum(finished) / len(finished)))
-
-        # pick the best response for each query
-        rewards = torch.tensor(rewards, dtype=torch.float32).reshape(-1, self.k)
-        max_reward_index = torch.argmax(rewards, dim=1)
-        for i, idx in enumerate(max_reward_index):
-            if rewards[i, idx] > 0:
-                max_reward_index[i] = (i * self.k + idx)
-            else:
-                max_reward_index[i] = -1
-        max_reward_index = max_reward_index.tolist()
-        rewards = rewards.flatten()
 
         if self.acc_state.is_main_process:
             print("====================================")
@@ -159,26 +163,35 @@ class RFT(Algo):
 
             print("====================================")
             print("Response 0 > Response -1:")
-            sorted_idx = torch.argsort(rewards[:5], descending=True)
-            best_idx = sorted_idx[0].item()
-            last_idx = sorted_idx[-1].item()
+            sorted_idx = np.argsort(rewards[:5])[::-1]
+            best_idx = sorted_idx[0]
+            last_idx = sorted_idx[-1]
             print(
-                f"Response 0, Reward {rewards[best_idx].item():.4f}:\n{responses[best_idx]}"
+                f"Response 0, Reward {rewards[best_idx]:.4f}:\n{evaluation_requests[best_idx].response}"
             )
             print("------------------------------------")
             print(
-                f"Response -1, Reward {rewards[last_idx].item():.4f}:\n{responses[last_idx]}"
+                f"Response -1, Reward {rewards[last_idx]:.4f}:\n{evaluation_requests[last_idx].response}"
             )
 
-        messages = [messages[idx] for idx in max_reward_index if idx != -1]
-        responses = [responses[idx] for idx in max_reward_index if idx != -1]
+        # pick the best response for each query
+        rewards = torch.tensor(rewards, dtype=torch.float32).reshape(-1, self.k)
+        rewards = (rewards - rewards.mean(1)[:, None])
+        rewards = rewards * (rewards >= 0)
+        rewards = rewards.flatten()
+
+        mess = []
+        resp = []
+        for i, rew in enumerate(rewards):
+            if rew > 0:
+                mess.append(evaluation_requests[i].messages)
+                resp.append(evaluation_requests[i].response)
 
         query_response_tensors, query_response_mask, response_mask = (
             create_joint_tensors(
                 self.tokenizer,
-                messages,
-                responses,
-                max_length=4096,
+                mess,
+                resp,
             )
         )
 
