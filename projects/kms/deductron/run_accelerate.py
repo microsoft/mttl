@@ -76,7 +76,6 @@ def train(args):
     off_batch_size = args.offbsz
     inn_batch_size = args.innbsz
     acc_steps = off_batch_size // inn_batch_size
-    total_steps = max_epochs * max_off_epochs
 
     accelerator = Accelerator(
         mixed_precision="bf16",
@@ -126,14 +125,9 @@ def train(args):
         lr=args.lr,
     )
 
-    if args.a == "rft":
-        total_steps = math.ceil(
-            (args.offepc * args.epc)
-        )
-    elif args.a == "rloo":
-        total_steps = math.ceil(
-            (args.offepc * args.epc)
-        )
+    total_steps = (max_epochs * max_off_epochs * onl_batch_size) // (
+        acc_steps * acc_state.num_processes
+    )
     scheduler = CosineWarmupScheduler(
         optimizer,
         max_lr=args.lr,
@@ -147,7 +141,9 @@ def train(args):
     GenerationBackend.init(args.b, model_name=models[args.m], seed=args.s)
 
     with accelerator.main_process_first():
-        train_dataset, val_dataset, test_dataset = prepare_nqa_dataset(algo.tokenizer, block_size=2048)
+        train_dataset, val_dataset, test_dataset = prepare_nqa_dataset(
+            algo.tokenizer, block_size=2048
+        )
 
     sample_indices = np.random.choice(len(val_dataset), onl_batch_size, replace=False)
     val_queries = [val_dataset[int(i)]["source"] for i in sample_indices]
@@ -173,7 +169,9 @@ def train(args):
     for epoch in range(max_epochs):
         epoch_stats = AccumulatorDict()
 
-        sample_indices = np.random.choice(len(train_dataset), onl_batch_size, replace=False)
+        sample_indices = np.random.choice(
+            len(train_dataset), onl_batch_size, replace=False
+        )
         queries_batch = [train_dataset[int(i)]["source"] for i in sample_indices]
         labels_batch = [train_dataset[int(i)]["label"] for i in sample_indices]
 
@@ -191,7 +189,10 @@ def train(args):
         accelerator.print("Beginning updating the policy")
         accelerator.print("Length of the dataset:", len(epoch_dataset))
 
-        torch.save(episode_data, f"{args.o}/episode_data_{acc_state.local_process_index}_{epoch}.pt")
+        torch.save(
+            episode_data,
+            f"{args.o}/episode_data_{acc_state.local_process_index}_{epoch}.pt",
+        )
 
         # offline steps
         train_iterator = iter(dataloader)
@@ -206,7 +207,7 @@ def train(args):
                 train_iterator,
                 total=len(dataloader),
                 desc="Offline epoch {}".format(off_epoch),
-                disable=not acc_state.is_main_process
+                disable=not acc_state.is_main_process,
             ):
                 loss_batch = 0
                 batch = [b.to(acc_state.device) for b in batch]
@@ -223,15 +224,13 @@ def train(args):
                 del batch
                 torch.cuda.empty_cache()
                 global_step += 1
-
-                accelerator.print(
-                    f"Epoch: {epoch}, Off Epoch: {off_epoch}, "
-                    f"Step: {global_step}, {algo.__class__.__name__}, "
-                    f"Loss: {epoch_stats.mean('loss'):.4f}, "
-                    f"Lr: {scheduler.get_last_lr()[0]:.6f}"
-                )
-
-            scheduler.step()
+                scheduler.step()
+            accelerator.print(
+                f"Epoch: {epoch}, Off Epoch: {off_epoch}, "
+                f"Step: {global_step}, {algo.__class__.__name__}, "
+                f"Loss: {epoch_stats.mean('loss'):.4f}, "
+                f"Lr: {scheduler.get_last_lr()[0]:.6f}"
+            )
 
         del dataloader
         del episode_data
@@ -254,7 +253,7 @@ def train(args):
                     **algo.stats.get(),
                 }
             )
-            
+
             # save stats
             with open(f"{args.o}/training_stats.json", "w") as f:
                 import json
@@ -303,7 +302,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--offepc", type=int, help="Number of offline epochs", default=4
     )
-    parser.add_argument("--offbsz", type=int, help="Offline batch size **per device**", default=8)
+    parser.add_argument(
+        "--offbsz", type=int, help="Offline batch size **per device**", default=8
+    )
     parser.add_argument(
         "--innbsz", type=int, help="Inner/Grad accumulation batch size", default=1
     )

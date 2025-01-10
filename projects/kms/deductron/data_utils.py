@@ -191,13 +191,13 @@ def pad_query_and_response(
             query_response_mask = torch.cat((pad_slice_mask, query_response_mask), 1)
             response_mask = torch.cat((pad_slice_mask, response_mask), 1)
 
-    if max_length is not None and padding_side == 'right':
+    if max_length is not None and padding_side == "right":
         return (
             query_response[:, :max_length],
             query_response_mask[:, :max_length],
             response_mask[:, :max_length],
         )
-    elif max_length is not None and padding_side == 'left':
+    elif max_length is not None and padding_side == "left":
         return (
             query_response[:, -max_length:],
             query_response_mask[:, -max_length:],
@@ -293,9 +293,9 @@ def prepare_nqa_dataset(tokenizer, block_size=2048):
     from datasets import load_dataset
 
     dataset = load_dataset("sordonia/narrativeqa_sanitized", split="train")
-    train_dataset = dataset.filter(lambda x: x['split'] == 'train', num_proc=16)
-    valid_dataset = dataset.filter(lambda x: x['split'] == 'validation', num_proc=16)
-    test_dataset = dataset.filter(lambda x: x['split'] == 'test', num_proc=16)
+    train_dataset = dataset.filter(lambda x: x["split"] == "train", num_proc=16)
+    valid_dataset = dataset.filter(lambda x: x["split"] == "validation", num_proc=16)
+    test_dataset = dataset.filter(lambda x: x["split"] == "test", num_proc=16)
 
     def chunk_row(example):
         sources, labels, dids = [], [], []

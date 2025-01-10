@@ -57,12 +57,7 @@ class SGLGenerator:
         assert cls._instance is not None, "SGLGenerator not initialized"
         return cls._instance
 
-    def __init__(
-        self,
-        model_name,
-        seed,
-        dp_size=2
-    ):
+    def __init__(self, model_name, seed, dp_size=2):
         self.model_name = model_name
         self.seed = seed
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -75,14 +70,16 @@ class SGLGenerator:
         from sglang.utils import execute_shell_command, wait_for_server
         import os
 
-        server_process = execute_shell_command(f"""python3 -m sglang.launch_server \
+        server_process = execute_shell_command(
+            f"""python3 -m sglang.launch_server \
 --model-path {self.model_name} \
 --host 0.0.0.0 --port 30000 \
---log-level warning \
+--log-level info \
 --random-seed {self.seed} \
---base-gpu-id {2} \
+--base-gpu-id 2 \
 --dp-size {self.dp_size}
-""")
+"""
+        )
 
         wait_for_server("http://localhost:30000")
         self.process = server_process

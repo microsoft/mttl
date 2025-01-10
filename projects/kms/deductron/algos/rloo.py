@@ -147,8 +147,8 @@ class RLOO(Algo):
         self.stats.accumulate("finished", (100.0 * np.sum(finished) / len(finished)))
 
         # rloo advantages
-        rewards = torch.tensor(rewards, dtype=torch.float32).view(self.k, -1)
-        baseline = (rewards.sum(0) - rewards) / (self.k - 1)
+        rewards = torch.tensor(rewards, dtype=torch.float32).view(-1, self.k)
+        baseline = (rewards.sum(1) - rewards) / (self.k - 1)
         advantages = (rewards - baseline).view(-1, 1)
 
         if acc_state.is_main_process:

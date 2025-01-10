@@ -37,11 +37,13 @@ def get_task(task_name: str):
 
 
 class SummaryAutoencoderTask:
-    def get_rewards(
-        self, model, tokenizer, messages, responses, labels, temperature=DEFAULT_TEMP
-    ):
+    def get_rewards(self, model, tokenizer, requests, temperature=DEFAULT_TEMP):
         from projects.kms.deductron.data_utils import create_joint_tensors
         from projects.kms.deductron.utils import get_logprobs
+
+        messages = [r.messages for r in requests]
+        responses = [r.response for r in requests]
+        finished = [r.finished for r in requests]
 
         problems = [m[-1]["content"] for m in messages]
         queries = [
@@ -50,7 +52,7 @@ class SummaryAutoencoderTask:
         ]
         # for auto-encoding, we are trying to reconstruct the paragraph itself!
         qr, qrm, rm = create_joint_tensors(
-            tokenizer, queries, problems, pad_to_length=4096
+            tokenizer, queries, problems, finished, max_length=4096, pad_to_length=4096
         )
         log_probs = get_logprobs(
             model,
@@ -67,7 +69,12 @@ class SummaryAutoencoderTask:
         ]
         # for auto-encoding, we are trying to reconstruct the paragraph itself!
         qr, qrm, rm = create_joint_tensors(
-            tokenizer, queries_empty, problems, pad_to_length=4096
+            tokenizer,
+            queries_empty,
+            problems,
+            finished,
+            max_length=4096,
+            pad_to_length=4096,
         )
         log_probs_base = get_logprobs(
             model,

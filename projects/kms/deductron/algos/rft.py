@@ -21,6 +21,12 @@ from projects.kms.deductron.utils import (
 )
 from projects.kms.deductron.vllm_utils import VLLMGenerator
 from accelerate.state import AcceleratorState
+from dataclasses import dataclass
+
+
+@dataclass
+class PriRequest(Request):
+    prior_reward: float = None
 
 
 class RFT(Algo):
@@ -64,6 +70,7 @@ class RFT(Algo):
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name,
         )
+        self.use_prior = True
         if not self.tokenizer.pad_token:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
@@ -100,7 +107,7 @@ class RFT(Algo):
             query_ids, messages, responses, labels, finished
         ):
             evaluation_requests.append(
-                Request(
+                PriRequest(
                     query_id=query_id,
                     messages=query_messages,
                     response=query_response,
@@ -113,14 +120,36 @@ class RFT(Algo):
         rewards = task.get_rewards(
             model=self.ref_model,
             tokenizer=self.tokenizer,
-            messages=[r.messages for r in evaluation_requests],
-            responses=[r.response for r in evaluation_requests],
-            labels=labels,
+            requests=evaluation_requests,
             temperature=self.temperature,
         )
+
+        qr, qrm, rm = create_joint_tensors(
+            self.tokenizer,
+            [r.messages for r in evaluation_requests],
+            [r.response for r in evaluation_requests],
+            [r.finished for r in evaluation_requests],
+            max_length=4096,
+            pad_to_length=4096,
+        )
+        log_probs = (
+            get_logprobs(
+                self.ref_model,
+                qr,
+                qrm,
+                rm,
+                batch_size=2,
+                temperature=self.temperature,
+            )
+            .cpu()
+            .tolist()
+        )
+        del qr, qrm, rm
+        torch.cuda.empty_cache()
         self.ref_model.to("cpu")
 
         RequestUtils.populate(evaluation_requests, rewards, "reward")
+        RequestUtils.populate(evaluation_requests, log_probs, "prior_reward")
         return evaluation_requests
 
     @torch.no_grad()
@@ -129,18 +158,21 @@ class RFT(Algo):
         prompts: List[str],
         labels: List[str],
     ):
-        evaluation_requests = self.compute_rewards(
-            prompts,
-            labels,
-            k=self.k
-        )
+        evaluation_requests = self.compute_rewards(prompts, labels, k=self.k)
 
         rewards = [r.reward for r in evaluation_requests]
         finished = [r.finished for r in evaluation_requests]
+        pri_rewards = [r.prior_reward for r in evaluation_requests]
+
         max_reward, avg_reward = RequestUtils.gather_max_avg_reward(evaluation_requests)
+        pri_max_reward, pri_avg_reward = RequestUtils.gather_max_avg_reward(
+            evaluation_requests, "prior_reward"
+        )
 
         self.stats.accumulate("avg_reward", avg_reward)
         self.stats.accumulate("max_reward", max_reward)
+        self.stats.accumulate("pri_max_reward", pri_max_reward)
+        self.stats.accumulate("pri_avg_reward", pri_avg_reward)
         self.stats.accumulate("finished", (100.0 * np.sum(finished) / len(finished)))
 
         if self.acc_state.is_main_process:
@@ -176,22 +208,25 @@ class RFT(Algo):
 
         # pick the best response for each query
         rewards = torch.tensor(rewards, dtype=torch.float32).reshape(-1, self.k)
-        rewards = (rewards - rewards.mean(1)[:, None])
-        rewards = rewards * (rewards >= 0)
-        rewards = rewards.flatten()
+        pri_rewards = torch.tensor(pri_rewards, dtype=torch.float32).reshape(-1, self.k)
 
-        mess = []
-        resp = []
+        messages = []
+        responses = []
+        finished = []
         for i, rew in enumerate(rewards):
-            if rew > 0:
-                mess.append(evaluation_requests[i].messages)
-                resp.append(evaluation_requests[i].response)
+            max_reward_idx = torch.argmax(rew + pri_rewards[i]).item()
+            messages.append(evaluation_requests[i * self.k + max_reward_idx].messages)
+            responses.append(evaluation_requests[i * self.k + max_reward_idx].response)
+            finished.append(evaluation_requests[i * self.k + max_reward_idx].finished)
 
         query_response_tensors, query_response_mask, response_mask = (
             create_joint_tensors(
                 self.tokenizer,
-                mess,
-                resp,
+                messages,
+                responses,
+                finished,
+                max_length=4096,
+                pad_to_length=4096,
             )
         )
 

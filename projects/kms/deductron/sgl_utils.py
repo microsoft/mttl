@@ -78,7 +78,7 @@ class SGLGeneratorParallel:
 
     def shutdown(self):
         from sglang.utils import terminate_process
-        
+
         terminate_process(self.process)
 
         print("Process killed, waiting for shutdown.")
@@ -88,13 +88,15 @@ class SGLGeneratorParallel:
         import os
         from sglang.utils import execute_shell_command, wait_for_server
 
-        server_process = execute_shell_command(f"""python3 -m sglang.launch_server \
+        server_process = execute_shell_command(
+            f"""python3 -m sglang.launch_server \
             --model-path {self.model_name} \
             --host 0.0.0.0 --port {self.port} \
             --log-level warning \
             --random-seed {self.seed} \
             --base-gpu-id {self.base_gpu_id}
-        """)
+        """
+        )
 
         print("SGL Launched! Waiting for host")
         wait_for_server(f"http://localhost:{self.port}")
@@ -305,14 +307,16 @@ class SGLGenerator:
         from sglang.utils import execute_shell_command, wait_for_server
         import os
 
-        server_process = execute_shell_command(f"""python3 -m sglang.launch_server \
+        server_process = execute_shell_command(
+            f"""python3 -m sglang.launch_server \
 --model-path {self.model_name} \
 --host 0.0.0.0 --port 30000 \
 --log-level warning \
 --random-seed {self.seed} \
 --base-gpu-id {self.world_size} \
 --dp-size 1
-""")
+"""
+        )
 
         wait_for_server("http://localhost:30000")
         self.process = server_process

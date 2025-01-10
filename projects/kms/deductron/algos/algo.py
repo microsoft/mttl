@@ -41,9 +41,9 @@ class RequestUtils:
             setattr(request, key, value)
 
     @classmethod
-    def gather_max_avg_reward(cls, requests: List[Request]):
-        rewards_by_query_id = cls.group_by_query_id(requests, "reward")
-        all_rewards = [r.reward for r in requests]
+    def gather_max_avg_reward(cls, requests: List[Request], key="reward"):
+        rewards_by_query_id = cls.group_by_query_id(requests, key)
+        all_rewards = [getattr(r, key) for r in requests]
         max_rewards = [max(rewards) for rewards in rewards_by_query_id.values()]
         return np.mean(max_rewards), np.mean(all_rewards)
 

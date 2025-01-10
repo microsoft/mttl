@@ -94,7 +94,7 @@ def rank_zero_only(func):
 
 def gather_and_concatenate(data, dim=0):
     from accelerate.state import AcceleratorState
-    
+
     state = AcceleratorState()
     world_size = state.num_processes
 
