@@ -72,7 +72,7 @@ class RFT(Algo):
         prompts: List[str],
         labels: List[str],
     ):
-        from .utils import get_task
+        from .task import get_task
 
         vllm = GenerationBackend.get()
 
@@ -128,48 +128,50 @@ class RFT(Algo):
         self.stats.accumulate("max_reward", max_reward)
         self.stats.accumulate("finished", (100.0 * np.sum(finished) / len(finished)))
 
-        print("====================================")
-        print("Optimistic reward:", max_reward)
-        print("Average reward:", avg_reward)
-        print(
-            "Reward distribution:",
-            print_metrics(
-                [
-                    np.mean(rewards)
-                    for rewards in RequestUtils.group_by_query_id(
-                        evaluation_requests, "reward"
-                    ).values()
-                ]
-            ),
-        )
-        print("Finished: ", (100.0 * np.sum(finished)) / len(finished), "%")
-        print("====================================")
-
         # pick the best response for each query
         rewards = torch.tensor(rewards, dtype=torch.float32).reshape(-1, self.k)
-        max_reward = torch.argmax(rewards, dim=1)
-        for i, idx in enumerate(max_reward):
+        max_reward_index = torch.argmax(rewards, dim=1)
+        for i, idx in enumerate(max_reward_index):
             if rewards[i, idx] > 0:
-                max_reward[i] = (i * self.k + idx)
+                max_reward_index[i] = (i * self.k + idx)
             else:
-                max_reward[i] = -1
-        max_reward = max_reward.tolist()
+                max_reward_index[i] = -1
+        max_reward_index = max_reward_index.tolist()
+        rewards = rewards.flatten()
 
-        print("====================================")
-        print("Response 0 > Response -1:")
-        sorted_idx = torch.argsort(rewards.flatten()[:5], descending=True)
-        best_idx = sorted_idx[0].item()
-        last_idx = sorted_idx[-1].item()
-        print(
-            f"Response 0, Reward {rewards[best_idx].item():.4f}:\n{responses[best_idx]}"
-        )
-        print("------------------------------------")
-        print(
-            f"Response -1, Reward {rewards[last_idx].item():.4f}:\n{responses[last_idx]}"
-        )
+        if self.acc_state.is_main_process:
+            print("====================================")
+            print("Optimistic reward:", max_reward)
+            print("Average reward:", avg_reward)
+            print(
+                "Reward distribution:",
+                print_metrics(
+                    [
+                        np.mean(rewards)
+                        for rewards in RequestUtils.group_by_query_id(
+                            evaluation_requests, "reward"
+                        ).values()
+                    ]
+                ),
+            )
+            print("Finished: ", (100.0 * np.sum(finished)) / len(finished), "%")
+            print("====================================")
 
-        messages = [messages[idx] for idx in max_reward if idx != -1]
-        responses = [responses[idx] for idx in max_reward if idx != -1]
+            print("====================================")
+            print("Response 0 > Response -1:")
+            sorted_idx = torch.argsort(rewards[:5], descending=True)
+            best_idx = sorted_idx[0].item()
+            last_idx = sorted_idx[-1].item()
+            print(
+                f"Response 0, Reward {rewards[best_idx].item():.4f}:\n{responses[best_idx]}"
+            )
+            print("------------------------------------")
+            print(
+                f"Response -1, Reward {rewards[last_idx].item():.4f}:\n{responses[last_idx]}"
+            )
+
+        messages = [messages[idx] for idx in max_reward_index if idx != -1]
+        responses = [responses[idx] for idx in max_reward_index if idx != -1]
 
         query_response_tensors, query_response_mask, response_mask = (
             create_joint_tensors(

@@ -32,7 +32,7 @@ from projects.kms.deductron.utils import (
 import bitsandbytes as bnb
 from accelerate.state import PartialState
 from accelerate.state import AcceleratorState
-from accelerate.utils import gather
+from accelerate import DeepSpeedPlugin
 
 
 models = {
@@ -78,8 +78,10 @@ def train(args):
     total_steps = max_epochs * max_off_epochs
 
     accelerator = Accelerator(
-        mixed_precision="bf16", gradient_accumulation_steps=acc_steps
+        mixed_precision="bf16",
+        gradient_accumulation_steps=acc_steps,
     )
+
     acc_state = AcceleratorState()
     part_state = PartialState()
 
@@ -124,7 +126,6 @@ def train(args):
     optimizer = bnb.optim.Adam8bit(
         optimizer_grouped_parameters,
         lr=args.lr,
-        optim_bits=8,
     )
 
     if args.a == "rft":
@@ -143,10 +144,7 @@ def train(args):
         max_steps=total_steps,
     )
 
-    # Initialize the VLLM model after the DDP initialization
-    algo.model, optimizer, scheduler = accelerator.prepare(
-        algo.model, optimizer, scheduler
-    )
+    algo.model = accelerator.prepare(algo.model)
     GenerationBackend.init(args.b, model_name=models[args.m], seed=args.s)
 
     with accelerator.main_process_first():
@@ -169,14 +167,10 @@ def train(args):
             list(zip(queries_batch, labels_batch))
         ) as partial_batch:
             part_queries, part_labels = zip(*partial_batch)
-            part_data = algo.gather_episodes(part_queries, part_labels)
-
-        episode_data = [gather(d.to(acc_state.device)).to("cpu") for d in part_data]
-        torch.cuda.empty_cache()
+            episode_data = algo.gather_episodes(part_queries, part_labels)
 
         epoch_dataset = MultiTensorDataset(*episode_data)
         dataloader = get_dataloader(epoch_dataset, inn_batch_size)
-        dataloader = accelerator.prepare(dataloader)
 
         if acc_state.is_main_process:
             print("====================================")
@@ -196,6 +190,7 @@ def train(args):
                 train_iterator,
                 total=len(dataloader),
                 desc="Offline epoch {}".format(off_epoch),
+                disable=not acc_state.is_main_process
             ):
                 loss_batch = 0
                 batch = [b.to(acc_state.device) for b in batch]
@@ -210,8 +205,8 @@ def train(args):
                 torch.cuda.synchronize()
                 optimizer.zero_grad()
                 torch.cuda.empty_cache()
-                global_step += 1
                 scheduler.step()
+                global_step += 1
 
                 if acc_state.is_main_process:
                     print(
@@ -263,7 +258,7 @@ def train(args):
             if epoch == 0 or training_stats[-1]["avg_reward"] >= np.max(
                 [t["avg_reward"] for t in training_stats[:-1]]
             ):
-                if ddp_state.ddp:
+                if acc_state.num_processes > 1:
                     algo.model.module.save_pretrained(f"{args.o}/model")
                 else:
                     algo.model.save_pretrained(f"{args.o}/model")

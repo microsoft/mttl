@@ -126,21 +126,21 @@ def get_logprobs(
 ):
     from accelerate.state import PartialState
 
-    acc_state = PartialState()
     all_logprobs = []
+    acc_state = PartialState()
 
     for batch in tqdm(
         range(0, len(query_response_mask), batch_size),
-        desc="Gathering logprobs...",
-        disable=not acc_state.is_main_process
+        desc=f"[{acc_state.local_process_index}] Gathering logprobs...",
+        position=acc_state.local_process_index,
     ):
         with torch.autocast(
             device_type="cuda",
             dtype=torch.bfloat16,
         ):
-            mb_qm = query_response_mask[batch : batch + batch_size].to(model.device)
-            mb_q = query_response[batch : batch + batch_size].to(model.device)
-            mb_r = response_mask[batch : batch + batch_size].to(model.device)
+            mb_qm = query_response_mask[batch : batch + batch_size].to(acc_state.device)
+            mb_q = query_response[batch : batch + batch_size].to(acc_state.device)
+            mb_r = response_mask[batch : batch + batch_size].to(acc_state.device)
             output = model(
                 input_ids=mb_q,
                 attention_mask=mb_qm,

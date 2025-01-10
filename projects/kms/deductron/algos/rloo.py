@@ -72,7 +72,7 @@ class RLOO(Algo):
         prompts: List[str],
         labels: List[str],
     ):
-        from .utils import get_task
+        from .task import get_task
         from accelerate.state import AcceleratorState
 
         acc_state = AcceleratorState()

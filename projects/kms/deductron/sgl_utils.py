@@ -169,9 +169,17 @@ class SGLGeneratorClient:
     _instance = None
 
     def __init__(self, model_name, **kwargs):
+        import os
+        from sglang.utils import execute_shell_command, wait_for_server
+
         self.port = 30000
         self.model_name = model_name
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+        print("Waiting for SGLang server...")
+        wait_for_server(f"http://localhost:{self.port}")
+        print("Server found!")
+
         SGLGeneratorClient._instance = self
 
     @state.on_main_process
