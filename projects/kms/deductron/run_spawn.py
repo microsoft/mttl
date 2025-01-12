@@ -1,4 +1,5 @@
 import argparse
+from contextlib import contextmanager
 import gc
 import math
 from multiprocessing import Process
@@ -10,7 +11,6 @@ import sys
 import time
 
 import numpy as np
-from projects.kms.deductron.launch_sgl import SGLGenerator
 import torch
 from datasets import load_dataset
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -24,6 +24,7 @@ from projects.kms.deductron.data_utils import (
     get_dataloader,
     prepare_nqa_dataset,
 )
+from launch_sgl import SGLGenerator, is_server_up
 from transformers.trainer_pt_utils import get_parameter_names
 from projects.kms.deductron.ddp_utils import init_ddp, gather_and_concatenate
 from projects.kms.deductron.gen_utils import GenerationBackend
@@ -37,9 +38,9 @@ from projects.kms.deductron.utils import (
     setup_output_directory,
 )
 import bitsandbytes as bnb
-from accelerate.state import PartialState
-from accelerate.state import AcceleratorState
-from accelerate import DeepSpeedPlugin
+from projects.kms.deductron.ddp_utils import ddp_state
+from sglang.utils import wait_for_server
+import torch.multiprocessing as mp
 
 
 models = {
@@ -61,7 +62,16 @@ def get_algo_kwargs(args, klass):
     return {k: v for k, v in vars(args).items() if k in argnames}
 
 
-def train(args):
+def train(local_rank, args):
+    if local_rank == 0:
+        print("=============================")
+        print("Bringing up SGL server")
+        generator = SGLGenerator(models[args.m], args.s)
+
+    # wait for generator to be up!
+    GenerationBackend.init(args.b, model_name=models[args.m], seed=args.s)
+    init_ddp(local_rank, args.P)
+
     # output directory
     torch.manual_seed(args.s)
     if torch.cuda.is_available():
@@ -78,24 +88,18 @@ def train(args):
 
     max_epochs = args.epc
     max_off_epochs = args.offepc
-    onl_batch_size = args.onlbsz
+    # total batch size across devices
+    onl_batch_size = args.onlbsz * ddp_state.num_processes
     # this is *per device*
     off_batch_size = args.offbsz
     inn_batch_size = args.innbsz
     acc_steps = off_batch_size // inn_batch_size
 
-    accelerator = Accelerator(
-        mixed_precision="bf16",
-        gradient_accumulation_steps=acc_steps,
-    )
-    part_state = PartialState()
-    acc_state = AcceleratorState()
-
     assert (
-        onl_batch_size % acc_state.num_processes == 0
+        onl_batch_size % ddp_state.num_processes == 0
     ), "Batch size must be divisible by the number of GPUs!"
 
-    if acc_state.is_main_process:
+    if ddp_state.is_main_process:
         setup_output_directory(args.o)
         save_args(args, args.o)
 
@@ -104,10 +108,12 @@ def train(args):
         k=args.k,
         temperature=args.t,
         max_tokens=args.maxtok,
-        device=acc_state.device,
-        task="summary_autoencoder",
+        device=ddp_state.device,
+        task="summary_next_chunk_prediction",
         **get_algo_kwargs(args, algos[args.a]),
     )
+    algo.model.gradient_checkpointing_enable()
+    algo.model = DDP(algo.model, device_ids=[ddp_state.local_process_index], output_device=ddp_state.local_process_index)
 
     decay_parameters = get_parameter_names(algo.model, [torch.nn.LayerNorm])
     decay_parameters = [name for name in decay_parameters if "bias" not in name]
@@ -130,6 +136,7 @@ def train(args):
         optimizer_grouped_parameters,
         lr=args.lr,
     )
+    ddp_state.print(torch.cuda.mem_get_info())
 
     if args.a == 'rloo':
         num_ex = onl_batch_size * args.k
@@ -137,9 +144,8 @@ def train(args):
         num_ex = onl_batch_size
 
     total_steps = (max_epochs * max_off_epochs * num_ex) // (
-        acc_steps * acc_state.num_processes
+        acc_steps * ddp_state.num_processes
     )
-
     scheduler = CosineWarmupScheduler(
         optimizer,
         max_lr=args.lr,
@@ -147,12 +153,9 @@ def train(args):
         warmup_steps=0.1 * total_steps,
         max_steps=total_steps,
     )
+    ddp_state.print("Scheduler set! Total steps:", total_steps)
 
-    algo.model = accelerator.prepare(algo.model)
-    scheduler = accelerator.prepare(scheduler)
-    GenerationBackend.init(args.b, model_name=models[args.m], seed=args.s)
-
-    with accelerator.main_process_first():
+    with ddp_state.main_process_first():
         train_dataset, val_dataset, test_dataset = prepare_nqa_dataset(
             algo.tokenizer, block_size=2048
         )
@@ -163,23 +166,21 @@ def train(args):
 
     training_stats = []
     # do validation
-    with part_state.split_between_processes(
+    with ddp_state.split_between_processes(
         list(zip(val_queries, val_labels))
     ) as partial_batch:
+        algo.model.eval()
         part_queries, part_labels = zip(*partial_batch)
         val_requests = algo.compute_rewards(part_queries, part_labels, k=1)
-        val_reward = torch.tensor(np.mean([r.reward for r in val_requests]), device=acc_state.device)
+        val_reward = torch.tensor(np.mean([r.reward for r in val_requests]), device=ddp_state.device)
 
-    torch.distributed.all_reduce(val_reward, op=torch.distributed.ReduceOp.SUM)
-    val_reward = (val_reward / acc_state.num_processes).item()
-    acc_state.wait_for_everyone()
-
+    torch.distributed.all_reduce(val_reward, op=torch.distributed.ReduceOp.AVG)
     training_stats.append(
         {
-            "val_reward": val_reward,
+            "val_reward": val_reward.item(),
         }
     )
-    accelerator.print("Val Reward at Init: ", val_reward)
+    ddp_state.wait_for_everyone()
 
     assert (
         onl_batch_size >= args.subs
@@ -196,7 +197,7 @@ def train(args):
         labels_batch = [train_dataset[int(i)]["label"] for i in sample_indices]
 
         # create dataset out of gathered episodes
-        with part_state.split_between_processes(
+        with ddp_state.split_between_processes(
             list(zip(queries_batch, labels_batch))
         ) as partial_batch:
             part_queries, part_labels = zip(*partial_batch)
@@ -205,13 +206,13 @@ def train(args):
         epoch_dataset = MultiTensorDataset(*episode_data)
         dataloader = get_dataloader(epoch_dataset, inn_batch_size)
 
-        accelerator.print("====================================")
-        accelerator.print("Beginning updating the policy")
-        accelerator.print("Length of the dataset:", len(epoch_dataset))
+        ddp_state.print("====================================")
+        ddp_state.print("Beginning updating the policy")
+        ddp_state.print("Length of the dataset:", len(epoch_dataset))
 
         torch.save(
             episode_data,
-            f"{args.o}/episode_data_{acc_state.local_process_index}_{epoch}.pt",
+            f"{args.o}/episode_data_{ddp_state.local_process_index}_{epoch}.pt",
         )
 
         # offline steps
@@ -221,37 +222,39 @@ def train(args):
         off_epoch = 0
 
         for off_epoch in range(max_off_epochs):
+            algo.model.train()
+            optimizer.zero_grad()
             train_iterator = iter(dataloader)
 
             for micro_step, batch in enumerate(tqdm(
                 train_iterator,
                 total=len(dataloader),
                 desc="Offline epoch {}".format(off_epoch),
-                disable=not acc_state.is_main_process,
+                disable=not ddp_state.is_main_process,
             )):
                 loss_batch = 0
-                batch = [b.to(acc_state.device) for b in batch]
+                batch = [b.to(ddp_state.device) for b in batch]
 
-                with accelerator.accumulate(algo.model):
-                    loss = algo.compute_loss(batch)
-                    accelerator.backward(loss)
+                algo.model.require_backward_grad_sync = (micro_step + 1 == acc_steps)
+                loss = algo.compute_loss(batch)
 
-                    if accelerator.sync_gradients:
-                        accelerator.clip_grad_norm_(
-                            algo.model.parameters(), 
-                            1.0,
-                        )
-
+                (loss / acc_steps).backward()
                 epoch_stats.accumulate("loss", loss.item())
-                optimizer.step()
-                optimizer.zero_grad()
-                scheduler.step()
-
                 del batch
+                del loss
                 torch.cuda.empty_cache()
+
+                if micro_step > 0 and (micro_step + 1) % acc_steps == 0:
+                    torch.nn.utils.clip_grad_norm_(algo.model.parameters(), 1.0)
+                    optimizer.step()
+                    torch.cuda.synchronize()
+                    scheduler.step()
+                    optimizer.zero_grad()
+                    torch.cuda.empty_cache()
+
                 global_step += 1
 
-            accelerator.print(
+            ddp_state.print(
                 f"Epoch: {epoch}, Off Epoch: {off_epoch}, "
                 f"Step: {global_step}, {algo.__class__.__name__}, "
                 f"Loss: {epoch_stats.mean('loss'):.4f}, "
@@ -260,21 +263,25 @@ def train(args):
 
         del dataloader
         del episode_data
+        optimizer.zero_grad()
         gc.collect()
         torch.cuda.empty_cache()
-        acc_state.wait_for_everyone()
+        ddp_state.wait_for_everyone()
 
         # do validation
-        with part_state.split_between_processes(
+        with ddp_state.split_between_processes(
             list(zip(val_queries, val_labels))
         ) as partial_batch:
+            algo.model.eval()
             part_queries, part_labels = zip(*partial_batch)
             val_requests = algo.compute_rewards(part_queries, part_labels, k=1)
-            val_reward = torch.tensor(np.mean([r.reward for r in val_requests]), device=acc_state.device)
-            torch.distributed.all_reduce(val_reward, op=torch.distributed.ReduceOp.SUM)
-            val_reward = (val_reward / acc_state.num_processes).item()
+            val_reward = torch.tensor(np.mean([r.reward for r in val_requests]), device=ddp_state.device)
 
-        if acc_state.is_main_process:
+        torch.distributed.all_reduce(val_reward, op=torch.distributed.ReduceOp.AVG)
+        val_reward = val_reward.item()
+        ddp_state.wait_for_everyone()
+
+        if ddp_state.is_main_process:
             # append a bunch of training stats
             training_stats.append(
                 {
@@ -297,7 +304,7 @@ def train(args):
             if epoch == 0 or training_stats[-1]["val_reward"] >= np.max(
                 [t["val_reward"] for t in training_stats[:-1]]
             ):
-                if acc_state.num_processes > 1:
+                if ddp_state.num_processes > 1:
                     algo.model.module.save_pretrained(f"{args.o}/model")
                 else:
                     algo.model.save_pretrained(f"{args.o}/model")
@@ -318,9 +325,30 @@ def train(args):
 
         # update the weights of the data generator after the epoch
         GenerationBackend.get().load_weights(algo.model)
-        acc_state.wait_for_everyone()
+        ddp_state.wait_for_everyone()
 
-    GenerationBackend.get().shutdown()
+    generator.shutdown()
+
+
+@contextmanager
+def patch_environment(**kwargs):
+    existing_vars = {}
+    for key, value in kwargs.items():
+        key = key.upper()
+        if key in os.environ:
+            existing_vars[key] = os.environ[key]
+        os.environ[key] = str(value)
+
+    try:
+        yield
+    finally:
+        for key in kwargs:
+            key = key.upper()
+            if key in existing_vars:
+                # restore previous value
+                os.environ[key] = existing_vars[key]
+            else:
+                os.environ.pop(key, None)
 
 
 if __name__ == "__main__":
@@ -354,6 +382,7 @@ if __name__ == "__main__":
         "--fast", action="store_true", help="Use fast mode (no eval on epoch 0)"
     )
     parser.add_argument("-d", type=str, help="Run description", default=None)
+    parser.add_argument("-P", type=int, help="Num Processes", default=1)
 
     # parse known args first
     partial_args, unknown_args = parser.parse_known_args()
@@ -364,4 +393,13 @@ if __name__ == "__main__":
     # Parse final args
     final_args = parser.parse_args()
 
-    train(final_args)
+    if is_server_up():
+        raise ValueError("Terminate previous server before starting!")
+
+    os.environ["OMP_NUM_THREADS"] = '1'
+    mp.spawn(
+        train,
+        args=(final_args,),
+        nprocs=final_args.P,
+        join=True
+    )

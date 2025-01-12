@@ -20,7 +20,7 @@ from projects.kms.deductron.utils import (
     repeat,
 )
 from projects.kms.deductron.vllm_utils import VLLMGenerator
-from accelerate.state import AcceleratorState
+from projects.kms.deductron.ddp_utils import ddp_state
 from dataclasses import dataclass
 
 
@@ -54,7 +54,6 @@ class RFT(Algo):
         self.task = task
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.acc_state = AcceleratorState()
         self.stats = AccumulatorDict()
 
         self.device = device
@@ -70,7 +69,6 @@ class RFT(Algo):
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name,
         )
-        self.use_prior = True
         if not self.tokenizer.pad_token:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
@@ -116,14 +114,13 @@ class RFT(Algo):
                 )
             )
 
-        self.ref_model.to(self.acc_state.device)
+        self.ref_model.to(ddp_state.device)
         rewards = task.get_rewards(
             model=self.ref_model,
             tokenizer=self.tokenizer,
             requests=evaluation_requests,
             temperature=self.temperature,
         )
-
         qr, qrm, rm = create_joint_tensors(
             self.tokenizer,
             [r.messages for r in evaluation_requests],
@@ -132,7 +129,7 @@ class RFT(Algo):
             max_length=4096,
             pad_to_length=4096,
         )
-        log_probs = (
+        r_log_probs = (
             get_logprobs(
                 self.ref_model,
                 qr,
@@ -144,12 +141,25 @@ class RFT(Algo):
             .cpu()
             .tolist()
         )
+        self.ref_model.to("cpu")
+        m_log_probs = (
+            get_logprobs(
+                self.model,
+                qr,
+                qrm,
+                rm,
+                batch_size=2,
+                temperature=self.temperature,
+            )
+            .cpu()
+            .tolist()
+        )
+        kl_rewards = [-(m - r) for m, r in zip(m_log_probs, r_log_probs)]
         del qr, qrm, rm
         torch.cuda.empty_cache()
-        self.ref_model.to("cpu")
 
         RequestUtils.populate(evaluation_requests, rewards, "reward")
-        RequestUtils.populate(evaluation_requests, log_probs, "prior_reward")
+        RequestUtils.populate(evaluation_requests, kl_rewards, "prior_reward")
         return evaluation_requests
 
     @torch.no_grad()
@@ -175,7 +185,7 @@ class RFT(Algo):
         self.stats.accumulate("pri_avg_reward", pri_avg_reward)
         self.stats.accumulate("finished", (100.0 * np.sum(finished) / len(finished)))
 
-        if self.acc_state.is_main_process:
+        if ddp_state.is_main_process:
             print("====================================")
             print("Optimistic reward:", max_reward)
             print("Average reward:", avg_reward)
@@ -214,7 +224,7 @@ class RFT(Algo):
         responses = []
         finished = []
         for i, rew in enumerate(rewards):
-            max_reward_idx = torch.argmax(rew + pri_rewards[i]).item()
+            max_reward_idx = torch.argmax(rew + 0.1 * pri_rewards[i]).item()
             messages.append(evaluation_requests[i * self.k + max_reward_idx].messages)
             responses.append(evaluation_requests[i * self.k + max_reward_idx].response)
             finished.append(evaluation_requests[i * self.k + max_reward_idx].finished)
@@ -250,11 +260,13 @@ class RFT(Algo):
         mb_query_response_mask = mb_query_response_mask[:, :max_tokens]
         mb_response_mask = mb_response_mask[:, :max_tokens]
 
-        output = self.model(
-            input_ids=mb_query_response,
-            attention_mask=mb_query_response_mask,
-            return_dict=True,
-        )
+        with torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16):
+            output = self.model(
+                input_ids=mb_query_response,
+                attention_mask=mb_query_response_mask,
+                return_dict=True,
+            )
+
         logits = output.logits / (self.temperature + 1e-7)
         logits = torch.nn.functional.log_softmax(logits, dim=-1)
 
@@ -278,5 +290,4 @@ class RFT(Algo):
             logits,
             output,
         )
-        torch.cuda.empty_cache()
         return loss

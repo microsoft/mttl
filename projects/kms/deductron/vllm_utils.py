@@ -26,11 +26,7 @@ from vllm.executor.gpu_executor import GPUExecutor
 from vllm.worker.worker import Worker
 
 from projects.kms.deductron.utils import DEFAULT_MAX_TOKENS, DEFAULT_TEMP
-from accelerate.state import PartialState
-
-
-state = PartialState()
-
+from projects.kms.deductron.ddp_utils import ddp_state
 
 class VLLMGenerator:
     _instance = None
@@ -47,8 +43,6 @@ class VLLMGenerator:
         max_num_seqs=32,
         gpu_memory_utilization=0.8,
     ):
-        from accelerate.state import AcceleratorState
-
         self.max_num_seqs = max_num_seqs
         self.gpu_memory_utilization = gpu_memory_utilization
         self.model_name = model_name
@@ -58,7 +52,7 @@ class VLLMGenerator:
         self.start()
         VLLMGenerator._instance = self
 
-    @state.on_main_process
+    @ddp_state.on_main_process
     def start(self):
         self.process = LLM(
             self.model_name,
@@ -66,11 +60,11 @@ class VLLMGenerator:
             dtype=torch.bfloat16,
             max_num_seqs=self.max_num_seqs,
             gpu_memory_utilization=self.gpu_memory_utilization,
-            device=f"cuda:{state.num_processes}",
+            device=f"cuda:{ddp_state.num_processes}",
             seed=self.seed,
         )
 
-    @state.on_main_process
+    @ddp_state.on_main_process
     def load_weights(self, model):
         if isinstance(model, DDP):
             model = model.module
@@ -80,7 +74,7 @@ class VLLMGenerator:
             model.named_parameters()
         )
 
-    @state.on_main_process
+    @ddp_state.on_main_process
     def shutdown(self):
         del self.process
 

@@ -19,11 +19,6 @@ from vllm.worker.worker import Worker
 
 from projects.kms.deductron.ddp_utils import ddp_state
 from projects.kms.deductron.utils import DEFAULT_MAX_TOKENS, DEFAULT_TEMP
-from accelerate.state import AcceleratorState
-from accelerate.state import PartialState
-
-
-state = PartialState()
 
 
 def wait_for_server_shutdown(base_url: str, timeout: int = None) -> None:
@@ -67,7 +62,7 @@ class SGLGeneratorParallel:
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.available_devices = torch.cuda.device_count()
         self.world_size = ddp_state.ddp_world_size
-        self.rank = state.local_process_index
+        self.rank = ddp_state.local_process_index
         self.base_gpu_id = self.world_size + self.rank
         self.port = str(30000 + self.rank)
 
@@ -102,19 +97,18 @@ class SGLGeneratorParallel:
         wait_for_server(f"http://localhost:{self.port}")
         self.process = server_process
 
-    @state.on_main_process
+    @ddp_state.on_main_process
     def save_model(self, model):
         if hasattr(model, "module"):
             model = model.module
 
-        print("Serializing model...")
         model.save_pretrained(f"/tmp/saved_model")
 
     def load_weights(self, model):
         import requests
 
         self.save_model(model)
-        state.wait_for_everyone()
+        ddp_state.wait_for_everyone()
 
         response = requests.post(
             f"http://localhost:{self.port}/update_weights_from_disk",
@@ -184,7 +178,7 @@ class SGLGeneratorClient:
 
         SGLGeneratorClient._instance = self
 
-    @state.on_main_process
+    @ddp_state.on_main_process
     def save_model(self, model):
         if hasattr(model, "module"):
             model = model.module
@@ -201,7 +195,7 @@ class SGLGeneratorClient:
         import requests
 
         self.save_model(model)
-        state.wait_for_everyone()
+        ddp_state.wait_for_everyone()
 
         response = requests.post(
             f"http://localhost:{self.port}/update_weights_from_disk",
@@ -272,7 +266,6 @@ class SGLGenerator:
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.available_devices = torch.cuda.device_count()
         self.world_size = ddp_state.ddp_world_size
-        self.acc_state = AcceleratorState()
 
         free_gpus = self.available_devices - self.world_size
         assert free_gpus > 0, "Not enough free GPUs"
@@ -293,7 +286,7 @@ class SGLGenerator:
         self.start()
         SGLGenerator._instance = self
 
-    @state.on_main_process
+    @ddp_state.on_main_process
     def shutdown(self):
         from sglang.utils import terminate_process
 
@@ -302,7 +295,7 @@ class SGLGenerator:
         print("Process killed, waiting for shutdown.")
         wait_for_server_shutdown("http://localhost:30000")
 
-    @state.on_main_process
+    @ddp_state.on_main_process
     def start(self):
         from sglang.utils import execute_shell_command, wait_for_server
         import os
@@ -321,7 +314,7 @@ class SGLGenerator:
         wait_for_server("http://localhost:30000")
         self.process = server_process
 
-    @state.on_main_process
+    @ddp_state.on_main_process
     def load_weights(self, model):
         import requests
 

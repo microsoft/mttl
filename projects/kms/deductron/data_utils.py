@@ -2,9 +2,8 @@ from typing import Dict, List, Union
 
 import torch
 from torch.utils.data import DataLoader, Dataset, DistributedSampler
-from transformers import AutoTokenizer
-
 from projects.kms.deductron.ddp_utils import ddp_state
+from transformers import AutoTokenizer
 
 
 class MultiTensorDataset(Dataset):
@@ -67,15 +66,11 @@ def get_dataloader(
     Returns:
         DataLoader: Configured DataLoader instance.
     """
-    if ddp_state.ddp:
-        sampler = DistributedSampler(dataset, shuffle=shuffle)
-    else:
-        sampler = (
-            torch.utils.data.RandomSampler(dataset)
-            if shuffle
-            else torch.utils.data.SequentialSampler(dataset)
-        )
-
+    sampler = (
+        torch.utils.data.RandomSampler(dataset)
+        if shuffle
+        else torch.utils.data.SequentialSampler(dataset)
+    )
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -84,7 +79,7 @@ def get_dataloader(
         num_workers=num_workers,
         collate_fn=custom_collate_fn,
         pin_memory=pin_memory and ddp_state.device.startswith("cuda"),
-        drop_last=True if ddp_state.ddp else False,
+        drop_last=True,
     )
     return dataloader
 

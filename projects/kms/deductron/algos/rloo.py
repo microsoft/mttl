@@ -23,7 +23,7 @@ from projects.kms.deductron.utils import (
     masked_mean,
     masked_whiten,
 )
-from accelerate.state import AcceleratorState
+from projects.kms.deductron.ddp_utils import ddp_state
 
 
 class RLOO(Algo):
@@ -67,7 +67,6 @@ class RLOO(Algo):
         )
         if not self.tokenizer.pad_token:
             self.tokenizer.pad_token = self.tokenizer.eos_token
-        self.acc_state = AcceleratorState()
 
     def compute_rewards(
         self,
@@ -111,7 +110,7 @@ class RLOO(Algo):
                 )
             )
 
-        self.ref_model.to(self.acc_state.device)
+        self.ref_model.to(ddp_state.device)
 
         rewards = task.get_rewards(
             model=self.ref_model,
@@ -129,9 +128,7 @@ class RLOO(Algo):
         prompts: List[str],
         labels: List[str],
     ):
-        acc_state = AcceleratorState()
-
-        self.ref_model.to(self.acc_state.device)
+        self.ref_model.to(ddp_state.device)
         evaluation_requests = self.compute_rewards(prompts, labels, k=self.k)
         rewards = [r.reward for r in evaluation_requests]
         finished = [r.finished for r in evaluation_requests]
@@ -190,7 +187,7 @@ class RLOO(Algo):
         baseline = (rewards.sum(1).unsqueeze(-1) - rewards) / (self.k - 1)
         advantages = (rewards - baseline).view(-1, 1)
 
-        if acc_state.is_main_process:
+        if ddp_state.is_main_process:
             print("====================================")
             print("Optimistic reward:", max_reward)
             print("Average reward:", avg_reward)
@@ -246,11 +243,12 @@ class RLOO(Algo):
         mb_response_mask = mb_response_mask[:, :max_tokens]
         mb_old_logprobs = mb_old_logprobs[:, : max_tokens - 1]
 
-        output = self.model(
-            input_ids=mb_query_response,
-            attention_mask=mb_query_response_mask,
-            return_dict=True,
-        )
+        with torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16):
+            output = self.model(
+                input_ids=mb_query_response,
+                attention_mask=mb_query_response_mask,
+                return_dict=True,
+            )
 
         mb_logprobs = get_shifted_logprobs(
             output.logits,
@@ -268,4 +266,14 @@ class RLOO(Algo):
         pg_losses2 = -mb_advantage * torch.clamp(ratio, 1.2, 1.2)
         pg_losses = torch.max(pg_losses1, pg_losses2)
         pg_loss = masked_mean(pg_losses, action_mask)
+
+        del (
+            output,
+            mb_logprobs,
+            mb_query_response,
+            mb_old_logprobs,
+            mb_query_response_mask,
+            mb_response_mask,
+            action_mask,
+        )
         return pg_loss

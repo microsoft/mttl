@@ -17,7 +17,6 @@ import numpy as np
 import ray
 import tiktoken
 import torch
-from accelerate import Accelerator
 from datasets import load_dataset
 from openai import OpenAI
 from termcolor import colored
@@ -133,12 +132,12 @@ class SummaryNextChunkPredictionTask:
 
         problems = [m[-1]["content"] for m in messages]
         queries = [
-            self.decode_template(problem, response, label)
-            for problem, response, label in zip(problems, responses, labels)
+            self.decode_template(problem, response)
+            for problem, response in zip(problems, responses)
         ]
         # for auto-encoding, we are trying to reconstruct the paragraph itself!
         qr, qrm, rm = create_joint_tensors(
-            tokenizer, queries, problems, finished, max_length=4096, pad_to_length=4096
+            tokenizer, queries, labels, finished, max_length=4096, pad_to_length=4096
         )
         log_probs = get_logprobs(
             model,
@@ -157,7 +156,7 @@ class SummaryNextChunkPredictionTask:
         qr, qrm, rm = create_joint_tensors(
             tokenizer,
             queries_empty,
-            problems,
+            labels,
             finished,
             max_length=4096,
             pad_to_length=4096,
@@ -175,7 +174,7 @@ class SummaryNextChunkPredictionTask:
         rewards = (log_probs - log_probs_base).cpu().tolist()
         return rewards
 
-    def decode_template(problem, response, label):
+    def decode_template(problem, response):
         return [
             {
                 "role": "user",

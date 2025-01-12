@@ -9,6 +9,9 @@ from openai import OpenAI
 from torch.optim.lr_scheduler import _LRScheduler
 from tqdm import tqdm
 
+from accelerate.state import PartialState
+from projects.kms.deductron.ddp_utils import ddp_state
+
 DEFAULT_TEMP = 0.5
 DEFAULT_MAX_TOKENS = 768
 
@@ -124,32 +127,24 @@ def get_logprobs(
     reduction="mean",
     temperature=DEFAULT_TEMP,
 ):
-    from accelerate.state import PartialState
-
     all_logprobs = []
-    acc_state = PartialState()
 
     for batch in tqdm(
         range(0, len(query_response_mask), batch_size),
-        desc=f"[{acc_state.local_process_index}] Gathering logprobs...",
-        position=acc_state.local_process_index,
+        desc=f"[{ddp_state.local_process_index}] Gathering logprobs...",
+        position=ddp_state.local_process_index,
     ):
-        with torch.autocast(
-            device_type="cuda",
-            dtype=torch.bfloat16,
-        ):
-            mb_qm = query_response_mask[batch : batch + batch_size].to(acc_state.device)
-            mb_q = query_response[batch : batch + batch_size].to(acc_state.device)
-            mb_r = response_mask[batch : batch + batch_size].to(acc_state.device)
-            output = model(
-                input_ids=mb_q,
-                attention_mask=mb_qm,
-                return_dict=True,
-            )
-            logprobs = get_shifted_logprobs(
-                output.logits, mb_q, mb_r, temperature=temperature, reduction=reduction
-            )
-
+        mb_qm = query_response_mask[batch : batch + batch_size].to(ddp_state.device)
+        mb_q = query_response[batch : batch + batch_size].to(ddp_state.device)
+        mb_r = response_mask[batch : batch + batch_size].to(ddp_state.device)
+        output = model(
+            input_ids=mb_q,
+            attention_mask=mb_qm,
+            return_dict=True,
+        )
+        logprobs = get_shifted_logprobs(
+            output.logits, mb_q, mb_r, temperature=temperature, reduction=reduction
+        )
         all_logprobs.append(logprobs.cpu())
         del output.logits, output
         torch.cuda.empty_cache()
@@ -357,33 +352,28 @@ class CosineWarmupScheduler(_LRScheduler):
         return new_lrs
 
 
+@ddp_state.on_main_process
 def setup_output_directory(output_dir: str):
     import os
     import shutil
 
     from ddp_utils import ddp_state
 
-    if ddp_state.is_master:
-        if os.path.exists(output_dir):
-            shutil.rmtree(output_dir, ignore_errors=True)
-        os.makedirs(output_dir)
-        form_code_zip(output_dir)
-
-    if ddp_state.ddp:
-        torch.distributed.barrier()
+    if os.path.exists(output_dir):
+        shutil.rmtree(output_dir, ignore_errors=True)
+    os.makedirs(output_dir)
+    form_code_zip(output_dir)
 
     return output_dir
 
 
+@ddp_state.on_main_process
 def save_args(args, output_dir: str):
     import json
     import os
 
-    from ddp_utils import ddp_state
-
-    if ddp_state.is_master:
-        with open(os.path.join(output_dir, "args.json"), "w") as f:
-            json.dump(vars(args), f, indent=4)
+    with open(os.path.join(output_dir, "args.json"), "w") as f:
+        json.dump(vars(args), f, indent=4)
 
 
 def repeat(ary: List[Any], k):

@@ -19,11 +19,26 @@ from vllm.worker.worker import Worker
 
 from projects.kms.deductron.ddp_utils import ddp_state
 from projects.kms.deductron.utils import DEFAULT_MAX_TOKENS, DEFAULT_TEMP
-from accelerate.state import AcceleratorState
-from accelerate.state import PartialState
 
 
-state = PartialState()
+def is_server_up(timeout: int = None) -> None:
+    """Wait for the server to be ready by polling the /v1/models endpoint.
+
+    Args:
+        base_url: The base URL of the server
+        timeout: Maximum time to wait in seconds. None means wait forever.
+    """
+    start_time = time.time()
+    try:
+        response = requests.get(
+            f"http://localhost:30000/v1/models",
+            headers={"Authorization": "Bearer None"},
+        )
+        if response.status_code == 200:
+            return True
+    except requests.exceptions.RequestException:
+        pass
+    return False
 
 
 def wait_for_server_shutdown(base_url: str, timeout: int = None) -> None:
@@ -65,7 +80,7 @@ class SGLGenerator:
         self.start()
         SGLGenerator._instance = self
 
-    @state.on_main_process
+    @ddp_state.on_main_process
     def start(self):
         from sglang.utils import execute_shell_command, wait_for_server
         import os

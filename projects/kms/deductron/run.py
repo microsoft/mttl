@@ -17,7 +17,7 @@ from projects.kms.deductron.data_utils import (
     get_dataloader,
     prepare_nqa_dataset,
 )
-from projects.kms.deductron.ddp_utils import ddp_state, init_ddp, gather_and_concatenate
+from projects.kms.deductron.ddp_utils import init_ddp, gather_and_concatenate
 from projects.kms.deductron.gen_utils import GenerationBackend
 from projects.kms.deductron.utils import (
     DEFAULT_MAX_TOKENS,
