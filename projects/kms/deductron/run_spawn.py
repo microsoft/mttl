@@ -109,7 +109,7 @@ def train(local_rank, args):
         temperature=args.t,
         max_tokens=args.maxtok,
         device=ddp_state.device,
-        task="summary_next_chunk_prediction",
+        task=args.task,
         **get_algo_kwargs(args, algos[args.a]),
     )
     algo.model.gradient_checkpointing_enable()
@@ -378,9 +378,7 @@ if __name__ == "__main__":
     parser.add_argument("--tpsz", type=int, help="Tensor parallel size", default=1)
     parser.add_argument("--ss", type=str, help="Math subset to consider", default="all")
     parser.add_argument("--subs", type=int, help="Subsample examples", default=-1)
-    parser.add_argument(
-        "--fast", action="store_true", help="Use fast mode (no eval on epoch 0)"
-    )
+    parser.add_argument("--task", type=str, help="Type of task to solve", default="s_ae", choices=["s_ae", "s_ncp"])
     parser.add_argument("-d", type=str, help="Run description", default=None)
     parser.add_argument("-P", type=int, help="Num Processes", default=1)
 

@@ -28,9 +28,9 @@ from projects.kms.deductron.utils import DEFAULT_TEMP
 
 
 def get_task(task_name: str):
-    if task_name == "summary_autoencoder":
+    if task_name == "s_ae":
         task = SummaryAutoencoderTask()
-    elif task_name == "summary_next_chunk_prediction":
+    elif task_name == "s_ncp":
         task = SummaryNextChunkPredictionTask()
     else:
         raise ValueError("Task not known!")
@@ -174,7 +174,7 @@ class SummaryNextChunkPredictionTask:
         rewards = (log_probs - log_probs_base).cpu().tolist()
         return rewards
 
-    def decode_template(problem, response):
+    def decode_template(self, problem, response):
         return [
             {
                 "role": "user",
