@@ -1,0 +1,7 @@
+{
+    "eval_every": 100,
+    "save_every": 100, 
+    "total_steps": 2500,
+    "subsample_dev": 256,
+    "router_selector": "ke_selector"
+}
