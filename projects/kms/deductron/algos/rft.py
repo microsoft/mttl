@@ -62,6 +62,7 @@ class RFT(Algo):
             torch_dtype=torch.bfloat16,
             device_map=device,
         )
+        self.kl_ctl = algo_kwargs['kl_ctl']
         self.ref_model = AutoModelForCausalLM.from_pretrained(
             model_name, torch_dtype=torch.bfloat16, device_map="cpu"
         )
@@ -114,14 +115,15 @@ class RFT(Algo):
                 )
             )
 
+        self.ref_model.to(ddp_state.device)
+        rewards = task.get_rewards(
+            model=self.ref_model,
+            tokenizer=self.tokenizer,
+            requests=evaluation_requests,
+            temperature=self.temperature,
+        )
+
         if self.kl_ctl > 0.:
-            self.ref_model.to(ddp_state.device)
-            rewards = task.get_rewards(
-                model=self.ref_model,
-                tokenizer=self.tokenizer,
-                requests=evaluation_requests,
-                temperature=self.temperature,
-            )
             qr, qrm, rm = create_joint_tensors(
                 self.tokenizer,
                 [r.messages for r in evaluation_requests],
@@ -142,7 +144,6 @@ class RFT(Algo):
                 .cpu()
                 .tolist()
             )
-            self.ref_model.to("cpu")
             m_log_probs = (
                 get_logprobs(
                     self.model,
@@ -160,6 +161,7 @@ class RFT(Algo):
             torch.cuda.empty_cache()
             RequestUtils.populate(evaluation_requests, kl_rewards, "prior_reward")
 
+        self.ref_model.to("cpu")
         RequestUtils.populate(evaluation_requests, rewards, "reward")
         return evaluation_requests
 
