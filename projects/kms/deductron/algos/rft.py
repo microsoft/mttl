@@ -35,7 +35,7 @@ class RFT(Algo):
         parser.add_argument(
             "--kl_ctl",
             type=float,
-            default=0.001,
+            default=0.,
             help="Target KL divergence between policy and reference policy.",
         )
         return parser
@@ -46,7 +46,7 @@ class RFT(Algo):
         k=5,
         temperature=DEFAULT_TEMP,
         max_tokens=DEFAULT_MAX_TOKENS,
-        task="summary_autoencoder",
+        task="s_ae",
         device="cuda",
         **algo_kwargs,
     ):
@@ -114,52 +114,53 @@ class RFT(Algo):
                 )
             )
 
-        self.ref_model.to(ddp_state.device)
-        rewards = task.get_rewards(
-            model=self.ref_model,
-            tokenizer=self.tokenizer,
-            requests=evaluation_requests,
-            temperature=self.temperature,
-        )
-        qr, qrm, rm = create_joint_tensors(
-            self.tokenizer,
-            [r.messages for r in evaluation_requests],
-            [r.response for r in evaluation_requests],
-            [r.finished for r in evaluation_requests],
-            max_length=4096,
-            pad_to_length=4096,
-        )
-        r_log_probs = (
-            get_logprobs(
-                self.ref_model,
-                qr,
-                qrm,
-                rm,
-                batch_size=2,
+        if self.kl_ctl > 0.:
+            self.ref_model.to(ddp_state.device)
+            rewards = task.get_rewards(
+                model=self.ref_model,
+                tokenizer=self.tokenizer,
+                requests=evaluation_requests,
                 temperature=self.temperature,
             )
-            .cpu()
-            .tolist()
-        )
-        self.ref_model.to("cpu")
-        m_log_probs = (
-            get_logprobs(
-                self.model,
-                qr,
-                qrm,
-                rm,
-                batch_size=2,
-                temperature=self.temperature,
+            qr, qrm, rm = create_joint_tensors(
+                self.tokenizer,
+                [r.messages for r in evaluation_requests],
+                [r.response for r in evaluation_requests],
+                [r.finished for r in evaluation_requests],
+                max_length=4096,
+                pad_to_length=4096,
             )
-            .cpu()
-            .tolist()
-        )
-        kl_rewards = [-(m - r) for m, r in zip(m_log_probs, r_log_probs)]
-        del qr, qrm, rm
-        torch.cuda.empty_cache()
+            r_log_probs = (
+                get_logprobs(
+                    self.ref_model,
+                    qr,
+                    qrm,
+                    rm,
+                    batch_size=2,
+                    temperature=self.temperature,
+                )
+                .cpu()
+                .tolist()
+            )
+            self.ref_model.to("cpu")
+            m_log_probs = (
+                get_logprobs(
+                    self.model,
+                    qr,
+                    qrm,
+                    rm,
+                    batch_size=2,
+                    temperature=self.temperature,
+                )
+                .cpu()
+                .tolist()
+            )
+            kl_rewards = [-(m - r) for m, r in zip(m_log_probs, r_log_probs)]
+            del qr, qrm, rm
+            torch.cuda.empty_cache()
+            RequestUtils.populate(evaluation_requests, kl_rewards, "prior_reward")
 
         RequestUtils.populate(evaluation_requests, rewards, "reward")
-        RequestUtils.populate(evaluation_requests, kl_rewards, "prior_reward")
         return evaluation_requests
 
     @torch.no_grad()
@@ -172,17 +173,18 @@ class RFT(Algo):
 
         rewards = [r.reward for r in evaluation_requests]
         finished = [r.finished for r in evaluation_requests]
-        pri_rewards = [r.prior_reward for r in evaluation_requests]
-
         max_reward, avg_reward = RequestUtils.gather_max_avg_reward(evaluation_requests)
-        pri_max_reward, pri_avg_reward = RequestUtils.gather_max_avg_reward(
-            evaluation_requests, "prior_reward"
-        )
+
+        if self.kl_ctl > 0.:
+            pri_rewards = [r.prior_reward for r in evaluation_requests]
+            pri_max_reward, pri_avg_reward = RequestUtils.gather_max_avg_reward(
+                evaluation_requests, "prior_reward"
+            )
+            self.stats.accumulate("pri_max_reward", pri_max_reward)
+            self.stats.accumulate("pri_avg_reward", pri_avg_reward)
 
         self.stats.accumulate("avg_reward", avg_reward)
         self.stats.accumulate("max_reward", max_reward)
-        self.stats.accumulate("pri_max_reward", pri_max_reward)
-        self.stats.accumulate("pri_avg_reward", pri_avg_reward)
         self.stats.accumulate("finished", (100.0 * np.sum(finished) / len(finished)))
 
         if ddp_state.is_main_process:
@@ -218,13 +220,16 @@ class RFT(Algo):
 
         # pick the best response for each query
         rewards = torch.tensor(rewards, dtype=torch.float32).reshape(-1, self.k)
-        pri_rewards = torch.tensor(pri_rewards, dtype=torch.float32).reshape(-1, self.k)
+        if self.kl_ctl > 0.:
+            pri_rewards = torch.tensor(pri_rewards, dtype=torch.float32).reshape(-1, self.k)
+        else:
+            pri_rewards = torch.zeros_like(rewards)
 
         messages = []
         responses = []
         finished = []
         for i, rew in enumerate(rewards):
-            max_reward_idx = torch.argmax(rew + 0.1 * pri_rewards[i]).item()
+            max_reward_idx = torch.argmax(rew + self.kl_ctl * pri_rewards[i]).item()
             messages.append(evaluation_requests[i * self.k + max_reward_idx].messages)
             responses.append(evaluation_requests[i * self.k + max_reward_idx].response)
             finished.append(evaluation_requests[i * self.k + max_reward_idx].finished)
