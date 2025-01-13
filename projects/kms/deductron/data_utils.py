@@ -2,9 +2,8 @@ from typing import Dict, List, Union
 
 import torch
 from torch.utils.data import DataLoader, Dataset, DistributedSampler
-from transformers import AutoTokenizer
-
 from projects.kms.deductron.ddp_utils import ddp_state
+from transformers import AutoTokenizer
 
 
 class MultiTensorDataset(Dataset):
@@ -67,15 +66,11 @@ def get_dataloader(
     Returns:
         DataLoader: Configured DataLoader instance.
     """
-    if ddp_state.ddp:
-        sampler = DistributedSampler(dataset, shuffle=shuffle)
-    else:
-        sampler = (
-            torch.utils.data.RandomSampler(dataset)
-            if shuffle
-            else torch.utils.data.SequentialSampler(dataset)
-        )
-
+    sampler = (
+        torch.utils.data.RandomSampler(dataset)
+        if shuffle
+        else torch.utils.data.SequentialSampler(dataset)
+    )
     dataloader = DataLoader(
         dataset,
         batch_size=batch_size,
@@ -84,7 +79,7 @@ def get_dataloader(
         num_workers=num_workers,
         collate_fn=custom_collate_fn,
         pin_memory=pin_memory and ddp_state.device.startswith("cuda"),
-        drop_last=True if ddp_state.ddp else False,
+        drop_last=True,
     )
     return dataloader
 
@@ -127,6 +122,8 @@ def pad_query_and_response(
     responses: list[torch.Tensor],
     padding_value: int = 0,
     padding_side: str = "right",
+    pad_to_length: int = None,
+    max_length: int = None,
 ) -> torch.Tensor:
     seq_len = max([q.shape[0] + r.shape[0] for q, r in zip(queries, responses)])
 
@@ -166,6 +163,41 @@ def pad_query_and_response(
         query_response[i][slices] = t
         query_response_mask[i][slices] = 1
         response_mask[i][response_slice] = 1
+
+    if pad_to_length and seq_len < pad_to_length:
+        pad_slice = torch.full(
+            (len(queries), pad_to_length - seq_len),
+            padding_value,
+            dtype=queries[0].dtype,
+            device=queries[0].device,
+        )
+        pad_slice_mask = torch.full(
+            (len(queries), pad_to_length - seq_len),
+            0,
+            dtype=queries[0].dtype,
+            device=queries[0].device,
+        )
+        if padding_side == "right":
+            query_response = torch.cat((query_response, pad_slice), 1)
+            query_response_mask = torch.cat((query_response_mask, pad_slice_mask), 1)
+            response_mask = torch.cat((response_mask, pad_slice_mask), 1)
+        elif padding_side == "left":
+            query_response = torch.cat((pad_slice, query_response), 1)
+            query_response_mask = torch.cat((pad_slice_mask, query_response_mask), 1)
+            response_mask = torch.cat((pad_slice_mask, response_mask), 1)
+
+    if max_length is not None and padding_side == "right":
+        return (
+            query_response[:, :max_length],
+            query_response_mask[:, :max_length],
+            response_mask[:, :max_length],
+        )
+    elif max_length is not None and padding_side == "left":
+        return (
+            query_response[:, -max_length:],
+            query_response_mask[:, -max_length:],
+            response_mask[:, -max_length:],
+        )
     return query_response, query_response_mask, response_mask
 
 
@@ -174,7 +206,8 @@ def create_joint_tensors(
     queries: Union[List[Dict[str, str]]],
     responses: List[str],
     is_final=None,
-    max_length=4096,
+    max_length=None,
+    pad_to_length=None,
 ):
     """
     For VPPO, messages can contain also a partial assistant message (the prefix so far),
@@ -220,12 +253,10 @@ def create_joint_tensors(
             tokenized_responses,
             tokenizer.pad_token_id,
             padding_side="right",
+            pad_to_length=pad_to_length,
+            max_length=max_length,
         )
     )
-    if query_and_response_tensors.shape[1] > max_length:
-        query_and_response_tensors = query_and_response_tensors[:, :max_length]
-        query_and_response_mask = query_and_response_mask[:, :max_length]
-        response_mask = response_mask[:, :max_length]
     return query_and_response_tensors, query_and_response_mask, response_mask
 
 
@@ -257,6 +288,9 @@ def prepare_nqa_dataset(tokenizer, block_size=2048):
     from datasets import load_dataset
 
     dataset = load_dataset("sordonia/narrativeqa_sanitized", split="train")
+    train_dataset = dataset.filter(lambda x: x["split"] == "train", num_proc=16)
+    valid_dataset = dataset.filter(lambda x: x["split"] == "validation", num_proc=16)
+    test_dataset = dataset.filter(lambda x: x["split"] == "test", num_proc=16)
 
     def chunk_row(example):
         sources, labels, dids = [], [], []
@@ -268,11 +302,25 @@ def prepare_nqa_dataset(tokenizer, block_size=2048):
                 dids.append(did)
         return {"source": sources, "label": labels, "document_id": dids}
 
-    new_dataset = dataset.map(
+    train_dataset = train_dataset.map(
         chunk_row,
         batched=True,
         remove_columns=dataset.column_names,
         batch_size=100,
         num_proc=16,
     )
-    return new_dataset
+    valid_dataset = valid_dataset.map(
+        chunk_row,
+        batched=True,
+        remove_columns=dataset.column_names,
+        batch_size=100,
+        num_proc=16,
+    )
+    test_dataset = test_dataset.map(
+        chunk_row,
+        batched=True,
+        remove_columns=dataset.column_names,
+        batch_size=100,
+        num_proc=16,
+    )
+    return train_dataset, valid_dataset, test_dataset

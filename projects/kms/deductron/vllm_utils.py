@@ -25,9 +25,8 @@ from vllm.distributed.parallel_state import (
 from vllm.executor.gpu_executor import GPUExecutor
 from vllm.worker.worker import Worker
 
-from projects.kms.deductron.ddp_utils import ddp_state
 from projects.kms.deductron.utils import DEFAULT_MAX_TOKENS, DEFAULT_TEMP
-
+from projects.kms.deductron.ddp_utils import ddp_state
 
 class VLLMGenerator:
     _instance = None
@@ -47,18 +46,25 @@ class VLLMGenerator:
         self.max_num_seqs = max_num_seqs
         self.gpu_memory_utilization = gpu_memory_utilization
         self.model_name = model_name
+        self.seed = seed
 
         vllm_single_gpu_patch()
+        self.start()
+        VLLMGenerator._instance = self
+
+    @ddp_state.on_main_process
+    def start(self):
         self.process = LLM(
-            model_name,
+            self.model_name,
             tensor_parallel_size=1,
             dtype=torch.bfloat16,
             max_num_seqs=self.max_num_seqs,
-            device=f"cuda:{ddp_state.ddp_world_size}",
-            seed=seed,
+            gpu_memory_utilization=self.gpu_memory_utilization,
+            device=f"cuda:{ddp_state.num_processes}",
+            seed=self.seed,
         )
-        VLLMGenerator._instance = self
 
+    @ddp_state.on_main_process
     def load_weights(self, model):
         if isinstance(model, DDP):
             model = model.module
@@ -68,6 +74,7 @@ class VLLMGenerator:
             model.named_parameters()
         )
 
+    @ddp_state.on_main_process
     def shutdown(self):
         del self.process
 

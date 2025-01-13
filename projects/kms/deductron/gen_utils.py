@@ -12,6 +12,14 @@ class GenerationBackend:
             from sgl_utils import SGLGenerator
 
             SGLGenerator(**kwargs)
+        elif cls.backend == "sglp":
+            from sgl_utils import SGLGeneratorParallel
+
+            SGLGeneratorParallel(**kwargs)
+        elif cls.backend == "sglc":
+            from sgl_utils import SGLGeneratorClient
+
+            SGLGeneratorClient(**kwargs)
 
     @classmethod
     def get(cls):
@@ -23,3 +31,11 @@ class GenerationBackend:
             from sgl_utils import SGLGenerator
 
             return SGLGenerator.get()
+        elif cls.backend == "sglp":
+            from sgl_utils import SGLGeneratorParallel
+
+            return SGLGeneratorParallel.get()
+        elif cls.backend == "sglc":
+            from sgl_utils import SGLGeneratorClient
+
+            return SGLGeneratorClient.get()

@@ -7,7 +7,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from projects.kms.deductron.algos.algo import Algo, Request, RequestUtils
 from projects.kms.deductron.data_utils import create_joint_tensors
-from projects.kms.deductron.ddp_utils import rank_zero_only
 from projects.kms.deductron.gen_utils import GenerationBackend
 from projects.kms.deductron.sgl_utils import SGLGenerator
 from projects.kms.deductron.utils import (
@@ -21,6 +20,13 @@ from projects.kms.deductron.utils import (
     repeat,
 )
 from projects.kms.deductron.vllm_utils import VLLMGenerator
+from projects.kms.deductron.ddp_utils import ddp_state
+from dataclasses import dataclass
+
+
+@dataclass
+class PriRequest(Request):
+    prior_reward: float = None
 
 
 class RFT(Algo):
@@ -29,7 +35,7 @@ class RFT(Algo):
         parser.add_argument(
             "--kl_ctl",
             type=float,
-            default=0.001,
+            default=0.,
             help="Target KL divergence between policy and reference policy.",
         )
         return parser
@@ -40,68 +46,67 @@ class RFT(Algo):
         k=5,
         temperature=DEFAULT_TEMP,
         max_tokens=DEFAULT_MAX_TOKENS,
-        task_generator="summary",
-        reward_func="infogain",
+        task="s_ae",
         device="cuda",
         **algo_kwargs,
     ):
         self.k = k
-        self.reward_func = reward_func
-        self.task_generator = task_generator
+        self.task = task
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.stats = AccumulatorDict()
 
         self.device = device
         self.model = AutoModelForCausalLM.from_pretrained(
-            model_name, torch_dtype=torch.bfloat16, device_map=device
+            model_name,
+            torch_dtype=torch.bfloat16,
+            device_map=device,
         )
+        self.kl_ctl = algo_kwargs['kl_ctl']
         self.ref_model = AutoModelForCausalLM.from_pretrained(
-            model_name, torch_dtype=torch.bfloat16, device_map=device
+            model_name, torch_dtype=torch.bfloat16, device_map="cpu"
         )
+        self.ref_model.eval()
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name,
         )
         if not self.tokenizer.pad_token:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
-    @rank_zero_only
-    @torch.no_grad()
-    def gather_episodes(
+    def compute_rewards(
         self,
         prompts: List[str],
         labels: List[str],
-    ):
+        k=1,
+    ) -> List[Request]:
+        from .task import get_task
+
         vllm = GenerationBackend.get()
 
-        if self.task_generator == "summary":
-            from projects.kms.deductron.algos.utils import summary_task_generator
-
-            messages = summary_task_generator(prompts)
-        else:
-            raise ValueError(f"Unknown task generator: {self.task_generator}")
+        task = get_task(self.task)
+        messages = task.encode_template(prompts)
 
         # Gather first set of completions
         responses, finished = vllm.chat(
             messages,
             temperature=self.temperature,
-            n=self.k,
+            n=k,
             max_tokens=self.max_tokens,
             return_finished=True,
         )
 
         responses = flatten(responses)
         finished = flatten(finished)
-        query_ids = repeat(range(len(messages)), self.k)
-        labels = repeat(labels, self.k)
-        messages = repeat(messages, self.k)
+        query_ids = repeat(range(len(messages)), k)
+        labels = repeat(labels, k)
+        messages = repeat(messages, k)
 
         evaluation_requests = []
         for query_id, query_messages, query_response, label, finish in zip(
             query_ids, messages, responses, labels, finished
         ):
             evaluation_requests.append(
-                Request(
+                PriRequest(
                     query_id=query_id,
                     messages=query_messages,
                     response=query_response,
@@ -110,91 +115,135 @@ class RFT(Algo):
                 )
             )
 
-        if self.reward_func == "infogain":
-            from .utils import infogain_reward
+        self.ref_model.to(ddp_state.device)
+        rewards = task.get_rewards(
+            model=self.ref_model,
+            tokenizer=self.tokenizer,
+            requests=evaluation_requests,
+            temperature=self.temperature,
+        )
 
-            self.ref_model.to(self.device)
-            rewards = infogain_reward(
-                model=self.ref_model,
-                tokenizer=self.tokenizer,
-                messages=[r.messages for r in evaluation_requests],
-                responses=[r.response for r in evaluation_requests],
-                labels=[r.label for r in evaluation_requests],
+        if self.kl_ctl > 0.:
+            qr, qrm, rm = create_joint_tensors(
+                self.tokenizer,
+                [r.messages for r in evaluation_requests],
+                [r.response for r in evaluation_requests],
+                [r.finished for r in evaluation_requests],
+                max_length=4096,
+                pad_to_length=4096,
             )
-            self.ref_model.to("cpu")
-        elif self.reward_func == "logprobs":
-            from .utils import logprobs_reward 
-
-            self.ref_model.to(self.device)
-            rewards = logprobs_reward(
-                model=self.ref_model,
-                tokenizer=self.tokenizer,
-                messages=[r.messages for r in evaluation_requests],
-                responses=[r.response for r in evaluation_requests],
-                labels=[r.label for r in evaluation_requests],
+            r_log_probs = (
+                get_logprobs(
+                    self.ref_model,
+                    qr,
+                    qrm,
+                    rm,
+                    batch_size=2,
+                    temperature=self.temperature,
+                )
+                .cpu()
+                .tolist()
             )
-            self.ref_model.to("cpu")
-        else:
-            raise ValueError(f"Unknown reward function: {self.reward_func}")
+            m_log_probs = (
+                get_logprobs(
+                    self.model,
+                    qr,
+                    qrm,
+                    rm,
+                    batch_size=2,
+                    temperature=self.temperature,
+                )
+                .cpu()
+                .tolist()
+            )
+            kl_rewards = [-(m - r) for m, r in zip(m_log_probs, r_log_probs)]
+            del qr, qrm, rm
+            torch.cuda.empty_cache()
+            RequestUtils.populate(evaluation_requests, kl_rewards, "prior_reward")
 
+        self.ref_model.to("cpu")
         RequestUtils.populate(evaluation_requests, rewards, "reward")
+        return evaluation_requests
 
+    @torch.no_grad()
+    def gather_episodes(
+        self,
+        prompts: List[str],
+        labels: List[str],
+    ):
+        evaluation_requests = self.compute_rewards(prompts, labels, k=self.k)
+
+        rewards = [r.reward for r in evaluation_requests]
+        finished = [r.finished for r in evaluation_requests]
         max_reward, avg_reward = RequestUtils.gather_max_avg_reward(evaluation_requests)
+
+        if self.kl_ctl > 0.:
+            pri_rewards = [r.prior_reward for r in evaluation_requests]
+            pri_max_reward, pri_avg_reward = RequestUtils.gather_max_avg_reward(
+                evaluation_requests, "prior_reward"
+            )
+            self.stats.accumulate("pri_max_reward", pri_max_reward)
+            self.stats.accumulate("pri_avg_reward", pri_avg_reward)
 
         self.stats.accumulate("avg_reward", avg_reward)
         self.stats.accumulate("max_reward", max_reward)
         self.stats.accumulate("finished", (100.0 * np.sum(finished) / len(finished)))
 
-        print("====================================")
-        print("Optimistic reward:", max_reward)
-        print("Average reward:", avg_reward)
-        print(
-            "Reward distribution:",
-            print_metrics(
-                [
-                    np.mean(rewards)
-                    for rewards in RequestUtils.group_by_query_id(
-                        evaluation_requests, "reward"
-                    ).values()
-                ]
-            ),
-        )
-        print("Finished: ", (100.0 * np.sum(finished)) / len(finished), "%")
-        print("====================================")
+        if ddp_state.is_main_process:
+            print("====================================")
+            print("Optimistic reward:", max_reward)
+            print("Average reward:", avg_reward)
+            print(
+                "Reward distribution:",
+                print_metrics(
+                    [
+                        np.mean(rewards)
+                        for rewards in RequestUtils.group_by_query_id(
+                            evaluation_requests, "reward"
+                        ).values()
+                    ]
+                ),
+            )
+            print("Finished: ", (100.0 * np.sum(finished)) / len(finished), "%")
+            print("====================================")
+
+            print("====================================")
+            print("Response 0 > Response -1:")
+            sorted_idx = np.argsort(rewards[:5])[::-1]
+            best_idx = sorted_idx[0]
+            last_idx = sorted_idx[-1]
+            print(
+                f"Response 0, Reward {rewards[best_idx]:.4f}:\n{evaluation_requests[best_idx].response}"
+            )
+            print("------------------------------------")
+            print(
+                f"Response -1, Reward {rewards[last_idx]:.4f}:\n{evaluation_requests[last_idx].response}"
+            )
 
         # pick the best response for each query
-        rewards_t = torch.tensor(rewards, dtype=torch.float32).reshape(-1, self.k)
-        max_reward_indices = torch.argmax(rewards_t, dim=1)
+        rewards = torch.tensor(rewards, dtype=torch.float32).reshape(-1, self.k)
+        if self.kl_ctl > 0.:
+            pri_rewards = torch.tensor(pri_rewards, dtype=torch.float32).reshape(-1, self.k)
+        else:
+            pri_rewards = torch.zeros_like(rewards)
 
-        best_messages, best_responses, best_rewards = [], [], []
-        rewards_flat = rewards_t.flatten()
-
-        # Collect best elements
-        for i, max_idx in enumerate(max_reward_indices.tolist()):
-            index = i * self.k + max_idx
-            best_messages.append(evaluation_requests[index].messages)
-            best_responses.append(evaluation_requests[index].response)
-            best_rewards.append(rewards_flat[index].item())
-
-        print("====================================")
-        print("Response 0 > Response -1:")
-        sorted_idx = torch.argsort(rewards_flat[:5], descending=True)
-        best_idx = sorted_idx[0].item()
-        last_idx = sorted_idx[-1].item()
-        print(
-            f"Response 0, Reward {rewards_flat[best_idx].item():.4f}:\n{responses[best_idx]}"
-        )
-        print("------------------------------------")
-        print(
-            f"Response -1, Reward {rewards_flat[last_idx].item():.4f}:\n{responses[last_idx]}"
-        )
+        messages = []
+        responses = []
+        finished = []
+        for i, rew in enumerate(rewards):
+            max_reward_idx = torch.argmax(rew + self.kl_ctl * pri_rewards[i]).item()
+            messages.append(evaluation_requests[i * self.k + max_reward_idx].messages)
+            responses.append(evaluation_requests[i * self.k + max_reward_idx].response)
+            finished.append(evaluation_requests[i * self.k + max_reward_idx].finished)
 
         query_response_tensors, query_response_mask, response_mask = (
             create_joint_tensors(
                 self.tokenizer,
-                best_messages,
-                best_responses,
+                messages,
+                responses,
+                finished,
                 max_length=4096,
+                pad_to_length=4096,
             )
         )
 
@@ -210,43 +259,42 @@ class RFT(Algo):
             mb_query_response,
             mb_query_response_mask,
             mb_response_mask,
-        ) = episode_returns[:3]
+        ) = episode_returns
 
-        with torch.autocast(
-            device_type="cuda",
-            dtype=torch.bfloat16,
-        ):
-            # trim from mb_query_response everything that is after the last 1 token in mb_query_response_mask
-            max_tokens = mb_query_response_mask.sum(dim=1).max()
+        # trim from mb_query_response everything that is after the last 1 token in mb_query_response_mask
+        max_tokens = mb_query_response_mask.sum(dim=1).max()
+        mb_query_response = mb_query_response[:, :max_tokens]
+        mb_query_response_mask = mb_query_response_mask[:, :max_tokens]
+        mb_response_mask = mb_response_mask[:, :max_tokens]
 
-            mb_query_response = mb_query_response[:, :max_tokens]
-            mb_query_response_mask = mb_query_response_mask[:, :max_tokens]
-            mb_response_mask = mb_response_mask[:, :max_tokens]
-
+        with torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16):
             output = self.model(
                 input_ids=mb_query_response,
                 attention_mask=mb_query_response_mask,
                 return_dict=True,
             )
-            logits = output.logits / (self.temperature + 1e-7)
-            logits = torch.nn.functional.log_softmax(logits, dim=-1)
 
-            shift_logits = logits[:, :-1]
-            shift_labels = mb_query_response[:, 1:]
-            shift_labels_mask = mb_response_mask[:, 1:]
-            mb_logprobs = torch.gather(
-                shift_logits, 2, shift_labels.unsqueeze(-1)
-            ).squeeze(-1)
+        logits = output.logits / (self.temperature + 1e-7)
+        logits = torch.nn.functional.log_softmax(logits, dim=-1)
 
-            loss = -mb_logprobs
-            loss = (loss * shift_labels_mask).sum() / shift_labels_mask.sum()
+        shift_logits = logits[:, :-1]
+        shift_labels = mb_query_response[:, 1:]
+        shift_labels_mask = mb_response_mask[:, 1:]
+        mb_logprobs = torch.gather(shift_logits, 2, shift_labels.unsqueeze(-1)).squeeze(
+            -1
+        )
 
-            del (
-                shift_logits,
-                shift_labels,
-                shift_labels_mask,
-                logits,
-                output,
-            )
-            torch.cuda.empty_cache()
-            return loss
+        loss = -mb_logprobs
+        loss = (loss * shift_labels_mask).sum() / shift_labels_mask.sum()
+
+        del (
+            shift_logits,
+            shift_labels,
+            shift_labels_mask,
+            mb_query_response,
+            mb_query_response_mask,
+            mb_response_mask,
+            logits,
+            output,
+        )
+        return loss
