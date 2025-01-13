@@ -27,6 +27,8 @@ class KMDatasetConfig(DatasetConfig):
     task_source_field: str = "document_id"
     # for train / dev split, split by document chunk, or split the list of summary / q/a's ?
     split_train_dev_on: str = "document_chunk"
+    # flip inputs and outputs
+    flip_inputs_outputs: bool = False
 
 
 class KMDataCollator(DefaultCollator):
@@ -97,23 +99,43 @@ class KMDatasetModule(DataModule):
                     # for QA, we want to show the question as well as the prompt
                     if type(output) == dict:
                         if type_ == "qa":
-                            prompt_str = "Generate a question-answer pair given the preceding passage."
+                            if self.config.flip_inputs_outputs:
+                                prompt_str = "Generate a passage containing the preceding question-answer pair."
+                            else:
+                                prompt_str = "Generate a question-answer pair given the preceding passage."
                             output_str = f"\nQuestion: {output['question']}\nAnswer: {output['answer']}"
                         elif type_ == "q":
-                            prompt_str = (
-                                "Generate a question given the preceding passage."
-                            )
+                            if self.config.flip_inputs_outputs:
+                                prompt_str = "Generate a passage containing the preceding question."
+                            else:
+                                prompt_str = (
+                                    "Generate a question given the preceding passage."
+                                )
                             output_str = f"{output['question']}"
                         elif type_ == "a":
-                            prompt_str = f"Answer the following question given the preceding passage.\nQuestion: {output['question']}"
+                            if self.config.flip_inputs_outputs:
+                                prompt_str = "Generate a passage containing the preceding answer."
+                            else:
+                                prompt_str = f"Answer the following question given the preceding passage.\nQuestion: {output['question']}"
                             output_str = f"{output['answer']}"
                         elif type_ == "summary":
-                            prompt_str = "Summarize the preceding passage."
+                            if self.config.flip_inputs_outputs:
+                                prompt_str = "Generate a passage which can be summarized by the previous summary."
+                            else:
+                                prompt_str = "Summarize the preceding passage."
                             output_str = output["summary"]
                     else:
                         # fallback to default prompt
-                        prompt_str = "Summarize the preceding passage."
+                        if self.config.flip_inputs_outputs:
+                            prompt_str = (
+                                "Generate a passage which can be summarized as follows."
+                            )
+                        else:
+                            prompt_str = "Summarize the preceding passage."
                         output_str = output
+
+                    if self.config.flip_inputs_outputs:
+                        input, output_str = output_str, input
 
                     prompt_str = self.tokenizer.apply_chat_template(
                         [
