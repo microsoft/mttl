@@ -10,11 +10,12 @@ from mttl.utils import logger
 
 got_exit_signal = False
 
-# Some error codes
-JOB_ALREADY_STARTED = 1_000
+# Some return codes
 FINISHED = 0
-FAILED = 1
-CRASHED = -1
+DONE_FILE_EMPTY = 1
+FAILED = 100
+CRASHED = -100
+JOB_ALREADY_STARTED = 1_000
 
 
 def handle_exit_signal(signum, frame):
@@ -50,6 +51,7 @@ class JobQueue:
         self.tasks = []
         self.finished = []
 
+        # Let's already remove finished tasks to simplify things
         for task in doc_ids:
             status = self.get_run_status(task)
             if status == "finished":
