@@ -160,7 +160,7 @@ def train(local_rank, args):
             algo.tokenizer, block_size=2048
         )
 
-    sample_indices = np.random.choice(len(val_dataset), onl_batch_size, replace=False)
+    sample_indices = np.random.choice(len(val_dataset), 32, replace=False)
     val_queries = [val_dataset[int(i)]["source"] for i in sample_indices]
     val_labels = [val_dataset[int(i)]["label"] for i in sample_indices]
 
@@ -175,12 +175,14 @@ def train(local_rank, args):
         val_reward = torch.tensor(np.mean([r.reward for r in val_requests]), device=ddp_state.device)
 
     torch.distributed.all_reduce(val_reward, op=torch.distributed.ReduceOp.AVG)
+    val_reward = val_reward.item()
     training_stats.append(
         {
-            "val_reward": val_reward.item(),
+            "val_reward": val_reward,
         }
     )
     ddp_state.wait_for_everyone()
+    ddp_state.print("Initial reward:", val_reward)
 
     assert (
         onl_batch_size >= args.subs
@@ -323,11 +325,14 @@ def train(local_rank, args):
             )
             print("====================================")
 
-        # update the weights of the data generator after the epoch
-        GenerationBackend.get().load_weights(algo.model)
+            # update the weights of the data generator after the epoch
+            GenerationBackend.get().load_weights(algo.model)
+
         ddp_state.wait_for_everyone()
 
-    generator.shutdown()
+    if ddp_state.local_process_index == 0:
+        generator.shutdown()
+    ddp_state.wait_for_everyone()
 
 
 @contextmanager
@@ -381,6 +386,7 @@ if __name__ == "__main__":
     parser.add_argument("--task", type=str, help="Type of task to solve", default="s_ae", choices=["s_ae", "s_ncp"])
     parser.add_argument("-d", type=str, help="Run description", default=None)
     parser.add_argument("-P", type=int, help="Num Processes", default=1)
+    parser.add_argument("--dmpepc", action='store_true', help="Dumps every epoch")
 
     # parse known args first
     partial_args, unknown_args = parser.parse_known_args()
