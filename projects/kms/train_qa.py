@@ -79,8 +79,6 @@ class KEArguments(MultiExpertConfig, KMArguments):
                 logger.warning(f"Overwriting `evaluate_on` to {self.evaluate_on}-rag")
                 self.evaluate_on += "-rag"
             self.include_context = True
-        else:
-            self.include_context = False
 
         self.dataset = train_datasets[self.evaluate_on]
         eval_on = self.evaluate_on.split("-")[0]
@@ -306,6 +304,7 @@ def train_ke(training_args):
         )
         do_eval_on_epoch = (
             training_args.eval_every_n_epoch
+            and training_args.eval_every_n_epoch > 0
             and epoch_finished
             and epoch % training_args.eval_every_n_epoch == 0
         )

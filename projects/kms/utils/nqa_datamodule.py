@@ -62,6 +62,7 @@ class NQADatamodule(DataModule):
         def expand_questions(examples, tokenizer):
 
             def maybe_truncate(fixed_prompt, content, buffer=10):
+                # return content
                 """Handling truncation here to make sure the prompt is not truncated"""
                 prompt_length = len(tokenizer.encode(fixed_prompt))
                 remaining_length = self.config.max_input_length - prompt_length - buffer
@@ -135,12 +136,6 @@ class NQADatamodule(DataModule):
                             }
                         ]
 
-                    xx = tokenizer.apply_chat_template(
-                        source, add_generation_prompt=True, tokenize=False
-                    )
-                    yy = tokenizer.apply_chat_template(
-                        source, add_generation_prompt=True, tokenize=True
-                    )
                     batch["source"].append(
                         tokenizer.apply_chat_template(
                             source, add_generation_prompt=True, tokenize=False
@@ -159,7 +154,7 @@ class NQADatamodule(DataModule):
                     lambda examples: expand_questions(examples, self.tokenizer),
                     batched=True,
                     batch_size=1000,
-                    num_proc=1,
+                    num_proc=20,
                     remove_columns=dataset.column_names,
                 )
                 setattr(self, f"{split}_dataset", dataset)
