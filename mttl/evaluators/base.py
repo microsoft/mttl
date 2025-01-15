@@ -178,6 +178,7 @@ class GenerationOutput:
     sources_texts: List[str]  # the input source texts
     generated_texts: List[str] = None  # only the generated portion
     time_per_request: float = None  # time to complete the request (in s)
+    num_prompt_tokens: List[int] = None  # number of tokens for each prompt
 
 
 class StoppingCriteriaSub(StoppingCriteria):
@@ -299,6 +300,9 @@ class GenerativeEvaluator(Evaluator):
         device = next(model.parameters()).device
         batch = transfer_batch_to_device(batch, device)
 
+        # number of prompt tokens
+        num_prompt_tokens = batch["attention_mask"].sum(1).to("cpu").tolist()
+
         with torch.no_grad():
             start = time.time()
             if isinstance(model, LightningEfficientCheckpoint) or isinstance(
@@ -372,7 +376,8 @@ class GenerativeEvaluator(Evaluator):
                 sequences_texts=sequences_texts,
                 sources_texts=sources_texts,
                 generated_texts=generated_texts,
-                time_per_request=float(end - start)/len(sequences_texts)
+                time_per_request=float(end - start)/len(sequences_texts),
+                num_prompt_tokens=num_prompt_tokens,
             )
         )
 
