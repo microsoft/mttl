@@ -110,6 +110,10 @@ class LogLikeEvaluator(Evaluator):
                         np.mean(all_accuracies), np.mean(all_losses)
                     )
                 )
+            
+            del logits
+            del loss_per_option
+            torch.cuda.empty_cache()
 
         loss = distributed_mean(all_losses, device)
         all_accuracies = (
