@@ -70,7 +70,11 @@ def eval_qa(training_args):
     )
 
     # create a model without any experts
-    model = MoEModel(model_config)
+    model = MoEModel(
+        model_config,
+        precision=training_args.precision,
+        attn_implementation=training_args.attn_implementation,
+    )
 
     # build evaluator
     data_args = copy.deepcopy(training_args)

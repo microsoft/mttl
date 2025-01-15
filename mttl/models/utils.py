@@ -140,8 +140,6 @@ def model_loader_helper(
             "Please install bitsandbytes with `pip install -e '.[bitsandbytes]'`."
         )
 
-    logger.info(f"Attention Implementation: {attn_implementation}")
-
     # set dtype
     if bf16:
         torch_dtype = torch.bfloat16
@@ -149,6 +147,10 @@ def model_loader_helper(
         torch_dtype = torch.float16
     else:
         torch_dtype = torch.float32
+
+    logger.info(f"Attention Implementation: {attn_implementation}")
+    logger.info(f"BnB config: {bnb_config}")
+    logger.info(f"Dtype: {torch_dtype}")
 
     if isinstance(model_name, PreTrainedModel):
         return model_name.train()
