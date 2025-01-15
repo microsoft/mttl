@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-
+import time
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -49,6 +49,7 @@ class RougeEvaluator(GenerativeEvaluator):
         verbose=True,
         shuffle=False,
         return_predictions=False,
+        output_path=None,
     ):
         dataloader = self.get_dataloader(split, subsample, shuffle=shuffle)
 
@@ -65,6 +66,7 @@ class RougeEvaluator(GenerativeEvaluator):
         all_predictions = []
         all_references = []
         all_sources = []
+        all_times = []
         for num_batch, batch in pbar:
             if num_batches is not None and num_batch >= num_batches:
                 break
@@ -72,7 +74,9 @@ class RougeEvaluator(GenerativeEvaluator):
             labels_texts = batch["labels_texts"]
             sources_texts = batch["sources_texts"]
 
-            predictions = self.generate_for_batch(model, batch).generated_texts
+            outputs = self.generate_for_batch(model, batch)
+            predictions = outputs.generated_texts
+            time_per_request = outputs.time_per_request
 
             # if we only have one label per prediction, wrap each label in a list
             if not isinstance(labels_texts[0], (list, tuple)):
@@ -92,10 +96,19 @@ class RougeEvaluator(GenerativeEvaluator):
             all_predictions.extend(predictions)
             all_references.extend(labels_texts)
             all_sources.extend(sources_texts)
+            all_times.append(time_per_request)
 
             torch.cuda.empty_cache()
 
         rouge_L = distributed_mean(all_rougeL, model.device)
+        time_per_request = distributed_mean(all_times, model.device)
+
+        if output_path:
+            metrics = {
+                "rouge_L": rouge_L,
+                "time_per_request": time_per_request,
+            }
+            self.save_metrics(metrics, output_path)
 
         if return_predictions:
             return rouge_L, GenerationOutput(

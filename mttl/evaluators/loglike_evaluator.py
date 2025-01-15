@@ -1,7 +1,7 @@
 import numpy as np
 import torch
 from tqdm.auto import tqdm
-
+import time
 from mttl.dist_utils import distributed_mean, is_main_process
 from mttl.evaluators.base import Evaluator, switch_to_eval_mode
 from mttl.logging import logger
@@ -43,7 +43,7 @@ class LogLikeEvaluator(Evaluator):
         all_losses = []
         all_accuracies = []
         all_predictions = []
-
+        time_per_request = []
         device = next(model.parameters()).device
 
         for num_batch, batch in pbar:
@@ -59,6 +59,7 @@ class LogLikeEvaluator(Evaluator):
             batch = transfer_batch_to_device(batch, device)
 
             with torch.no_grad():
+                start = time.time()
                 if isinstance(model, LightningEfficientCheckpoint) or isinstance(
                     model, BaseExpertModel
                 ):
@@ -68,7 +69,7 @@ class LogLikeEvaluator(Evaluator):
                         input_ids=batch["input_ids"],
                         attention_mask=batch["attention_mask"],
                     ).logits
-
+                time_per_request.append((time.time() - start) / batch_size)
                 loss_per_option = compute_loglike_loss(
                     logits,
                     batch["labels"],
@@ -106,8 +107,8 @@ class LogLikeEvaluator(Evaluator):
 
             if all_accuracies:
                 pbar.set_description(
-                    "Accuracy: {:.4f} \t Loss {:.4f}".format(
-                        np.mean(all_accuracies), np.mean(all_losses)
+                    "Accuracy: {:.4f} \t Loss {:.4f} \t Time: {:.4f}".format(
+                        np.mean(all_accuracies), np.mean(all_losses), np.mean(time_per_request),
                     )
                 )
             
@@ -119,12 +120,14 @@ class LogLikeEvaluator(Evaluator):
         all_accuracies = (
             distributed_mean(all_accuracies, device) if all_accuracies else None
         )
+        time_per_request = distributed_mean(time_per_request, device)
 
         metrics = {
             "loss": loss,
             "loglike": -loss,
             "predictions": all_predictions,
             "accuracy": all_accuracies,
+            "time_per_request": time_per_request
         }
 
         self.save_metrics(metrics, output_path)

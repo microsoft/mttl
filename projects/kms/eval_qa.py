@@ -2,7 +2,7 @@ import copy
 import json
 import logging
 from dataclasses import dataclass
-
+import os
 from lightning_fabric import seed_everything
 
 # register this datamodule!
@@ -10,7 +10,7 @@ from projects.kms.utils.km_datamodule import KMDatasetModule
 from projects.kms.utils.nqa_datamodule import NQADatamodule
 
 # isort: split
-
+import time
 from mttl.logging import logger, setup_logging
 from mttl.models.containers.selectors.km_selector import (
     KnowledgeExtractorSelectorConfig,
@@ -82,7 +82,10 @@ def eval_qa(training_args):
         precision=training_args.precision,
         attn_implementation=training_args.attn_implementation,
         device_map=device,
+        load_in_8bit=training_args.load_in_8bit,
+        load_in_4bit=training_args.load_in_4bit,
     )
+    model = model.eval()
 
     # build evaluator
     data_args = copy.deepcopy(training_args)
@@ -106,10 +109,9 @@ def eval_qa(training_args):
         ke_expert = load_expert(training_args.ke_hf_path)
         model.add_expert_instance(ke_expert, expert_name=training_args.ke_expert_name)
 
-    # Call the NQA callback
-    rougeL = evaluator.evaluate(model, split=args.split)
-
-    print(f"ROUGE-L: {rougeL}")
+    result = evaluator.evaluate(model, split=args.split, shuffle=True, output_path=args.output_dir)
+    if is_main_process():
+        print(f"Result: {result}")
 
 
 if __name__ == "__main__":

@@ -177,6 +177,7 @@ class GenerationOutput:
     sequences_texts: List[str]  # everything that generate() returns in text
     sources_texts: List[str]  # the input source texts
     generated_texts: List[str] = None  # only the generated portion
+    time_per_request: float = None  # time to complete the request (in s)
 
 
 class StoppingCriteriaSub(StoppingCriteria):
@@ -268,6 +269,7 @@ class GenerativeEvaluator(Evaluator):
         return generation_output
 
     def generate_for_batch(self, model, batch):
+        import time
         from mttl.models.expert_model import BaseExpertModel
         from mttl.models.lightning.base_module import LightningEfficientCheckpoint
         from mttl.models.utils import transfer_batch_to_device
@@ -298,6 +300,7 @@ class GenerativeEvaluator(Evaluator):
         batch = transfer_batch_to_device(batch, device)
 
         with torch.no_grad():
+            start = time.time()
             if isinstance(model, LightningEfficientCheckpoint) or isinstance(
                 model, BaseExpertModel
             ):
@@ -317,6 +320,7 @@ class GenerativeEvaluator(Evaluator):
                     output_scores=True,
                     **extra_kwargs,
                 )
+            end = time.time()
 
         # take only the prediction part
         # we cannot do cut at the token id level due to token healing problems
@@ -363,11 +367,12 @@ class GenerativeEvaluator(Evaluator):
 
         return self.postprocess_generation_output(
             GenerationOutput(
-                scores=predictions.scores.to("cpu"),
+                scores=tuple(s.to("cpu") for s in predictions.scores),
                 sequences=predictions.sequences,
                 sequences_texts=sequences_texts,
                 sources_texts=sources_texts,
                 generated_texts=generated_texts,
+                time_per_request=float(end - start)/len(sequences_texts)
             )
         )
 
