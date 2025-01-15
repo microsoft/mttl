@@ -25,6 +25,12 @@ from projects.kms.train_km_simple import (
     evaluate_datasets,
     evaluate_metrics,
 )
+from mttl.dist_utils import (
+    get_device,
+    get_local_rank,
+    is_dist_avail_and_initialized,
+    is_main_process,
+)
 from projects.kms.train_qa import KEArguments, train_datasets
 from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator
 from projects.kms.utils.quality_evaluator import QualityEvaluator
@@ -70,10 +76,12 @@ def eval_qa(training_args):
     )
 
     # create a model without any experts
+    device = get_device()
     model = MoEModel(
         model_config,
         precision=training_args.precision,
         attn_implementation=training_args.attn_implementation,
+        device_map=device,
     )
 
     # build evaluator
@@ -97,8 +105,6 @@ def eval_qa(training_args):
     if training_args.ke_hf_path:
         ke_expert = load_expert(training_args.ke_hf_path)
         model.add_expert_instance(ke_expert, expert_name=training_args.ke_expert_name)
-
-    model = model.cuda()
 
     # Call the NQA callback
     rougeL = evaluator.evaluate(model, split=args.split)
