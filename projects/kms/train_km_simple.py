@@ -60,11 +60,11 @@ train_datasets = {
 
 evaluate_datasets = {
     "nqa": "az://mttldata/narrativeqa-sanitized",
-    "nqa-rag": "pclucas14/nqa-RAG-64",
+    "nqa-rag": "az://mttldata/nqa-rag-256",
     "wiki": "az://mttldata/wiki-top-20-sanitized",
     "wiki-rag": "az://mttldata/wiki-top-20-sanitized-rag",
     "quality": "az://mttldata/quality-sanitized",
-    "quality-rag": "pclucas14/quality-RAG-64",
+    "quality-rag": "az://mttldata/ql-rag-256",
 }
 
 evaluate_class = {

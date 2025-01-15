@@ -80,6 +80,10 @@ def chunk_text(
     block_size: int = 2048,
     chunk_overlap: Union[float, int] = 0.1,
 ):
+    if isinstance(text, list):
+        assert len(text) == 1
+        text = text[0]
+
     if isinstance(chunk_overlap, float):
         assert 0.0 <= chunk_overlap < 1.0
         chunk_overlap = int(block_size * chunk_overlap)
