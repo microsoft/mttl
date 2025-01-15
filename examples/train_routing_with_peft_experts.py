@@ -24,6 +24,16 @@ def create_library_from_peft(args):
             library.add_expert_from_ckpt(path)
 
 
+def train_routing_with_peft_library(args):
+
+    # create a temporary library
+    library = ExpertLibrary.get_expert_library(args.library_id, create=True)
+    module = MultiExpertModule(**vars(args)).to("cuda")
+    module.add_experts_from_library(library=library)
+    dm = get_datamodule(args)
+    train_module(args, module, dm)
+
+
 def train_lora_soup_with_peft(args):
     if (
         not args.experts
@@ -50,5 +60,6 @@ def train_lora_soup_with_peft(args):
 
 if __name__ == "__main__":
     args = FinetuneConfig.parse()
-    create_library_from_peft(args)
+    # create_library_from_peft(args)
     # train_lora_soup_with_peft(args)
+    train_routing_with_peft_library(args)
