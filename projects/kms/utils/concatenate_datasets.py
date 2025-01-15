@@ -2,7 +2,9 @@ import argparse
 import os
 from collections import defaultdict
 
-from datasets import concatenate_datasets, load_dataset, load_from_disk
+from datasets import concatenate_datasets, load_from_disk
+
+from mttl.models.library.dataset_library import DatasetLibrary
 
 
 def convert_str_to_python(python_str):
@@ -28,26 +30,28 @@ def main():
         help="Input directory containing arrow datasets",
     )
     parser.add_argument(
-        "--input_hf_ids",
+        "--input_ds_ids",
         type=str,
         nargs="+",
         help="HF dataset IDs to concatenate",
     )
-    parser.add_argument("--hf_id", type=str, required=True, help="HF dataset ID")
+    parser.add_argument(
+        "--final_dataset_id", type=str, required=True, help="Output dataset ID"
+    )
     args = parser.parse_args()
 
-    # make sure only one of `input_hf_ids` or `input_idr` is provided
-    if args.input_dir and args.input_hf_ids:
+    # make sure only one of `input_ds_ids` or `input_idr` is provided
+    if args.input_dir and args.input_ds_ids:
         raise ValueError(
-            "Only one of `input_dir` or `input_hf_ids` should be provided."
+            "Only one of `input_dir` or `input_ds_ids` should be provided."
         )
 
-    if not args.input_dir and not args.input_hf_ids:
-        raise ValueError("One of `input_dir` or `input_hf_ids` should be provided.")
+    if not args.input_dir and not args.input_ds_ids:
+        raise ValueError("One of `input_dir` or `input_ds_ids` should be provided.")
 
-    if args.input_hf_ids:
-        if len(args.input_hf_ids) == 1:
-            args.input_hf_ids = convert_str_to_python(args.input_hf_ids[0])
+    if args.input_ds_ids:
+        if len(args.input_ds_ids) == 1:
+            args.input_ds_ids = convert_str_to_python(args.input_ds_ids[0])
 
     splits_datasets = defaultdict(list)
 
@@ -64,11 +68,12 @@ def main():
                 except Exception as e:
                     print(f"Failed to load dataset from {item_path}: {e}")
                     continue
-    elif args.input_hf_ids:
+    elif args.input_ds_ids:
         # I will not explicitly check for the splits
-        for hf_id in args.input_hf_ids:
+        for hf_id in args.input_ds_ids:
             try:
-                dataset = load_dataset(hf_id)
+                print(f"pulling dataset from {hf_id}")
+                dataset = DatasetLibrary.pull_dataset(hf_id)
                 for split in dataset.keys():
                     splits_datasets[split].append(dataset[split])
             except Exception as e:
@@ -88,8 +93,14 @@ def main():
         print(f"Length of concatenated dataset: {len(concatenated_splits[split])}")
 
     # Save concatenated dataset
-    concatenated_dataset.push_to_hub(args.hf_id)
-    print(f"Pushing concatenated dataset to {args.hf_id}")
+    # concatenated_dataset.push_to_hub(args.final_dataset_id)
+    DatasetLibrary.push_dataset(concatenated_dataset, args.final_dataset_id)
+    print(f"Pushing concatenated dataset to {args.final_dataset_id}")
+
+    # Finally, let's delete the partial datasets
+    for hf_id in args.input_ds_ids:
+        print(f"pulling dataset from {hf_id}")
+        DatasetLibrary.delete_dataset(hf_id)
 
 
 if __name__ == "__main__":

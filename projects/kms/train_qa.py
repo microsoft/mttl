@@ -25,12 +25,14 @@ from mttl.dist_utils import (
 )
 from mttl.logging import logger, setup_logging
 from mttl.models.get_optimizer import get_optimizer_and_scheduler
+from mttl.models.library.expert import load_expert
 from mttl.models.utils import transfer_batch_to_device
 from projects.kms.train_km_simple import (
     evaluate_class,
     evaluate_datasets,
     evaluate_metrics,
 )
+from projects.kms.utils.simple_utils import EarlyStopper  # added
 from projects.kms.utils.simple_utils import (
     SimpleLogger,
     do_evaluation,
@@ -69,6 +71,10 @@ class KEArguments(MultiExpertConfig, KMArguments):
     max_kms: int = None
     # split file for subsampling
     subsample_file: str = None
+    # rag dataset
+    rag_dataset: str = None
+    # whether to overwrite / force upload of the new expert
+    force: bool = False
 
     def __post_init__(self):
         super().__post_init__()
@@ -79,8 +85,14 @@ class KEArguments(MultiExpertConfig, KMArguments):
                 logger.warning(f"Overwriting `evaluate_on` to {self.evaluate_on}-rag")
                 self.evaluate_on += "-rag"
             self.include_context = True
+            if self.rag_dataset is None:
+                self.dataset = train_datasets[self.evaluate_on]
+            else:
+                self.dataset = self.rag_dataset
+        else:
+            self.dataset = train_datasets[self.evaluate_on]
 
-        self.dataset = train_datasets[self.evaluate_on]
+        logger.warning(f"Overwriting `dataset` to {self.dataset}")
         eval_on = self.evaluate_on.split("-")[0]
         dataset_type = {"nqa": "narrativeqa", "quality": "quality"}[eval_on]
         if self.dataset_type != dataset_type:
@@ -215,6 +227,11 @@ def train_ke(training_args):
     eval_score_so_far = []
     met_logger = SimpleLogger(training_args.output_dir)
 
+    # early stopper
+    early_stopper = None
+    if training_args.patience is not None:
+        early_stopper = EarlyStopper(patience=training_args.patience, mode="min")
+
     if training_args.eval_before_training:
         val_loss, eval_score = do_evaluation(
             datamodule,
@@ -339,6 +356,10 @@ def train_ke(training_args):
                 training_args.save_config(training_args.output_dir + "/best_model")
                 logger.info(f"Saving model to {training_args.output_dir}")
 
+            if early_stopper and early_stopper(val_loss):
+                logger.info(f"Early stopping after {global_step} steps")
+                break
+
         if global_step >= training_args.total_steps:
             break
 
@@ -369,8 +390,18 @@ if __name__ == "__main__":
     args = KEArguments.parse()
     assert args.dataset_config
 
-    if os.path.exists(args.output_dir + "/last_model/mttl_weights.bin"):
-        logger.info("Model already trained, skipping")
+    # check if KE expert already exists
+    if not args.force and os.path.exists(
+        args.output_dir + "/last_model/mttl_weights.bin"
+    ):
+        logger.warning(f"Found expert checkpoint. in {args.output_dir}/last_model")
         exit(0)
+    elif not args.force and args.ke_hf_path:
+        try:
+            expert = load_expert(args.ke_hf_path)
+            logger.warning(f"Found expert in {args.ke_hf_path}")
+            exit(0)
+        except:
+            pass
 
     train_ke(args)
