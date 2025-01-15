@@ -93,6 +93,8 @@ class RougeEvaluator(GenerativeEvaluator):
             all_references.extend(labels_texts)
             all_sources.extend(sources_texts)
 
+            torch.cuda.empty_cache()
+
         rouge_L = distributed_mean(all_rougeL, model.device)
 
         if return_predictions:

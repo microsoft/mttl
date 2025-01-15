@@ -363,7 +363,7 @@ class GenerativeEvaluator(Evaluator):
 
         return self.postprocess_generation_output(
             GenerationOutput(
-                scores=predictions.scores,
+                scores=predictions.scores.to("cpu"),
                 sequences=predictions.sequences,
                 sequences_texts=sequences_texts,
                 sources_texts=sources_texts,
