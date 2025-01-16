@@ -1,0 +1,5 @@
+{
+    "dataset": "az://mttldata/ql-rag-2048",
+    "evaluate_on": "quality",
+    "include_context": true
+}
