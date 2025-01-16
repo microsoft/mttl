@@ -1,6 +1,6 @@
 {
     "top_k": 10,
-    "final_dataset_id": "az://mttldata/nqa-rag-256", 
+    "final_dataset_id": "az://mttldata/nqa-rag-128", 
     "block_size": 128,
     "source_dataset": "az://mttldata/narrativeqa-sanitized",
     "source_document_field": "text",

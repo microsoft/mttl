@@ -22,7 +22,7 @@ class RAGArguments(DataArgs):
     source_document_field: str = "outputs"
     source_dataset_n_items: int = -1
     chunk_source: int = 1
-    subsample_file: str = None
+    custom_split_file: str = None
     subsample_split: str = None
     model: str = "Salesforce/SFR-Embedding-2_R"
     final_dataset_id: str = None
@@ -79,10 +79,10 @@ def main(args: RAGArguments):
     final_dataset = []
 
     valid_files = None
-    if args.subsample_file is not None:
+    if args.custom_split_file is not None:
         import json
 
-        with open(args.subsample_file, "r") as f:
+        with open(args.custom_split_file, "r") as f:
             valid_files = json.load(f)
 
         if args.subsample_split is not None:

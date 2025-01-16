@@ -101,6 +101,7 @@ class DatasetConfig:
     task_name_field: str = "task_name"
     task_source_field: str = "task_source"
     dataloader_num_workers: int = 8
+    custom_split_file: str = None
 
 
 class PackedMixin:
@@ -672,6 +673,42 @@ class DataModule(LightningDataModule, Registrable):
     @property
     def task_names(self):
         return self._task_names
+
+    @property
+    def train_task_names(self):
+        if not hasattr(self, "_train_task_names"):
+            if len(self.train_dataset) == 0:
+                self._train_task_names = []
+            else:
+                self._train_task_names = list(
+                    set(self.train_dataset[self.config.task_name_field])
+                )
+
+        return self._train_task_names
+
+    @property
+    def dev_task_names(self):
+        if not hasattr(self, "_dev_task_names"):
+            if len(self.dev_dataset) == 0:
+                self._dev_task_names = []
+            else:
+                self._dev_task_names = list(
+                    set(self.dev_dataset[self.config.task_name_field])
+                )
+
+        return self._dev_task_names
+
+    @property
+    def test_task_names(self):
+        if not hasattr(self, "_test_task_names"):
+            if len(self.test_dataset) == 0:
+                self._test_task_names = []
+            else:
+                self._test_task_names = list(
+                    set(self.test_dataset[self.config.task_name_field])
+                )
+
+        return self._test_task_names
 
     @property
     def task_to_id(self):

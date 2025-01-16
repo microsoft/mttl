@@ -1,3 +1,4 @@
+import json
 import os
 from collections.abc import Iterable
 
@@ -172,3 +173,22 @@ def get_tokenizer_with_args(
     tokenizer.mttl_merges_space = tokenizer_merges_space(tokenizer)
     tokenizer.mttl_enforces_eos = tokenizer_enforces_eos(tokenizer)
     return tokenizer
+
+
+def apply_custom_split_file(dataset, split_file):
+    assert split_file.endswith(".json"), "split_file must be a json file"
+    split_file = json.load(open(split_file, "r"))
+    assert list(split_file.keys()) == ["train", "dev", "test"]
+
+    doc_to_split = {
+        doc: split for split in ["train", "dev", "test"] for doc in split_file[split]
+    }
+    all_docs = set(split_file["train"] + split_file["dev"] + split_file["test"])
+    dataset = dataset.filter(lambda x: x["document_id"] in all_docs)
+
+    def update_split(item):
+        item["split"] = doc_to_split[item["document_id"]]
+        return item
+
+    # Update the Split column
+    return dataset.map(update_split)

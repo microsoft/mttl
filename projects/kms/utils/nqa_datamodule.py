@@ -2,7 +2,11 @@ import json
 from dataclasses import dataclass
 
 from mttl.datamodule.base import DataModule, DatasetConfig
-from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task, split_on_split_column
+from mttl.datamodule.utils import (
+    apply_custom_split_file,
+    maybe_filter_hf_dataset_by_task,
+    split_on_split_column,
+)
 
 
 @dataclass
@@ -14,7 +18,6 @@ class NQADatasetConfig(DatasetConfig):
     )
     include_context: bool = False
     topk_context: int = 10
-    subsample_file: str = None
 
 
 @DataModule.register("narrativeqa", config_cls=NQADatasetConfig)
@@ -24,26 +27,9 @@ class NQADatamodule(DataModule):
 
         dataset = DatasetLibrary.pull_dataset(self.config.dataset)
 
-        # Instead of always working with the large NQA dataset, we can subsample it
-        # This allows us to reuse our previous datasets, while ensure a consistent train / dev / test split
-        if self.config.subsample_file:
-            subsample_file = json.load(open(self.config.subsample_file, "r"))
-            doc_to_split = {
-                doc: split
-                for split in ["train", "dev", "test"]
-                for doc in subsample_file[split]
-            }
-            all_docs = set(
-                subsample_file["train"] + subsample_file["dev"] + subsample_file["test"]
-            )
-            dataset = dataset.filter(lambda x: x["document_id"] in all_docs)
-
-            def update_split(item):
-                item["split"] = doc_to_split[item["document_id"]]
-                return item
-
-            # Update the Split column
-            dataset = dataset.map(update_split)
+        # Instead of always working with the large datasets, we can subsample it
+        if self.config.custom_split_file:
+            dataset = apply_custom_split_file(dataset, self.config.custom_split_file)
 
         (
             self._task_names,
@@ -62,7 +48,7 @@ class NQADatamodule(DataModule):
         def expand_questions(examples, tokenizer):
 
             def maybe_truncate(fixed_prompt, content, buffer=10):
-                # return content
+                return content
                 """Handling truncation here to make sure the prompt is not truncated"""
                 prompt_length = len(tokenizer.encode(fixed_prompt))
                 remaining_length = self.config.max_input_length - prompt_length - buffer
