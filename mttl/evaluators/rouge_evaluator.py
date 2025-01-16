@@ -108,8 +108,8 @@ class RougeEvaluator(GenerativeEvaluator):
         all_references = []
         all_sources = []
 
-        if self.config.predict_output_file is not None:
-            f = open(self.config.predict_output_file + "/prediction.jsonl", "w")
+        if self.config.predict_output_dir is not None:
+            f = open(self.config.predict_output_dir + "/prediction.jsonl", "w")
         for num_batch, batch in enumerate(dataloader):
             if num_batches is not None and num_batch >= num_batches:
                 break

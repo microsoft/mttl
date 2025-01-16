@@ -54,7 +54,7 @@ if args.merge_or_route == "base":
     )
 elif args.merge_or_route == "uniform":
     model = MultiExpertModel.from_pretrained_library(
-        "hf://zhan1993/abstention_library",
+        args.library_id,
         selector_config=UniformSelectorConfig(),
         device_map=device_map,
     )
@@ -76,7 +76,7 @@ datamodule = AbstentionDataModule(config, for_generation=True)
 
 
 evaluator = RougeEvaluator(datamodule=datamodule)
-evaluator.generate(model, split="test")
+evaluator.generate(model, split="test", verbose=False)
 
 # train_dataloader = datamodule.test_dataloader()
 # for batch in train_dataloader:
