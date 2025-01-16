@@ -62,16 +62,6 @@ class QAEvalArguments(MultiExpertConfig):
     # Which datamodule to use
     evaluate_on: str = None
 
-    def __post_init__(self):
-        # Allow to set trainable tasks from a json split file (e.g. nqa_mini_split.json)
-        if isinstance(
-            self.finetune_task_name, str
-        ) and self.finetune_task_name.endswith(".json"):
-            self.finetune_task_name = load_task_splits(self.finetune_task_name)[self.split]
-        else:
-            raise ValueError("Please provide a finetune_task_name ending with .json")
-        super().__post_init__()
-
 
 def eval_qa(training_args):
     seed_everything(training_args.seed, workers=True)
@@ -118,7 +108,7 @@ def eval_qa(training_args):
             ]
         )
         expert_lib = ExpertLibrary.get_expert_library(
-            training_args.library_id, selection=list(test_tasks)
+            training_args.library_id, selection=list(evaluator.datamodule.task_names)
         )
         model.add_experts_from_library(expert_lib)
 
