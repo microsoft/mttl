@@ -1,15 +1,9 @@
 import copy
-import json
-import logging
 import os
-import random
 from dataclasses import dataclass
 from functools import partial
 
-import numpy as np
 import torch
-import torch.distributed as dist
-import torch.nn.functional as F
 from lightning_fabric import seed_everything
 from torch.distributed import destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -30,10 +24,10 @@ from mttl.dist_utils import (
     is_main_process,
 )
 from mttl.logging import logger, setup_logging
-from mttl.models.expert_model import ExpertModel, ExpertModelConfig, disable_modifiers
+from mttl.models.expert_model import ExpertModel, ExpertModelConfig
 from mttl.models.get_optimizer import get_optimizer_and_scheduler
 from mttl.models.utils import transfer_batch_to_device
-from mttl.utils import create_library, remote_login, seed_everything, upload_library
+from mttl.utils import remote_login, seed_everything
 from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator
 from projects.kms.utils.quality_evaluator import QualityEvaluator
 from projects.kms.utils.simple_utils import (
@@ -315,8 +309,6 @@ def train_km(training_args: KMArguments):
 
         if global_step >= training_args.total_steps:
             break
-
-    # To reload the best model:
 
     # Also save last model
     raw_model.save_pretrained(training_args.output_dir + "/last_model")
