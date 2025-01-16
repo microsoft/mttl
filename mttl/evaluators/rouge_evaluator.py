@@ -117,15 +117,17 @@ class RougeEvaluator(GenerativeEvaluator):
             labels_texts = batch["labels_texts"]
             sources_texts = batch["sources_texts"]
             predictions = self.generate_for_batch(model, batch).generated_texts
+            ids = batch['ids']
 
-            for source, label, prediction in zip(
-                sources_texts, labels_texts, predictions
+            for id, source, label, prediction in zip(
+                ids, sources_texts, labels_texts, predictions
             ):
                 json_write = json.dumps(
                     {
                         "source": source,
                         "label": label,
                         "prediction": prediction,
+                        "id": id
                     }
                 )
                 f.write(json_write + "\n")
