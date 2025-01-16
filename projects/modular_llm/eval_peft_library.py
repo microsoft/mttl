@@ -66,17 +66,18 @@ else:
         checkpoint = torch.load(args.checkpoint, weights_only=False)["state_dict"]
         module.load_state_dict(checkpoint)
     model = module.model
+
 ## load datasets
 config = AbstentionDataConfig(
     model=args.model,
-    dataset="zhan1993/coconot_original_train_routing",
+    dataset=args.dataset,  # zhan1993/coconot_original_eval
     predict_output_dir=args.output_dir,
 )
 datamodule = AbstentionDataModule(config, for_generation=True)
 
 
 evaluator = RougeEvaluator(datamodule=datamodule)
-evaluator.generate(model, split="test", verbose=False)
+evaluator.generate(model, split="test", verbose=True)
 
 # train_dataloader = datamodule.test_dataloader()
 # for batch in train_dataloader:
