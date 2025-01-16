@@ -145,5 +145,6 @@ class LogLikeEvaluator(Evaluator):
             "tokens_per_request": tokens_per_request
         }
 
-        self.save_metrics(metrics, output_path)
+        if output_path:
+            self.save_metrics(metrics, output_path)
         return metrics["accuracy"]
