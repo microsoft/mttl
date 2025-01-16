@@ -33,23 +33,6 @@ from projects.kms.train_km_simple import (
     evaluate_datasets,
     evaluate_metrics,
 )
-from mttl.dist_utils import (
-    get_device,
-    get_local_rank,
-    is_dist_avail_and_initialized,
-    is_main_process,
-)
-from mttl.arguments import MultiExpertConfig
-from projects.kms.train_qa import KEArguments, train_datasets
-from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator
-from projects.kms.utils.quality_evaluator import QualityEvaluator
-from projects.kms.utils.wiki_mmlu_evaluator import WikiMMLUEvaluator
-
-
-def load_task_splits(task_file):
-    with open(task_file, "r") as f:
-        split_dict = json.load(f)
-    return split_dict
 
 
 @dataclass
@@ -62,16 +45,6 @@ class QAEvalArguments(MultiExpertConfig):
     # Which datamodule to use
     evaluate_on: str = None
 
-    def __post_init__(self):
-        # Allow to set trainable tasks from a json split file (e.g. nqa_mini_split.json)
-        if isinstance(
-            self.finetune_task_name, str
-        ) and self.finetune_task_name.endswith(".json"):
-            self.finetune_task_name = load_task_splits(self.finetune_task_name)[self.split]
-        else:
-            raise ValueError("Please provide a finetune_task_name ending with .json")
-        super().__post_init__()
-
 
 def eval_qa(training_args):
     seed_everything(training_args.seed, workers=True)
@@ -80,10 +53,7 @@ def eval_qa(training_args):
     setup_logging(training_args.output_dir)
     logger.info("Args: %s", training_args.to_json())
 
-    try:
-        remote_login(training_args.remote_token)
-    except Exception as e:
-        logger.error(f"Failed to login remotely: {e}")
+    remote_login(training_args.remote_token, raise_error=False)
 
     # Build model (will have 0 experts if `library_id` is None)
     model_config = KEMoEModelConfig(
@@ -109,16 +79,15 @@ def eval_qa(training_args):
     data_args = copy.deepcopy(training_args)
     data_args.dataset = evaluate_datasets[training_args.evaluate_on]
     evaluator = evaluate_class[training_args.evaluate_on](data_args)
+    metric = evaluate_metrics[training_args.evaluate_on]
 
     if training_args.library_id:
         # Add only the experts we need
-        test_tasks = set(
-            getattr(evaluator.datamodule, f"{training_args.split}_dataset")[
-                "document_id"
-            ]
+        expert_selection = getattr(
+            evaluator.datamodule, f"{training_args.split}_task_names"
         )
         expert_lib = ExpertLibrary.get_expert_library(
-            training_args.library_id, selection=list(test_tasks)
+            training_args.library_id, selection=expert_selection
         )
         model.add_experts_from_library(expert_lib)
 
@@ -131,7 +100,7 @@ def eval_qa(training_args):
         model, split=args.split, shuffle=True, output_path=args.output_dir
     )
     if is_main_process():
-        print(f"Result: {result}")
+        print(f"{metric}: {result}")
 
 
 if __name__ == "__main__":

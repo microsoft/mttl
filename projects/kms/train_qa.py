@@ -1,9 +1,7 @@
 import copy
-import json
-import logging
 import os
+import random
 from dataclasses import dataclass
-from functools import partial
 
 import torch
 from lightning_fabric import seed_everything
@@ -32,8 +30,8 @@ from projects.kms.train_km_simple import (
     evaluate_datasets,
     evaluate_metrics,
 )
-from projects.kms.utils.simple_utils import EarlyStopper  # added
 from projects.kms.utils.simple_utils import (
+    EarlyStopper,
     SimpleLogger,
     do_evaluation,
     lm_loss,
@@ -49,92 +47,18 @@ from mttl.models.library.expert_library import ExpertLibrary
 from mttl.utils import remote_login
 from projects.kms.train_km_simple import KMArguments
 
-train_datasets = {
-    "nqa": "az://mttldata/narrativeqa-sanitized",
-    "nqa-rag": "pclucas14/nqa-RAG-64",
-    "quality": "az://mttldata/quality-sanitized",
-    "quality-rag": "pclucas14/quality-RAG-64",
-}
-
 
 @dataclass
 class KEArguments(MultiExpertConfig, KMArguments):
-    # set the following if you want to enable the NQA callback during training
     nqa_dataset: str = None
     # Where to save the KE expert
     ke_hf_path: str = None
-    # Whether to retrieve passages
-    use_rag: bool = False
     # offload experts
     offload_experts: bool = False
     # max kms
     max_kms: int = None
-    # split file for subsampling
-    subsample_file: str = None
-    # rag dataset
-    rag_dataset: str = None
     # whether to overwrite / force upload of the new expert
     force: bool = False
-
-    def __post_init__(self):
-        super().__post_init__()
-
-        # Automating some args
-        if self.use_rag:
-            if not self.evaluate_on.endswith("-rag"):
-                logger.warning(f"Overwriting `evaluate_on` to {self.evaluate_on}-rag")
-                self.evaluate_on += "-rag"
-            self.include_context = True
-            if self.rag_dataset is None:
-                self.dataset = train_datasets[self.evaluate_on]
-            else:
-                self.dataset = self.rag_dataset
-        else:
-            self.dataset = train_datasets[self.evaluate_on]
-
-        logger.warning(f"Overwriting `dataset` to {self.dataset}")
-        eval_on = self.evaluate_on.split("-")[0]
-        dataset_type = {"nqa": "narrativeqa", "quality": "quality"}[eval_on]
-        if self.dataset_type != dataset_type:
-            logger.warning(f"Overwriting `dataset_type` to {dataset_type}")
-            self.dataset_type = dataset_type
-
-        if self.finetune_task_name is None:
-            self.finetune_task_name = {
-                "quality": "splits/quality/quality_full.json",
-                "nqa": "splits/nqa/nqa_full.json",
-            }[eval_on]
-            logger.warning(
-                f"Overwriting `finetune_task_name` to {self.finetune_task_name}"
-            )
-
-        # Allow to set trainable tasks from a json split file (e.g. nqa_mini_split.json)
-        if isinstance(
-            self.finetune_task_name, str
-        ) and self.finetune_task_name.endswith(".json"):
-            if self.finetune_task_name != self.subsample_file:
-                logger.warning(
-                    f"Overwriting `subsample_file` to {self.finetune_task_name}"
-                )
-                self.subsample_file = self.finetune_task_name
-
-            with open(self.finetune_task_name, "r") as f:
-                split_dict = json.load(f)
-
-            # HACK so that QAEvalArguments can still work
-            if hasattr(self, "split"):
-                tasks = split_dict[self.split]
-            else:
-                tasks = split_dict["train"] + split_dict["dev"]
-            logger.info(f"Setting finetune_task_name to {tasks}")
-            self.finetune_task_name = tasks
-
-        if self.max_kms is not None:
-            import random
-
-            random.shuffle(self.finetune_task_name)
-            logger.info(f"Selecting {self.max_kms} tasks to finetune on")
-            self.finetune_task_name = self.finetune_task_name[: self.max_kms]
 
 
 def train_ke(training_args):
@@ -150,13 +74,26 @@ def train_ke(training_args):
 
     remote_login(training_args.remote_token)
 
+    # build evaluator
+    data_args = copy.deepcopy(training_args)
+    data_args.dataset = evaluate_datasets[training_args.evaluate_on]
+    evaluator = evaluate_class[training_args.evaluate_on](data_args)
+    eval_metric = evaluate_metrics[training_args.evaluate_on]
+
+    datamodule = get_datamodule(training_args)
+
     if training_args.library_id:
         logger.info("Loading expert library: %s", training_args.library_id)
+
+        expert_selection = datamodule.train_task_names + datamodule.dev_task_names
+        if training_args.max_kms:
+            random.shuffle(expert_selection)
+            expert_selection = expert_selection[: training_args.max_kms]
 
         model_config = KEMoEModelConfig(
             base_model=training_args.model,
             library_id=training_args.library_id,
-            expert_selection=args.finetune_task_name,
+            expert_selection=expert_selection,
             selector_config=training_args.selector_config,
             offload_experts=training_args.offload_experts,
         )
@@ -167,14 +104,6 @@ def train_ke(training_args):
             logger.warning("Overwriting `trainable_param_names` to include the KE")
             training_args.trainable_param_names = f".*{model.ke_expert_name}.*"
 
-        # for which we have trained KM experts
-        if not training_args.finetune_task_name:
-            logger.info(
-                f"Setting `finetune_task_name` to match with experts in the model"
-            )
-            training_args.finetune_task_name = list(
-                filter(lambda x: x != model.ke_expert_name, model.experts_names)
-            )
     else:
         logger.info("Loading model without expert library")
         model_config = ExpertModelConfig(
@@ -197,14 +126,7 @@ def train_ke(training_args):
     if is_dist_avail_and_initialized():
         model = DDP(model, device_ids=[get_local_rank()])
 
-    # build evaluator
-    data_args = copy.deepcopy(training_args)
-    data_args.dataset = evaluate_datasets[training_args.evaluate_on]
-    evaluator = evaluate_class[training_args.evaluate_on](data_args)
-    eval_metric = evaluate_metrics[training_args.evaluate_on]
-
-    datamodule = get_datamodule(training_args)
-    (optimizer, scheduler), trainable_param_names = get_optimizer_and_scheduler(
+    (optimizer, scheduler), _ = get_optimizer_and_scheduler(
         model, training_args, num_train_examples=len(datamodule.train_dataset)
     )
 
@@ -224,7 +146,6 @@ def train_ke(training_args):
 
     global_step = 0
     best_val = val_loss = float("inf")
-    eval_score_so_far = []
     met_logger = SimpleLogger(training_args.output_dir)
 
     # early stopper
