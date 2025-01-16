@@ -13,6 +13,5 @@
     "attn_implementation": "flash_attention_2",
     "task_name_field": "document_id",
     "include_context": true,
-    "split": "dev",
-    "finetune_task_name": "splits/quality/quality_full.json"
+    "split": "dev"
 }
