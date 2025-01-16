@@ -77,11 +77,10 @@ class LogLikeEvaluator(Evaluator):
                     reduction="none",
                     normalize_length=self.length_normalization,
                 )
-                loss_per_option = loss_per_option.cpu()
-
                 if loss_per_option.dtype in [torch.bfloat16, torch.float16]:
-                    loss_per_option = loss_per_option.float().numpy()
+                    loss_per_option = loss_per_option.float()
 
+                loss_per_option = loss_per_option.cpu().numpy()
                 loss_per_example = [
                     loss_per_option[
                         int(np.sum(num_options[:i])) : int(np.sum(num_options[: i + 1]))
@@ -98,6 +97,7 @@ class LogLikeEvaluator(Evaluator):
                 num_tokens_in_prompt = (
                     batch["attention_mask"].sum(1) - batch["labels"].ne(label_pad_id).sum(1)
                 ).cpu().tolist()
+
                 num_tokens_in_prompt = [
                     num_tokens_in_prompt[int(np.sum(num_options[:i])) : int(np.sum(num_options[: i + 1]))][0]
                     for i in range(batch_size)

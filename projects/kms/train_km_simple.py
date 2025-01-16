@@ -61,28 +61,40 @@ train_datasets = {
 evaluate_datasets = {
     "nqa": "az://mttldata/narrativeqa-sanitized",
     "nqa-rag": "az://mttldata/nqa-rag-256",
+    "nqa-rag-1024": "az://mttldata/nqa-rag-1024",
+    "nqa-rag-2048": "az://mttldata/nqa-rag-2048",
     "wiki": "az://mttldata/wiki-top-20-sanitized",
     "wiki-rag": "az://mttldata/wiki-top-20-sanitized-rag",
     "quality": "az://mttldata/quality-sanitized",
     "quality-rag": "az://mttldata/ql-rag-256",
+    "quality-rag-1024": "az://mttldata/ql-rag-1024",
+    "quality-rag-2048": "az://mttldata/ql-rag-2048",
 }
 
 evaluate_class = {
     "nqa": NQAZeroShotEvaluator,
     "nqa-rag": NQAZeroShotEvaluator,
+    "nqa-rag-1024": NQAZeroShotEvaluator,
+    "nqa-rag-2048": NQAZeroShotEvaluator,
     "wiki": WikiMMLUEvaluator,
     "wiki-rag": WikiMMLUEvaluator,
     "quality": QualityEvaluator,
     "quality-rag": QualityEvaluator,
+    "quality-rag-1024": QualityEvaluator,
+    "quality-rag-2048": QualityEvaluator,
 }
 
 evaluate_metrics = {
     "nqa": "rougeL",
     "nqa-rag": "rougeL",
+    "nqa-rag-1024": "rougeL",
+    "nqa-rag-2048": "rougeL",
     "wiki": "accuracy",
     "wiki-rag": "accuracy",
     "quality": "accuracy",
     "quality-rag": "accuracy",
+    "quality-rag-1024": "accuracy",
+    "quality-rag-2048": "accuracy",
 }
 
 

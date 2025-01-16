@@ -33,60 +33,43 @@ from projects.kms.train_km_simple import (
     evaluate_datasets,
     evaluate_metrics,
 )
+from mttl.dist_utils import (
+    get_device,
+    get_local_rank,
+    is_dist_avail_and_initialized,
+    is_main_process,
+)
+from mttl.arguments import MultiExpertConfig
 from projects.kms.train_qa import KEArguments, train_datasets
 from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator
 from projects.kms.utils.quality_evaluator import QualityEvaluator
 from projects.kms.utils.wiki_mmlu_evaluator import WikiMMLUEvaluator
 
-evaluate_class = {
-    "nqa": NQAZeroShotEvaluator,
-    "wiki": WikiMMLUEvaluator,
-    "quality": QualityEvaluator,
-}
 
-evaluate_metrics = {
-    "nqa": "rougeL",
-    "wiki": "accuracy",
-    "quality": "accuracy",
-}
+def load_task_splits(task_file):
+    with open(task_file, "r") as f:
+        split_dict = json.load(f)
+    return split_dict
 
 
 @dataclass
 class QAEvalArguments(MultiExpertConfig):
-    # name of the KE expert inside the MoEModel
     ke_expert_name: str = "KE"
-    # which split to evaluate on
+    # split
     split: str = "test"
     # Where to load the KE expert from
     ke_hf_path: str = None
     # Which datamodule to use
     evaluate_on: str = None
-    # augment the data sample with additional context
-    include_context: bool = False
-    # evaluation dataset
-    dataset: str = None
 
     def __post_init__(self):
-        if "rag" in self.dataset.lower() and not self.include_context:
-            raise logger.warning("RAG datasets require context to be included.")
-
         # Allow to set trainable tasks from a json split file (e.g. nqa_mini_split.json)
         if isinstance(
             self.finetune_task_name, str
         ) and self.finetune_task_name.endswith(".json"):
-            if self.finetune_task_name != self.subsample_file:
-                logger.warning(
-                    f"Overwriting `subsample_file` to {self.finetune_task_name}"
-                )
-                self.subsample_file = self.finetune_task_name
-
-            with open(self.finetune_task_name, "r") as f:
-                split_dict = json.load(f)
-
-            tasks = split_dict[self.split]
-            logger.info(f"Setting finetune_task_name to {tasks}")
-            self.finetune_task_name = tasks
-
+            self.finetune_task_name = load_task_splits(self.finetune_task_name)[self.split]
+        else:
+            raise ValueError("Please provide a finetune_task_name ending with .json")
         super().__post_init__()
 
 
