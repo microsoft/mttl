@@ -49,6 +49,12 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
         self.lora_a = nn.ParameterDict({})
         self.lora_b = nn.ParameterDict({})
 
+        assert isinstance(layer, nn.Linear)
+        # llama does stuff like `target_dtype = self.q_proj.weight.dtype`
+        # which fails if we do not have a point to `weight` and `bias` attributes
+        self.weight = layer.weight
+        self.bias = layer.bias
+
     def merge_expert(self, expert_name):
         if expert_name not in self.expert_infos:
             raise ValueError(
