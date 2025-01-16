@@ -208,8 +208,7 @@ def main(args: RAGArguments):
             DatasetLibrary.push_dataset(final_dataset, path)
         else:
             DatasetLibrary.push_dataset(
-                final_dataset,
-                f"{path}-{args.worker_id}-{args.num_workers}",
+                final_dataset, f"{path}-{args.worker_id}-{args.num_workers}"
             )
     except Exception as e:
         try:
