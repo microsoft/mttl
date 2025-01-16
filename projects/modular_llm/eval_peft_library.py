@@ -77,7 +77,7 @@ datamodule = AbstentionDataModule(config, for_generation=True)
 
 
 evaluator = RougeEvaluator(datamodule=datamodule)
-evaluator.generate(model, split="test", verbose=True)
+evaluator.generate(model, split="test", verbose=False)
 
 # train_dataloader = datamodule.test_dataloader()
 # for batch in train_dataloader:

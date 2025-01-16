@@ -7,7 +7,6 @@ from mttl.evaluators.base import GenerativeEvaluator, switch_to_eval_mode
 from mttl.evaluators.ni_evaluator import compute_metrics
 from mttl.logging import logger
 
-
 @dataclass
 class GenerationOutput:
     predictions: list[str]
@@ -110,18 +109,23 @@ class RougeEvaluator(GenerativeEvaluator):
 
         if self.config.predict_output_dir is not None:
             f = open(self.config.predict_output_dir + "/prediction.jsonl", "w")
-        for num_batch, batch in enumerate(dataloader):
+        pbar = tqdm(
+            enumerate(dataloader),
+            total=len(dataloader),
+        )
+        for num_batch, batch in pbar:
             if num_batches is not None and num_batch >= num_batches:
                 break
-
+            batch = transfer_batch_to_device(batch, "cuda")
             labels_texts = batch["labels_texts"]
             sources_texts = batch["sources_texts"]
+
             predictions = self.generate_for_batch(model, batch).generated_texts
             ids = batch['ids']
 
-            for id, source, label, prediction in zip(
+            for id, source, label, prediction in tqdm(zip(
                 ids, sources_texts, labels_texts, predictions
-            ):
+            )):
                 json_write = json.dumps(
                     {
                         "source": source,
