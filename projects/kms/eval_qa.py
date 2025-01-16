@@ -1,8 +1,10 @@
 import copy
 import json
 import logging
-from dataclasses import dataclass
 import os
+import time
+from dataclasses import dataclass
+
 from lightning_fabric import seed_everything
 
 # register this datamodule!
@@ -10,7 +12,13 @@ from projects.kms.utils.km_datamodule import KMDatasetModule
 from projects.kms.utils.nqa_datamodule import NQADatamodule
 
 # isort: split
-import time
+from mttl.arguments import ExpertConfig, MultiExpertConfig
+from mttl.dist_utils import (
+    get_device,
+    get_local_rank,
+    is_dist_avail_and_initialized,
+    is_main_process,
+)
 from mttl.logging import logger, setup_logging
 from mttl.models.containers.selectors.km_selector import (
     KnowledgeExtractorSelectorConfig,
@@ -25,32 +33,59 @@ from projects.kms.train_km_simple import (
     evaluate_datasets,
     evaluate_metrics,
 )
-from mttl.dist_utils import (
-    get_device,
-    get_local_rank,
-    is_dist_avail_and_initialized,
-    is_main_process,
-)
 from projects.kms.train_qa import KEArguments, train_datasets
 from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator
 from projects.kms.utils.quality_evaluator import QualityEvaluator
 from projects.kms.utils.wiki_mmlu_evaluator import WikiMMLUEvaluator
 
+evaluate_class = {
+    "nqa": NQAZeroShotEvaluator,
+    "wiki": WikiMMLUEvaluator,
+    "quality": QualityEvaluator,
+}
+
+evaluate_metrics = {
+    "nqa": "rougeL",
+    "wiki": "accuracy",
+    "quality": "accuracy",
+}
+
 
 @dataclass
-class QAEvalArguments(KEArguments):
+class QAEvalArguments(MultiExpertConfig):
+    # name of the KE expert inside the MoEModel
     ke_expert_name: str = "KE"
+    # which split to evaluate on
     split: str = "test"
+    # Where to load the KE expert from
+    ke_hf_path: str = None
+    # Which datamodule to use
+    evaluate_on: str = None
+    # augment the data sample with additional context
+    include_context: bool = False
+    # evaluation dataset
+    dataset: str = None
 
     def __post_init__(self):
-        eval_on = self.evaluate_on.split("-")[0]
-        dataset_type = {"nqa": "narrativeqa", "quality": "quality"}[eval_on]
-        if dataset_type == "quality" and self.split == "test":
-            logger.warning(
-                f"Quality has not labelled test split. Overwriting `split` to valid"
-            )
-            self.split = "dev"
-            self.subsample_dev = self.subsample_test
+        if "rag" in self.dataset.lower() and not self.include_context:
+            raise logger.warning("RAG datasets require context to be included.")
+
+        # Allow to set trainable tasks from a json split file (e.g. nqa_mini_split.json)
+        if isinstance(
+            self.finetune_task_name, str
+        ) and self.finetune_task_name.endswith(".json"):
+            if self.finetune_task_name != self.subsample_file:
+                logger.warning(
+                    f"Overwriting `subsample_file` to {self.finetune_task_name}"
+                )
+                self.subsample_file = self.finetune_task_name
+
+            with open(self.finetune_task_name, "r") as f:
+                split_dict = json.load(f)
+
+            tasks = split_dict[self.split]
+            logger.info(f"Setting finetune_task_name to {tasks}")
+            self.finetune_task_name = tasks
 
         super().__post_init__()
 
@@ -109,7 +144,9 @@ def eval_qa(training_args):
         ke_expert = load_expert(training_args.ke_hf_path)
         model.add_expert_instance(ke_expert, expert_name=training_args.ke_expert_name)
 
-    result = evaluator.evaluate(model, split=args.split, shuffle=True, output_path=args.output_dir)
+    result = evaluator.evaluate(
+        model, split=args.split, shuffle=True, output_path=args.output_dir
+    )
     if is_main_process():
         print(f"Result: {result}")
 

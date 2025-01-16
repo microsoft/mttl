@@ -99,6 +99,30 @@ class JobQueue:
         retry_files = [f for f in os.listdir(task_output_dir) if f.startswith("retry_")]
         return len(retry_files)
 
+    def print_task_directory(self, task):
+        def format_time(timestamp):
+            return time.strftime("%d-%m-%Y %H:%M:%S", time.localtime(timestamp))
+
+        # clean out the task directory
+        timestamp = format_time(self.get_timestamp(task))
+        current_time = format_time(time.time())
+
+        print(
+            f"Task {task} was last modified at {timestamp} and the current time is {current_time}"
+        )
+
+        # actually, let's print the name and timestamp of every file in the task directory
+        task_output_dir = os.path.join(self.output_dir, task)
+        task_files = os.listdir(task_output_dir)
+        for f in task_files:
+            f_timestamp = format_time(
+                os.path.getmtime(os.path.join(task_output_dir, f))
+            )
+            print(f"{f} - {f_timestamp}")
+
+        if len(task_files) == 0:
+            print(f"Task {task} has an empty task directory")
+
     def get_run_status(self, task):
         task_output_dir = os.path.join(self.output_dir, task)
         if os.path.exists(task_output_dir):
@@ -137,7 +161,7 @@ class JobQueue:
         while True:
             # shuffle the tasks
             doc_id = None
-            for priority_status in ["queued", "crashed", "failed"]:
+            for p_idx, priority_status in enumerate(["queued", "crashed", "failed"]):
 
                 tasks = self.tasks.copy()
                 random.shuffle(tasks)
@@ -148,45 +172,21 @@ class JobQueue:
                         f"task : {task} - status : {status} - priority_status : {priority_status}"
                     )
 
+                    if status == "running" and p_idx == 0:
+                        self.print_task_directory(task)
+
                     if status == "finished":
                         self.finished.append(task)
                         self.tasks.remove(task)
                         continue
 
                     if status.startswith("crashed"):
-                        doc_id = task
-                        # clean out the task directory
-                        timestamp = self.get_timestamp(task)
-                        # convert timestsamp to DD-MM-MM-YYYY HH:MM:SS
-                        timestamp_str = time.strftime(
-                            "%d-%m-%Y %H:%M:%S", time.localtime(timestamp)
-                        )
-                        current_time = time.strftime(
-                            "%d-%m-%Y %H:%M:%S", time.localtime(time.time())
-                        )
-                        logger.warning(
-                            f"Crashed job {task} ({status}): {timestamp_str} \t current time {current_time}"
-                        )
-
-                        # actually, let's print the name and timestamp of every file in the task directory
-                        task_output_dir = os.path.join(self.output_dir, task)
-                        task_files = os.listdir(task_output_dir)
-                        for f in task_files:
-                            timestamp = os.path.getmtime(
-                                os.path.join(task_output_dir, f)
-                            )
-                            timestamp_str = time.strftime(
-                                "%d-%m-%Y %H:%M:%S", time.localtime(timestamp)
-                            )
-                            print(f"{f} - {timestamp_str}")
-                        if len(task_files) == 0:
-                            print(f"Task {task} has Empty directory")
+                        self.print_task_directory(task)
 
                     if status == "failed" == priority_status:
                         # check how many retries have been done
                         n_retries = self.count_retries(task)
                         if n_retries < self.n_retries:
-                            doc_id = task
                             # create a file called `retry_{timestamp}.txt` to indicate that the task is being retried
                             retry_file = os.path.join(
                                 self.output_dir, task, f"retry_{time.time()}.txt"
@@ -454,7 +454,8 @@ async def main():
                 try:
                     os.remove(done_file)
                 except FileNotFoundError:
-                    print(f"File {done_file} not found")
+                    new_status = job_queue.get_run_status(doc_id)
+                    print(f"File {done_file} not found. New status is {new_status}")
 
             # create a directory for the task ASAP
             os.makedirs(os.path.join(output_dir, doc_id), exist_ok=True)

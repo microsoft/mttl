@@ -14,6 +14,7 @@ class QualityDatasetConfig(DatasetConfig):
     )
     include_context: bool = False
     topk_context: int = 10
+    subsample_file: str = None
 
 
 @DataModule.register("quality", config_cls=QualityDatasetConfig)
@@ -22,6 +23,27 @@ class QualityDatamodule(MultiChoiceDataModule):
         from mttl.models.library.dataset_library import DatasetLibrary
 
         dataset = DatasetLibrary.pull_dataset(self.config.dataset)
+
+        # Instead of always working with the large NQA dataset, we can subsample it
+        # This allows us to reuse our previous datasets, while ensure a consistent train / dev / test split
+        if self.config.subsample_file:
+            subsample_file = json.load(open(self.config.subsample_file, "r"))
+            doc_to_split = {
+                doc: split
+                for split in ["train", "dev", "test"]
+                for doc in subsample_file[split]
+            }
+            all_docs = set(
+                subsample_file["train"] + subsample_file["dev"] + subsample_file["test"]
+            )
+            dataset = dataset.filter(lambda x: x["document_id"] in all_docs)
+
+            def update_split(item):
+                item["split"] = doc_to_split[item["document_id"]]
+                return item
+
+            # Update the Split column
+            dataset = dataset.map(update_split)
 
         (
             self._task_names,

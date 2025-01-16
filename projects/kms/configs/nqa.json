@@ -1,0 +1,4 @@
+{
+    "dataset": "az://mttldata/narrativeqa-sanitized",
+    "evaluate_on": "nqa"
+}

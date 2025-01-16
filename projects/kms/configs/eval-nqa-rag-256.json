@@ -1,0 +1,5 @@
+{
+    "dataset": "az://mttldata/nqa-rag-256",
+    "evaluate_on": "nqa",
+    "include_context": true
+}
