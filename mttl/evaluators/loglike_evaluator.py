@@ -44,6 +44,7 @@ class LogLikeEvaluator(Evaluator):
         all_accuracies = []
         all_predictions = []
         time_per_request = []
+        tokens_per_request = []
         device = next(model.parameters()).device
 
         for num_batch, batch in pbar:
@@ -69,7 +70,7 @@ class LogLikeEvaluator(Evaluator):
                         input_ids=batch["input_ids"],
                         attention_mask=batch["attention_mask"],
                     ).logits
-                time_per_request.append((time.time() - start) / batch_size)
+                end = time.time()
                 loss_per_option = compute_loglike_loss(
                     logits,
                     batch["labels"],
@@ -92,8 +93,20 @@ class LogLikeEvaluator(Evaluator):
                     np.argmin(option_loss) for option_loss in loss_per_example
                 ]
 
+                # get number of tokens in prompt
+                label_pad_id = self.datamodule.collate_fn.label_pad_token_id
+                num_tokens_in_prompt = (
+                    batch["attention_mask"].sum(1) - batch["labels"].ne(label_pad_id).sum(1)
+                ).cpu().tolist()
+                num_tokens_in_prompt = [
+                    num_tokens_in_prompt[int(np.sum(num_options[:i])) : int(np.sum(num_options[: i + 1]))][0]
+                    for i in range(batch_size)
+                ]
+
                 all_predictions.extend(predictions)
                 all_losses.extend(loss_per_option.tolist())
+                time_per_request.append((end - start) / batch_size)
+                tokens_per_request.extend(num_tokens_in_prompt)
 
                 if labels_index is not None:
                     all_accuracies.extend(
@@ -121,13 +134,15 @@ class LogLikeEvaluator(Evaluator):
             distributed_mean(all_accuracies, device) if all_accuracies else None
         )
         time_per_request = distributed_mean(time_per_request, device)
+        tokens_per_request = distributed_mean(tokens_per_request, device)
 
         metrics = {
             "loss": loss,
             "loglike": -loss,
             "predictions": all_predictions,
             "accuracy": all_accuracies,
-            "time_per_request": time_per_request
+            "time_per_request": time_per_request,
+            "tokens_per_request": tokens_per_request
         }
 
         self.save_metrics(metrics, output_path)
