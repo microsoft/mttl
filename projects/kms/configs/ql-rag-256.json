@@ -1,5 +1,5 @@
 {
-    "top_k": 10,
+    "top_k": 20,
     "final_dataset_id": "az://mttldata/ql-rag-256",
     "block_size": 256,
     "source_dataset": "az://mttldata/quality-sanitized",
