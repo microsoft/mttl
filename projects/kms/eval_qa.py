@@ -44,6 +44,8 @@ class QAEvalArguments(MultiExpertConfig):
     ke_hf_path: str = None
     # Which datamodule to use
     evaluate_on: str = None
+    # Default router should be ke selector
+    router_selector: str = "ke_selector"
 
 
 def eval_qa(training_args):
