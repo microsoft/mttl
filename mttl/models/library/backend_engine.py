@@ -150,7 +150,7 @@ class BlobStorageEngine(BackendEngine):
         if _cache_dir is not None:
             self._cache_dir = Path(_cache_dir)
         if "BLOB_CACHE_DIR" in os.environ:
-            self._cache_dir = os.environ["BLOB_CACHE_DIR"]
+            self._cache_dir = Path(os.environ["BLOB_CACHE_DIR"])
         else:
             self._cache_dir = Path.home() / ".cache" / "mttl"
 
