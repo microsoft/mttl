@@ -174,7 +174,8 @@ class ExpertLibrary:
             if metadatum.expert_deleted:
                 continue
 
-            key = metadatum.expert_name
+            key = str(metadatum.expert_name)
+            # key = metadatum.expert_name
             if key in self.data:
                 raise ValueError(
                     f"Expert {metadatum.expert_name} already exists. Library corrupted."
@@ -296,7 +297,11 @@ class ExpertLibrary:
         lock = threading.Lock()
 
         def process_ckpt(ckpt_path):
-            expert_dump = load_expert(ckpt_path)
+            try:
+                expert_dump = load_expert(ckpt_path)
+            except Exception as e:
+                logger.error(f"Error loading expert from {ckpt_path}: {e}\n")
+                raise e
 
             with lock:
                 if update and expert_dump.name in self.data:

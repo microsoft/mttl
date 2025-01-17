@@ -157,6 +157,11 @@ def load_expert(
     from mttl.models.library.peft import load_expert_from_peft_checkpoint
     from mttl.models.lightning.base_module import CHECKPOINT_PATH_IN_HUB
 
+    # HACK: we have currently no way to enforce the expert_name to be a string when building it
+    # We will enforce it here
+    if expert_name and not isinstance(expert_name, str):
+        expert_name = str(expert_name)
+
     # enable ability to load expert from library by doing
     # expert_path = <hf_id>/<lib_name>/<exp_name>
     if isinstance(expert_path, str) and "://" in expert_path:
