@@ -40,6 +40,7 @@ def distributed_mean(metrics: List[float], device: torch.device) -> float:
     count = len(metrics)
     metric = np.sum(metrics)
     if is_dist_avail_and_initialized():
+        torch.distributed.barrier()
         metric = torch.tensor(metric, dtype=torch.float32, device=device)
         count = torch.tensor(count, dtype=torch.long, device=device)
         dist.all_reduce(metric, op=dist.ReduceOp.SUM)

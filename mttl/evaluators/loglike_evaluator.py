@@ -124,7 +124,8 @@ class LogLikeEvaluator(Evaluator):
                         np.mean(all_accuracies), np.mean(all_losses), np.mean(time_per_request),
                     )
                 )
-            
+
+            del batch
             del logits
             del loss_per_option
             torch.cuda.empty_cache()

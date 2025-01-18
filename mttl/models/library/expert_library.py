@@ -42,7 +42,7 @@ class Score:
 
     @property
     def hash(self) -> str:
-        return str(self.key).encode()
+        return self.key.encode()
 
     @classmethod
     def fromdict(self, data):
@@ -174,8 +174,7 @@ class ExpertLibrary:
             if metadatum.expert_deleted:
                 continue
 
-            key = str(metadatum.expert_name)
-            # key = metadatum.expert_name
+            key = metadatum.expert_name
             if key in self.data:
                 raise ValueError(
                     f"Expert {metadatum.expert_name} already exists. Library corrupted."
@@ -343,7 +342,7 @@ class ExpertLibrary:
                 f"Expert {expert_dump.expert_info.expert_name} already exists!"
             )
 
-        if "." in str(expert_dump.expert_info.expert_name):
+        if "." in expert_dump.expert_info.expert_name:
             raise ValueError("Expert name cannot contain dots.")
 
         # convert to metadata entry
