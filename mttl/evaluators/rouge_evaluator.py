@@ -116,7 +116,7 @@ class RougeEvaluator(GenerativeEvaluator):
         for num_batch, batch in pbar:
             if num_batches is not None and num_batch >= num_batches:
                 break
-            batch = transfer_batch_to_device(batch, "cuda")
+                
             labels_texts = batch["labels_texts"]
             sources_texts = batch["sources_texts"]
 

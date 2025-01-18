@@ -66,6 +66,7 @@ else:
         checkpoint = torch.load(args.checkpoint, weights_only=False)["state_dict"]
         module.load_state_dict(checkpoint)
     model = module.model
+    # module.push_to_hub("zhan1993:/")
 
 ## load datasets
 config = AbstentionDataConfig(
