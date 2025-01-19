@@ -53,9 +53,13 @@ class Serializable:
                 data_[field.name] = {
                     k: get_args(field_type)[1].fromdict(v) for k, v in value.items()
                 }
-            # simple value
-            else:
-                data_[field.name] = value
+            elif get_origin(field_type) is None:
+                # If it's a direct type like int, float, bool, etc.
+                if field_type in {int, float, bool, str}:
+                    data_[field.name] = field_type(value)
+                else:
+                    # Fallback to simple assignment for everything else
+                    data_[field.name] = value
         return cls(**data_)
 
     def to_json_string(self) -> str:
