@@ -1,21 +1,10 @@
 # here, we train experts and we upload them to a local library (repository) of experts.
 
-import os
-from mttl.arguments import ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.models.library.expert_library import ExpertLibrary
-from mttl.models.expert_model import (
-    ExpertModel,
-    MultiExpertModel,
-    MultiExpertModelConfig,
-    ExpertModelConfig,
-)
-from mttl.models.train_utils import train_model
 
 from mttl.evaluators.gsm_evaluator import GsmEvaluator
-from mttl.evaluators.rouge_evaluator import RougeEvaluator
-from mttl.models.containers.selectors.base import UniformSelectorConfig
-from mttl.arguments import EvaluationConfig, ExpertConfig
+from mttl.arguments import EvaluationConfig
 from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
 import torch
 from mttl.logging import setup_logging
@@ -25,8 +14,23 @@ setup_logging()
 
 args = EvaluationConfig.parse()
 
-datamodule = get_datamodule(args, for_generation=True)
-evaluator = GsmEvaluator(datamodule)
+
+from mttl.datamodule.gsm_data_module import GsmDataConfig, GsmDataModule
+
+# datamodule = get_datamodule(args, for_generation=True)
+
+config = GsmDataConfig(
+    model=args.model,
+    model_family=args.model_family,
+    max_input_length=args.max_input_length,
+    max_output_length=args.max_output_length,
+    gsm_template=args.gsm_template,
+    data_dir=args.output_dir,
+    few_shot=args.few_shot,
+)
+dm = GsmDataModule(config, for_generation=True)
+
+evaluator = GsmEvaluator(dm)
 
 if args.library_id is None:
     module = ExpertModule(**vars(args)).to(device)
@@ -36,7 +40,7 @@ else:
     module = MultiExpertModule(**vars(args)).to(device)
     if args.expert_selection is not None:
         expert = library.get_expert(args.expert_selection)
-        module.add_expert_instance(expert, action="merge")
+        module.add_expert_instance(expert, is_default=True)
     else:
         module = MultiExpertModule(**vars(args)).to(device)
         module.add_experts_from_library(args.library_id)

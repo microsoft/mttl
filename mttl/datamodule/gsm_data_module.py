@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 from mttl.datamodule.base import DataModule, DatasetConfig
 from mttl.models.library.dataset_library import DatasetLibrary
+from functools import partial
 import json
 
 
@@ -11,23 +12,31 @@ class GsmDataConfig(DatasetConfig):
     gsm_template: str = (
         "cot"  # the template we will use for the prompt, for code generation or chain of thought.
     )
+    few_shot: int = 8  # number of fewshot examples to include in the prompt
 
 
 # code refer to https://github.com/aksh555/LoRA-Soups/blob/main/evaluate.py#L208
-def generate_math_prompt_with_python(instruction, input=None):
+def generate_math_prompt_with_python(instruction, input=None, few_shot=8):
+
     with open("mttl/datamodule/math.json", "r") as f:
         cot_data = json.load(f)
     prompt = """Let's use Python to solve math problems step by step. Below are a few Instruction-Response pairs on how to do it."""
     prompt += "\n\n"
     for data in cot_data:
-        prompt += f"### Instruction:\n{data['instruction']}\n\n### Response:\n{data['output']}\n\n"
+        if few_shot == 8:
+            prompt += f"### Instruction:\n{data['instruction']}\n\n### Response:\n{data['output']}\n\n"
+        elif few_shot == 1:
+            prompt += f"### Instruction:\n{data['instruction']}\n\n### Response:\n{data['output']}\n\n"
+            break
     prompt += "Now write a function 'solution' encolsed in ``` in Python to solve this Instruction. Write only a code block. Write only valid Python code without using any units with the numerical values and any invalid symbols.\n\n"
     prompt += f"### Instruction:\n{instruction}\n\n### Response:\n"
     return prompt
 
 
-def instruct_template_python(example):
-    example["source"] = generate_math_prompt_with_python(example["input"])
+def instruct_template_python(example, few_shot):
+    example["source"] = generate_math_prompt_with_python(
+        example["input"], few_shot=few_shot
+    )
     example["target"] = str(example["answer"])
     return example
 
@@ -80,13 +89,21 @@ class GsmDataModule(DataModule):
         if self.config.gsm_template == "cot":
             dataset = dataset.map(instruct_template_cot, num_proc=n_proc)
         elif self.config.gsm_template == "python":
-            dataset = dataset.map(instruct_template_python, num_proc=n_proc)
+            partial_parse_function = partial(
+                instruct_template_python, few_shot=self.config.few_shot
+            )
+            dataset = dataset.map(
+                partial_parse_function,
+                num_proc=n_proc,
+            )
         self.train_dataset = dataset["train"]
         self.dev_dataset = self.test_dataset = dataset["train"]
 
 
 if __name__ == "__main__":
-    config = GsmDataConfig(model="microsoft/Phi-3-mini-4k-instruct", gsm_template="cot")
+    config = GsmDataConfig(
+        model="microsoft/Phi-3-mini-4k-instruct", gsm_template="python", few_shot=1
+    )
 
     datamodule = GsmDataModule(config, for_generation=True)
     train_dataloader = datamodule.train_dataloader()

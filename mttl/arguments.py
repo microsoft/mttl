@@ -593,6 +593,7 @@ class EvaluationConfig(MultiExpertConfig, TransformArgs):
     n_ng_iterations: int = 30  # number of iterations for LoraHub
     recompute_prototypes: bool = False
     gsm_template: str = "cot"
+    few_shot = 8  # number of fewshot examples to include in the prompt
 
 
 @dataclass
