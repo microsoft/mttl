@@ -57,11 +57,11 @@ if __name__ == "__main__":
     # alpaca_data_module.setup_dataset()
     # print(alpaca_data_module.train_dataset)
 
-    mathqa_alpaca_code_data_module = MathQaAlpacaCodeDataModule(
+    alpaca_code_data_module = AlpacaCodeDataModule(
         DatasetConfig(model="meta-llama/Llama-2-7b-hf")
     )
-    mathqa_alpaca_code_data_module.setup_dataset()
-    val_dataloder = mathqa_alpaca_code_data_module.val_dataloader()
+    alpaca_code_data_module.setup_dataset()
+    val_dataloder = alpaca_code_data_module.val_dataloader()
     for batch in val_dataloder:
         print(batch)
         breakpoint()

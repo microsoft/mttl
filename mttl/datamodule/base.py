@@ -1079,6 +1079,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         config = GsmDataConfig(
             **common_kwargs,
             gsm_template=args.gsm_template,
+            data_dir=args.output_dir,
         )
         dm = GsmDataModule(config, for_generation=for_generation)
 

@@ -26,12 +26,10 @@ class GsmEvaluator(GenerativeEvaluator):
         self.prepend_source = prepend_source
         os.environ["HF_ALLOW_CODE_EVAL"] = "1"
         if self.config.gsm_template == "python":
-            self.save_file = (
-                f"experiment/{self.config.model}-{self.config.dataset}.jsonl"
-            )
 
-            if not os.path.exists(f"experiment/{self.config.model}"):
-                os.makedirs(f"experiment/{self.config.model}")
+            if not os.path.exists(self.config.data_dir):
+                os.makedirs(self.config.data_dir)
+            self.save_file = f"{self.config.data_dir}/predict_python_code.jsonl"
 
     @switch_to_eval_mode
     def evaluate(

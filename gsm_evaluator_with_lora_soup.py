@@ -31,8 +31,15 @@ evaluator = GsmEvaluator(datamodule)
 if args.library_id is None:
     module = ExpertModule(**vars(args)).to(device)
 else:
-    module = MultiExpertModule(**vars(args)).to("cuda")
-    module.add_experts_from_library(args.library_id)
+
+    library = ExpertLibrary.get_expert_library(args.library_id)
+    module = MultiExpertModule(**vars(args)).to(device)
+    if args.expert_selection is not None:
+        expert = library.get_expert(args.expert_selection)
+        module.add_expert_instance(expert, action="merge")
+    else:
+        module = MultiExpertModule(**vars(args)).to(device)
+        module.add_experts_from_library(args.library_id)
 
 if args.checkpoint is not None:
     checkpoint = torch.load(args.checkpoint, weights_only=False)["state_dict"]
