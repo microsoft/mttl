@@ -305,9 +305,9 @@ class SharedNQAEvaluator(NQAZeroShotEvaluator):
             for question_ids in questions_ids:
                 answer = self.generate_answer(
                     model,
+                    cache,
                     context_length,
                     question_ids,
-                    cache,
                     max_new_tokens=self.config.max_output_length,
                     forward_kwargs=forward_kwargs,
                 )
