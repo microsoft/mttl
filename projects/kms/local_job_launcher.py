@@ -6,8 +6,6 @@ import signal
 import time
 from time import sleep
 
-from mttl.utils import logger
-
 got_exit_signal = False
 
 # Some return codes
@@ -16,6 +14,23 @@ DONE_FILE_EMPTY = 1
 FAILED = 100
 CRASHED = -100
 JOB_ALREADY_STARTED = 1_000
+
+# create a logger object that logs with the time formatted as DD-MM-YYYY HH:MM:SS
+import logging
+
+logger = logging.getLogger("local_job_launcher")
+stream_handler = logging.StreamHandler()
+stream_handler.setLevel(logging.INFO)
+stream_formatter = logging.Formatter(
+    "%(asctime)s %(levelname)s --> %(message)s", datefmt="%d-%m-%Y %H:%M:%S"
+)
+stream_handler.setFormatter(stream_formatter)
+logger.addHandler(stream_handler)
+logger.setLevel(logging.INFO)
+
+
+def format_timestamp(timestamp):
+    return time.strftime("%d-%m-%Y %H:%M:%S", time.localtime(timestamp))
 
 
 def handle_exit_signal(signum, frame):
@@ -27,25 +42,11 @@ def handle_exit_signal(signum, frame):
 
 
 class JobQueue:
-    def __init__(self, job_file, output_dir, n_retries, seconds_to_crashed):
-        self.job_file = job_file
+    def __init__(self, doc_ids, output_dir, n_retries, seconds_to_crashed):
         self.n_retries = n_retries
         self.output_dir = output_dir
         self.launcher_id = f"{random.randint(1000, 9999)}-{os.getpid()}"
         self.seconds_to_crashed = seconds_to_crashed
-
-        # copy the original job file to the queue file
-        # convert the queue_file to the desired format
-        data = json.load(open(self.job_file, "r"))
-
-        # If data is a dict with train/valid/test keys, flatten it.
-        if isinstance(data, dict):
-            doc_ids = []
-            for value in data.values():
-                doc_ids += value
-        else:
-            # If data is already a single list, just use it directly.
-            doc_ids = data
 
         # keep track of tasks needing execution
         self.tasks = []
@@ -55,11 +56,15 @@ class JobQueue:
         for task in doc_ids:
             status = self.get_run_status(task)
             if status == "finished":
-                print(f"adding {task} to finished")
+                logger.info(f"adding {task} to finished")
                 self.finished.append(task)
             else:
                 self.tasks.append(task)
-                print(f"adding {task} to tasks")
+                logger.info(f"adding {task} to tasks")
+
+        logger.info(
+            f"Launcher {self.launcher_id} initialized with {len(self.tasks)} tasks, {len(self.finished)} finished"
+        )
 
     def task_is_done(self, task):
         done_file = os.path.join(self.output_dir, task, "done.txt")
@@ -87,41 +92,17 @@ class JobQueue:
                 )
                 os.system(f"cp {done_file} {done_error_file}")
 
-                print(f"Error parsing task {task} `done.txt`. Return code: {e}")
-                print(f"Lines: {lines}")
+                logger.error(f"Error parsing task {task} `done.txt`. Return code: {e}")
+                logger.error(f"Lines: {lines}")
                 return_code = None
 
-            return return_code
+        return return_code
 
     def count_retries(self, task):
         # check how many files are named `retry_*.txt`
         task_output_dir = os.path.join(self.output_dir, task)
         retry_files = [f for f in os.listdir(task_output_dir) if f.startswith("retry_")]
         return len(retry_files)
-
-    def print_task_directory(self, task):
-        def format_time(timestamp):
-            return time.strftime("%d-%m-%Y %H:%M:%S", time.localtime(timestamp))
-
-        # clean out the task directory
-        timestamp = format_time(self.get_timestamp(task))
-        current_time = format_time(time.time())
-
-        print(
-            f"Task {task} was last modified at {timestamp} and the current time is {current_time}"
-        )
-
-        # actually, let's print the name and timestamp of every file in the task directory
-        task_output_dir = os.path.join(self.output_dir, task)
-        task_files = os.listdir(task_output_dir)
-        for f in task_files:
-            f_timestamp = format_time(
-                os.path.getmtime(os.path.join(task_output_dir, f))
-            )
-            print(f"{f} - {f_timestamp}")
-
-        if len(task_files) == 0:
-            print(f"Task {task} has an empty task directory")
 
     def get_run_status(self, task):
         task_output_dir = os.path.join(self.output_dir, task)
@@ -161,19 +142,16 @@ class JobQueue:
         while True:
             # shuffle the tasks
             doc_id = None
-            for p_idx, priority_status in enumerate(["queued", "crashed", "failed"]):
+            for priority_status in ["queued", "crashed", "failed"]:
 
                 tasks = self.tasks.copy()
                 random.shuffle(tasks)
 
                 for task in tasks:
                     status = self.get_run_status(task)
-                    print(
+                    logger.info(
                         f"task : {task} - status : {status} - priority_status : {priority_status}"
                     )
-
-                    if status == "running" and p_idx == 0:
-                        self.print_task_directory(task)
 
                     if status == "finished":
                         self.finished.append(task)
@@ -181,12 +159,28 @@ class JobQueue:
                         continue
 
                     if status.startswith("crashed"):
-                        self.print_task_directory(task)
+                        doc_id = task
+                        # clean out the task directory
+                        logger.warning(
+                            f"Crashed job {task} ({status}): {format_timestamp(self.get_timestamp(task))}"
+                        )
+
+                        # actually, let's print the name and timestamp of every file in the task directory
+                        task_output_dir = os.path.join(self.output_dir, task)
+                        task_files = os.listdir(task_output_dir)
+                        for f in task_files:
+                            timestamp = os.path.getmtime(
+                                os.path.join(task_output_dir, f)
+                            )
+                            logger.info(f"{f} - {format_timestamp(timestamp)}")
+                        if len(task_files) == 0:
+                            logger.info(f"Task {task} has Empty directory")
 
                     if status == "failed" == priority_status:
                         # check how many retries have been done
                         n_retries = self.count_retries(task)
                         if n_retries < self.n_retries:
+                            doc_id = task
                             # create a file called `retry_{timestamp}.txt` to indicate that the task is being retried
                             retry_file = os.path.join(
                                 self.output_dir, task, f"retry_{time.time()}.txt"
@@ -194,18 +188,19 @@ class JobQueue:
                             with open(retry_file, "a") as f:
                                 f.write(f"{time.time()} - {self.launcher_id}\n")
                         else:
+                            logger.info(f"No more retries for task {task}")
                             continue
 
                     if status.startswith(priority_status):
                         doc_id = task
                         yield doc_id, status
 
-                print(
+                logger.info(
                     f"no more {priority_status} tasks for launcher {self.launcher_id}"
                 )
 
             if doc_id is None:
-                print("No more tasks to run. Exiting.")
+                logger.info("No more tasks to run. Exiting.")
                 raise StopIteration
 
     def _print_progress(self):
@@ -235,7 +230,6 @@ async def run_job(
     gpu_id, doc_id, config_file, output_dir, train_script, config_id, launcher_id
 ):
 
-    # print('starting job for doc_id : ', doc_id)
     # Because the file system is on the network, when creating a file one the network,
     # it may take a while for the file creation to be visible to other nodes.
     # Therefore, let's wait 15 seconds before starting the job, to see if other
@@ -252,6 +246,12 @@ async def run_job(
             other_started_file_timestamp = os.path.getmtime(other_started_file)
             if other_started_file_timestamp > started_file_timestamp:
                 print(f"Another runner has started this job. Exiting.")
+                print(
+                    f"Other started file: {other_started_file} with timestamp {format_timestamp(other_started_file_timestamp)}"
+                )
+                print(
+                    f"This started file: {started_file} with timestamp {format_timestamp(started_file_timestamp)}"
+                )
                 return doc_id, JOB_ALREADY_STARTED
 
     env = os.environ.copy()
@@ -339,6 +339,7 @@ def parse_arguments():
     parser.add_argument(
         "--tasks-file", type=str, required=True, help="Path to the job file"
     )
+    parser.add_argument("--tasks-file-split", type=str, default=None)
     parser.add_argument("--config-id", type=str, required=True, help="Configuration ID")
     parser.add_argument(
         "--train-script",
@@ -391,15 +392,23 @@ async def main():
     if os.path.exists("/data/lucas"):
         output_dir = f"/data/lucas/{output_dir}"
 
+    # get the document ids
+    data = json.load(open(args.tasks_file, "r"))
+
+    doc_ids = []
+    if args.tasks_file_split:
+        doc_ids = data[args.tasks_file_split]
+    else:
+        for value in data.values():
+            doc_ids += value
+
     os.makedirs(output_dir, exist_ok=True)
     loop = asyncio.get_running_loop()
 
     # Register signal handlers for graceful shutdown
     loop.add_signal_handler(signal.SIGTERM, handle_exit_signal, signal.SIGTERM, None)
     loop.add_signal_handler(signal.SIGINT, handle_exit_signal, signal.SIGINT, None)
-    job_queue = JobQueue(
-        args.tasks_file, output_dir, args.n_retries, args.seconds_to_crashed
-    )
+    job_queue = JobQueue(doc_ids, output_dir, args.n_retries, args.seconds_to_crashed)
 
     gpu_monitor = GPUMonitor(args.num_gpus, args.jobs_per_gpu)
     running_tasks = []
@@ -442,20 +451,22 @@ async def main():
                 doc_id, previous_status = out
             except:
                 done_training = True
-                print(f"No more jobs to process. Training is done.")
+                logger.info(f"No more jobs to process. Training is done.")
                 break
 
-            print(f"Next job : {doc_id} - with status {previous_status}")
+            logger.info(f"Next job : {doc_id} - with status {previous_status}")
 
             if previous_status == "failed":
                 # need to delete `done.txt` file
                 done_file = os.path.join(output_dir, doc_id, "done.txt")
-                print(f"deleting done file : {done_file}")
+                logger.info(f"deleting done file : {done_file}")
                 try:
                     os.remove(done_file)
                 except FileNotFoundError:
                     new_status = job_queue.get_run_status(doc_id)
-                    print(f"File {done_file} not found. New status is {new_status}")
+                    logger.error(
+                        f"File {done_file} not found. New status is {new_status}"
+                    )
 
             # create a directory for the task ASAP
             os.makedirs(os.path.join(output_dir, doc_id), exist_ok=True)
@@ -479,11 +490,11 @@ async def main():
             )
             sleep(5)
             running_tasks.append((task, gpu_id, doc_id))
-            print(f"gpu usage : {gpu_monitor.gpu_usage}")
+            logger.info(f"gpu usage : {gpu_monitor.gpu_usage}")
 
         if not running_tasks:
             monitor_task.cancel()
-            print("No more jobs to process. Exiting.")
+            logger.info("No more jobs to process. Exiting.")
             job_queue._print_progress()
             break
 
@@ -504,7 +515,7 @@ async def main():
                     if return_code != JOB_ALREADY_STARTED:
                         new_return_code = job_queue.get_return_code(doc_id)
                         if new_return_code != return_code:
-                            print(
+                            logger.error(
                                 f"Task {doc_id} has a mismatch return code: {new_return_code} != {return_code}"
                             )
 
