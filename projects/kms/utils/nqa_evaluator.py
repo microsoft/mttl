@@ -1,6 +1,7 @@
 from typing import Dict
 
 import tqdm
+from mttl.models.base_model import BaseExpertModel
 from mttl.models.expert_model import ExpertModel
 import torch
 import numpy as np
@@ -128,6 +129,7 @@ class SharedNQAEvaluator(NQAZeroShotEvaluator):
 
         return context_ids, question_ids
 
+    @torch.no_grad()
     def generate_answer(
         self,
         model,
@@ -155,7 +157,6 @@ class SharedNQAEvaluator(NQAZeroShotEvaluator):
             input_ids=question_ids.to(model.device),
             past_key_values=cache,
             position_ids=position_ids,
-            num_logits_to_keep=1,
             **forward_kwargs,
         )
 
@@ -201,6 +202,8 @@ class SharedNQAEvaluator(NQAZeroShotEvaluator):
                 new_id = outputs.logits[0, -1].argmax()
 
             generated_ids.append(new_id)
+            del outputs
+            torch.cuda.empty_cache()
             if new_id.item() in should_stop_token_ids:
                 break
 
@@ -227,6 +230,7 @@ class SharedNQAEvaluator(NQAZeroShotEvaluator):
                 for layer_idx, sequence_length in enumerate(cache_seq_lengths)
             ]
 
+        torch.cuda.empty_cache()
         return answer
 
     def shard_by_local_rank(self, dataset):
@@ -283,18 +287,18 @@ class SharedNQAEvaluator(NQAZeroShotEvaluator):
 
             cache = DynamicCache()
 
-            if isinstance(model, ExpertModel):
+            if isinstance(model, BaseExpertModel):
                 # build task names manually
                 forward_kwargs = {"task_names": [example[self.config.task_name_field]]}
             else:
                 forward_kwargs = {}
 
-            model(
-                input_ids=context_ids,
-                past_key_values=cache,
-                num_logits_to_keep=1,
-                **forward_kwargs
-            )
+            with torch.no_grad():
+                model(
+                    input_ids=context_ids,
+                    past_key_values=cache,
+                    **forward_kwargs
+                )
 
             self.ctx_lengths.append(context_length)
             self.cmp_lengths.append(cache.get_seq_length())
