@@ -131,14 +131,13 @@ class SharedNQAEvaluator(NQAZeroShotEvaluator):
     def generate_answer(
         self,
         model,
-        question_ids,
         cache,
-        extra_kwargs,
+        context_length,
+        question_ids,
+        max_new_tokens,
+        forward_kwargs,
     ):
-        context_length = self.config.max_input_length
-        max_new_tokens = self.config.max_output_length
-        generation_config = model.generation_config
-        do_sample = model.generation_config.do_sample
+        do_sample = True
         top_p = model.generation_config.top_p
         temperature = model.generation_config.temperature
 
@@ -156,7 +155,8 @@ class SharedNQAEvaluator(NQAZeroShotEvaluator):
             input_ids=question_ids.to(model.device),
             past_key_values=cache,
             position_ids=position_ids,
-            **extra_kwargs,
+            num_logits_to_keep=1,
+            **forward_kwargs,
         )
 
         position_ids = position_ids[:, -1:] + 1
@@ -171,7 +171,7 @@ class SharedNQAEvaluator(NQAZeroShotEvaluator):
                 input_ids=generated_ids[-1].unsqueeze(0).unsqueeze(0),
                 past_key_values=cache,
                 position_ids=position_ids + i,
-                **extra_kwargs,
+                **forward_kwargs,
             )
             if do_sample:
                 logits = outputs.logits[0, -1]
@@ -255,6 +255,8 @@ class SharedNQAEvaluator(NQAZeroShotEvaluator):
             logger.info("Shuffle is not supported for this evaluator.")
         
         dataset = getattr(self.datamodule, f"{split}_dataset")
+
+        # shard the dataset across processes manually
         dataset = self.shard_by_local_rank(dataset)
 
         pbar = tqdm.tqdm(
@@ -273,7 +275,7 @@ class SharedNQAEvaluator(NQAZeroShotEvaluator):
         for num_example, example in pbar:
             context = example["text"]
             questions = example["questions"]
-            answers = example["answers"]
+            gt_answers = example["answers"]
 
             context_ids, questions_ids = self.encode_context(context, questions)
             context_ids = context_ids.to(model.device)
@@ -283,15 +285,15 @@ class SharedNQAEvaluator(NQAZeroShotEvaluator):
 
             if isinstance(model, ExpertModel):
                 # build task names manually
-                extra_kwargs = {"task_names": [example[self.config.task_name_field]]}
+                forward_kwargs = {"task_names": [example[self.config.task_name_field]]}
             else:
-                extra_kwargs = {}
+                forward_kwargs = {}
 
             model(
                 input_ids=context_ids,
                 past_key_values=cache,
                 num_logits_to_keep=1,
-                **extra_kwargs
+                **forward_kwargs
             )
 
             self.ctx_lengths.append(context_length)
@@ -301,20 +303,28 @@ class SharedNQAEvaluator(NQAZeroShotEvaluator):
             # Greedy decoding for each question
             gen_answers = []
             for question_ids in questions_ids:
-                answer = self.generate_answer(model, question_ids, cache, extra_kwargs)
+                answer = self.generate_answer(
+                    model,
+                    context_length,
+                    question_ids,
+                    cache,
+                    max_new_tokens=self.config.max_output_length,
+                    forward_kwargs=forward_kwargs,
+                )
                 gen_answers.append(answer)
 
-            eval_metrics = compute_metrics(gen_answers, answers, reduction="none")
+            eval_metrics = compute_metrics(gen_answers, gt_answers, reduction="none")
             all_rougeL.extend(eval_metrics["rougeL"])
 
             if verbose:
-                logger.info("Sources:\n%s", context)
-                logger.info("Label:\n%s", answers[0])
+                logger.info("Source:\n%s", self.datamodule.tokenizer.decode(context_ids[0]))
+                logger.info("Question:\n%s", questions[0])
+                logger.info("Label:\n%s", gt_answers[0])
                 logger.info("Prediction:\n%s", gen_answers[0])
 
             pbar.set_description(f"RougeL: {np.mean(all_rougeL):.4f}")
-            all_predictions.extend(answers)
-            all_references.extend(gen_answers)
+            all_predictions.extend(gen_answers)
+            all_references.extend(gt_answers)
             all_tokens.append(cache.get_seq_length())
             all_sources.extend(questions)
             torch.cuda.empty_cache()
