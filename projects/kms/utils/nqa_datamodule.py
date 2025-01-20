@@ -16,6 +16,7 @@ class NQADatasetConfig(DatasetConfig):
     prompt: str = (
         "Answer the following question. Give only the answer, and no extra commentary, formatting, or chattiness. Question: "
     )
+    expand_questions: bool = True
     include_context: bool = False
     topk_context: int = 10
 
@@ -46,19 +47,8 @@ class NQADatamodule(DataModule):
         )
 
         def expand_questions(examples, tokenizer):
-
             def maybe_truncate(fixed_prompt, content, buffer=10):
                 return content
-                """Handling truncation here to make sure the prompt is not truncated"""
-                prompt_length = len(tokenizer.encode(fixed_prompt))
-                remaining_length = self.config.max_input_length - prompt_length - buffer
-                content = tokenizer(content)["input_ids"]
-                if tokenizer.truncation_side == "right":
-                    content = content[:remaining_length]
-                else:
-                    content = content[-remaining_length:]
-
-                return tokenizer.decode(content)
 
             batch = {
                 "source": [],
@@ -135,7 +125,7 @@ class NQADatamodule(DataModule):
         for split in ["train", "dev", "test"]:
             dataset = getattr(self, f"{split}_dataset")
 
-            if dataset:
+            if dataset and self.config.expand_questions:
                 dataset = dataset.map(
                     lambda examples: expand_questions(examples, self.tokenizer),
                     batched=True,
