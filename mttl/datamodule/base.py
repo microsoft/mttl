@@ -212,7 +212,7 @@ class DefaultCollator(PackedMixin):
     pad_to_multiple_of: Optional[int] = None
     label_pad_token_id: int = -100
     return_tensors: str = "pt"
-    model_family: str = "seq2seq"
+    model_family: str = "gpt"
     for_generation: bool = False
     train_on_inputs: bool = False
     task_to_id: dict = None
@@ -267,7 +267,7 @@ class DefaultCollator(PackedMixin):
 
         # adds the eos token
         labels_ = [
-            l + ((" " + self.tokenizer.eos_token) if self.add_eos_to_targets else "")
+            l + (self.tokenizer.eos_token if self.add_eos_to_targets else "")
             for l in labels_
         ]
         return sources_, labels_

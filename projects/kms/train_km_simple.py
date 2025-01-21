@@ -11,10 +11,10 @@ from tqdm import tqdm
 
 # register this datamodule!
 from projects.kms.utils.km_datamodule import KMDatasetModule
+from projects.kms.utils.pit_datamodule import PITDatasetModule
 from projects.kms.utils.nqa_datamodule import NQADatamodule
 
 # isort: split
-
 from mttl.arguments import ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.dist_utils import (
@@ -28,7 +28,7 @@ from mttl.models.expert_model import ExpertModel, ExpertModelConfig
 from mttl.models.get_optimizer import get_optimizer_and_scheduler
 from mttl.models.utils import transfer_batch_to_device
 from mttl.utils import remote_login, seed_everything
-from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator
+from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator, SharedNQAEvaluator
 from projects.kms.utils.quality_evaluator import QualityEvaluator
 from projects.kms.utils.simple_utils import (
     EarlyStopper,
@@ -216,7 +216,6 @@ def train_km(training_args: KMArguments):
             loss_function,
             evaluator if training_args.callback_during_training else None,
         )
-        # if early_stopper: early_stopper(val_loss)
 
         met_logger.log_metrics(
             {"val_loss": val_loss, eval_metric: eval_score}, step=global_step

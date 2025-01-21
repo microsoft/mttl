@@ -339,9 +339,6 @@ def lm_loss(model, inputs, prefix=""):
     # assert that labels is either -100 or the same as input_ids
     assert torch.all((labels == -100) | (labels == input_ids))
 
-    # NOTE: when using `LMTrainer` for training the KM, batch has unwanted keys.
-    # This Trainer is also used for training the KE.
-    # Also: I need **batch for the KE training with knowledge modules (the task names)
     outputs = model(
         input_ids=input_ids,
         attention_mask=attention_mask,
