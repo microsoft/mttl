@@ -195,7 +195,6 @@ def train_km(training_args: KMArguments):
             loss_function,
             evaluator if training_args.callback_during_training else None,
         )
-        # if early_stopper: early_stopper(val_loss)
 
         met_logger.log_metrics(
             {"val_loss": val_loss, eval_metric: eval_score}, step=global_step

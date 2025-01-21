@@ -70,8 +70,8 @@ class PITDatasetModule(DataModule):
 
                 for i, output in enumerate(outputs):
                     # for QA, we want to show the question as well as the prompt
-                    prompt_str = "Read the following summary and the corresponding full paragraph. Summary:"
-                    output_str = output + "\nDocument:\n" + input
+                    prompt_str = "Generate a summary and the corresponding full paragraph."
+                    output_str = "Summary:\n" + output + "\nDocument:\n" + input
 
                     source_str = self.tokenizer.apply_chat_template(
                         [
@@ -129,3 +129,7 @@ class PITDatasetModule(DataModule):
             )
 
         self.test_dataset = self.dev_dataset
+        
+        logger.info("PIT Datamodule set-up!")
+        logger.info(f"Example source: {self.train_dataset[0]['source']}")
+        logger.info(f"Example target: {self.train_dataset[0]['target']}")
