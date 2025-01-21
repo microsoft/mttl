@@ -45,8 +45,4 @@ class QualityEvaluator(LogLikeEvaluator):
                 if dataset and len(dataset):
                     break
 
-        try:
-            return super().evaluate(model, split=split, **kwargs)
-        except Exception as e:
-            warn_once(f"Error evaluating split {split}: {e}")
-            return None
+        return super().evaluate(model, split=split, **kwargs)
