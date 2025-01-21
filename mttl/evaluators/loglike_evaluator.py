@@ -1,7 +1,9 @@
+import time
+
 import numpy as np
 import torch
 from tqdm.auto import tqdm
-import time
+
 from mttl.dist_utils import distributed_mean, is_main_process
 from mttl.evaluators.base import Evaluator, switch_to_eval_mode
 from mttl.logging import logger
@@ -38,6 +40,8 @@ class LogLikeEvaluator(Evaluator):
             enumerate(dataloader),
             total=len(dataloader),
             disable=not is_main_process(),
+            leave=False,
+            position=1,
         )
 
         all_losses = []
@@ -95,11 +99,18 @@ class LogLikeEvaluator(Evaluator):
                 # get number of tokens in prompt
                 label_pad_id = self.datamodule.collate_fn.label_pad_token_id
                 num_tokens_in_prompt = (
-                    batch["attention_mask"].sum(1) - batch["labels"].ne(label_pad_id).sum(1)
-                ).cpu().tolist()
+                    (
+                        batch["attention_mask"].sum(1)
+                        - batch["labels"].ne(label_pad_id).sum(1)
+                    )
+                    .cpu()
+                    .tolist()
+                )
 
                 num_tokens_in_prompt = [
-                    num_tokens_in_prompt[int(np.sum(num_options[:i])) : int(np.sum(num_options[: i + 1]))][0]
+                    num_tokens_in_prompt[
+                        int(np.sum(num_options[:i])) : int(np.sum(num_options[: i + 1]))
+                    ][0]
                     for i in range(batch_size)
                 ]
 
@@ -121,7 +132,9 @@ class LogLikeEvaluator(Evaluator):
             if all_accuracies:
                 pbar.set_description(
                     "Accuracy: {:.4f} \t Loss {:.4f} \t Time: {:.4f}".format(
-                        np.mean(all_accuracies), np.mean(all_losses), np.mean(time_per_request),
+                        np.mean(all_accuracies),
+                        np.mean(all_losses),
+                        np.mean(time_per_request),
                     )
                 )
 
@@ -143,7 +156,7 @@ class LogLikeEvaluator(Evaluator):
             "predictions": all_predictions,
             "accuracy": all_accuracies,
             "time_per_request": time_per_request,
-            "tokens_per_request": tokens_per_request
+            "tokens_per_request": tokens_per_request,
         }
 
         if output_path:

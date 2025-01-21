@@ -1,5 +1,6 @@
-from dataclasses import dataclass
 import time
+from dataclasses import dataclass
+
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -60,6 +61,8 @@ class RougeEvaluator(GenerativeEvaluator):
             enumerate(dataloader),
             total=len(dataloader),
             disable=not is_main_process(),
+            leave=False,
+            position=1,
         )
 
         all_rougeL = []
