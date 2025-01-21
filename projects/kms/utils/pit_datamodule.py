@@ -71,7 +71,13 @@ class PITDatasetModule(DataModule):
                 for i, output in enumerate(outputs):
                     # for QA, we want to show the question as well as the prompt
                     prompt_str = "Generate a summary and the corresponding full paragraph."
-                    output_str = "Summary:\n" + output + "\nDocument:\n" + input
+
+                    if type(output) == dict:
+                        summary = output["summary"]
+                    else:
+                        summary = output
+
+                    output_str = "Summary:\n" + summary + "\nDocument:\n" + input
 
                     source_str = self.tokenizer.apply_chat_template(
                         [
