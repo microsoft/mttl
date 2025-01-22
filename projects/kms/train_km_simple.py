@@ -11,8 +11,8 @@ from tqdm import tqdm
 
 # register this datamodule!
 from projects.kms.utils.km_datamodule import KMDatasetModule
-from projects.kms.utils.pit_datamodule import PITDatasetModule
 from projects.kms.utils.nqa_datamodule import NQADatamodule
+from projects.kms.utils.pit_datamodule import PITDatasetModule
 
 # isort: split
 from mttl.arguments import ExpertConfig
@@ -44,12 +44,12 @@ torch.set_float32_matmul_precision("high")
 
 
 train_datasets = {
-    "quality-km-llama-8b": "az://mttldata/quality-summaries-qa-llama-8b-instruct",
-    "quality-km-phi3-med": "az://mttldata/quality-summaries-qa-phi-3-medium",
-    "wiki-km-llama-8b": "az://mttldata/wiki-top-20-summaries-qa-llama-8b-instruct",
-    "wiki-km-phi3-med": "az://mttldata/wiki-top-20-summaries-qa-phi-3-medium",
-    "nqa-km-phi3-med": "az://mttldata/nqa-summaries-qa-phi-3-medium",
-    "nqa-km-llama-8b": "az://mttldata/nqa-summaries-qa-llama-8b-instruct",
+    "quality-km-llama-8b": "az://mttldata/quality-summaries-qa-next-chunk-llama-8b-instruct",
+    "quality-km-phi3-med": "az://mttldata/quality-summaries-qa-next-chunk-phi-3-medium",
+    "wiki-km-llama-8b": "az://mttldata/wiki-top-20-summaries-qa-next-chunk-llama-8b-instruct",
+    "wiki-km-phi3-med": "az://mttldata/wiki-top-20-summaries-qa-next-chunk-phi-3-medium",
+    "nqa-km-phi3-med": "az://mttldata/nqa-summaries-qa-next-chunk-phi-3-medium",
+    "nqa-km-llama-8b": "az://mttldata/nqa-summaries-qa-next-chunk-llama-8b-instruct",
 }
 
 evaluate_datasets = {
