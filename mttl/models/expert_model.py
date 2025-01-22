@@ -393,6 +393,9 @@ class MultiExpertMixin:
             expert_instance = expert_instance.clone()
             expert_instance.name = expert_name
 
+        # HACK ensuring that the name is an actual string
+        expert_instance.name = str(expert_instance.name)
+
         with self.lock:
             modifier_name = expert_instance.expert_config.modifier_name
             selector_config = self._get_selector_config(modifier_name)

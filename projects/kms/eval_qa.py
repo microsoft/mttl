@@ -44,6 +44,12 @@ class QAEvalArguments(MultiExpertConfig):
     ke_hf_path: str = None
     # Which datamodule to use
     evaluate_on: str = None
+    # Default router should be ke selector
+    router_selector: str = "ke_selector"
+    # By default, we don't throw an error if the KE expert is not found
+    allow_missing_ke: bool = True
+    # whether to print evluator input / output
+    verbose: bool = False
 
 
 def eval_qa(training_args):
@@ -97,7 +103,11 @@ def eval_qa(training_args):
         model.add_expert_instance(ke_expert, expert_name=training_args.ke_expert_name)
 
     result = evaluator.evaluate(
-        model, split=args.split, shuffle=True, output_path=args.output_dir
+        model,
+        split=args.split,
+        shuffle=True,
+        output_path=args.output_dir,
+        verbose=args.verbose,
     )
     if is_main_process():
         print(f"{metric}: {result}")

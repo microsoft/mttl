@@ -350,7 +350,8 @@ class Selector(nn.Module, Registrable):
             )
             self._task_to_expert_name[expert_name] = expert_name
         else:
-            for task_name in expert_info.expert_task_name.split(","):
+            # HACK: ensuring that `expert_task_name` is a string
+            for task_name in str(expert_info.expert_task_name).split(","):
                 if task_name in self._task_to_expert_name:
                     logger.warning(
                         f"Task name {task_name} already assigned to expert {self._task_to_expert_name[task_name]}"
