@@ -17,7 +17,7 @@ from mttl.models.library.dataset_library import DatasetLibrary
 
 @dataclass
 class KMDatasetConfig(DatasetConfig):
-    # there might be multiple types, i.e. "qa", "summary", or maybe else in the future
+    # there might be multiple types, i.e. "qa", "summary", or "next_chunk" or maybe else in the future
     use_only_type: str = "summary"
     # for each input example, we could have several outputs (e.g. several summaries or QA pairs), we can only use N of these
     num_outputs_per_chunk: int = -1
@@ -124,14 +124,37 @@ class KMDatasetModule(DataModule):
                             else:
                                 prompt_str = "Summarize the preceding passage."
                             output_str = output["summary"]
+                        elif type_ == "next_chunk":
+                            if self.config.flip_inputs_outputs:
+                                raise ValueError(
+                                    "Cannot flip inputs and outputs for `next_chunk`"
+                                )
+                            else:
+                                prompt_str = "Generate the continuation of the previous passage, make sure to keep the same style and narrative flow."
+                            output_str = output["next_chunk"]
                     else:
                         # fallback to default prompt
-                        if self.config.flip_inputs_outputs:
-                            prompt_str = (
-                                "Generate a passage which can be summarized as follows."
-                            )
+                        if type_ == "qa":
+                            if self.config.flip_inputs_outputs:
+                                prompt_str = "Generate a passage containing the preceding question-answer pair."
+                            else:
+                                prompt_str = "Generate a question-answer pair given the preceding passage."
+                        elif type_ == "summary":
+                            if self.config.flip_inputs_outputs:
+                                prompt_str = "Generate a passage which can be summarized as follows."
+                            else:
+                                prompt_str = "Summarize the preceding passage."
+                        elif type_ == "next_chunk":
+                            if self.config.flip_inputs_outputs:
+                                raise ValueError(
+                                    "Cannot flip inputs and outputs for `next_chunk`"
+                                )
+                            else:
+                                prompt_str = "Generate the continuation of the previous passage, make sure to keep the same style and narrative flow."
                         else:
-                            prompt_str = "Summarize the preceding passage."
+                            raise ValueError(
+                                f"For legacy dataset, only qa, summary and next_chunk are supported!"
+                            )
                         output_str = output
 
                     if self.config.flip_inputs_outputs:
@@ -282,110 +305,6 @@ class DocumentDatasetTwo(torch.utils.data.Dataset):
             "task_names": self.docs[doc_idx]["document_id"],
         }
         return self.build_labels(output)
-
-
-class DocumentDataset(torch.utils.data.Dataset):
-    """Dataset to handle randomly chunking documents at every epoch"""
-
-    def preprend_a_zero(self, tensor):
-        return torch.cat([torch.zeros_like(tensor[:1]), tensor])
-
-    def __init__(self, docs, config, deterministic=False):
-        self.docs = docs
-        self.config = config
-        self.deterministic = deterministic
-        self.rank = ddp_rank
-        self.world_size = ddp_world_size
-        chunk_size = self.config.max_input_length
-
-        if deterministic:
-            # we always want to pick the first index of every chunk
-            self.chunks_per_doc = torch.LongTensor(
-                [int(np.ceil(len(doc["input_ids"]) / chunk_size)) for doc in self.docs]
-            )
-            self.cum_chunks_per_doc = torch.cumsum(self.chunks_per_doc, 0).long()
-
-            # self.cum_chunks_per_doc[i] = number of chunks from documents 0 to i-1
-            self.cum_chunks_per_doc = self.preprend_a_zero(self.cum_chunks_per_doc)
-        else:
-            # Every document can be indexed at multiple places
-            self.max_start_idx = torch.LongTensor(
-                [len(doc["input_ids"]) - chunk_size for doc in self.docs]
-            )
-            self.cum_start_idx = torch.cumsum(self.max_start_idx, 0).long()
-
-            # self.cum_start_idx[i] = sum of tokens from documents 0 to i-1
-            self.cum_start_idx = self.preprend_a_zero(self.cum_start_idx)
-
-    def build_labels(self, datapoint):
-        all_tokens = datapoint["input_ids"]
-
-        # clone the data
-        input_ids = all_tokens[:]
-        label_ids = all_tokens[:]
-
-        # datapoint["attention_mask"] = datapoint["attention_mask"][:-1]
-
-        # input ids will be split into
-        # [ context ] [warmup] [labels]
-        # where the distillation loss will be measured on the [labels]
-        # the input to the frozen model will be [context] [warmup] [labels]
-        # the input to the KM model will be [warmup] [labels]
-
-        label_start = max(0, int(len(input_ids) * (1 - self.config.label_frac)))
-        warmup_start = max(0, label_start - self.config.prefix_length)
-
-        # ensure that nothing before `label_start` has loss computed
-        label_ids[:label_start] = [-100] * label_start
-
-        datapoint["labels"] = label_ids
-        datapoint["nc_input_ids"] = input_ids[warmup_start:]
-        datapoint["nc_labels"] = label_ids[warmup_start:]
-        datapoint["nc_attention_mask"] = datapoint["attention_mask"][warmup_start:]
-
-        return datapoint
-
-    def __getitem__(self, idx):
-        """Enable both random sampling and sequential iteration over document chunks"""
-
-        if self.deterministic:
-            doc_idx = torch.where(
-                (idx >= self.cum_chunks_per_doc[:-1])
-                & (idx < self.cum_chunks_per_doc[1:])
-            )[0].item()
-            # undo the offset from the previous documents
-            chunk_idx = (idx - self.cum_chunks_per_doc[doc_idx]).item()
-            start_idx = chunk_idx * self.config.max_input_length
-        else:
-            doc_idx = torch.where(
-                (idx >= self.cum_start_idx[:-1]) & (idx < self.cum_start_idx[1:])
-            )[0].item()
-            # undo the offset from the previous documents
-            start_idx = (idx - self.cum_start_idx[doc_idx]).item()
-
-        worker_id = getattr(get_worker_info(), "id", -1)
-        end_idx = start_idx + self.config.max_input_length
-        # print(f"rank {self.rank}, worker id {worker_id}, det {self.deterministic}",start_idx)
-
-        output = {
-            "input_ids": self.docs[doc_idx]["input_ids"][start_idx:end_idx],
-            "labels": self.docs[doc_idx]["input_ids"][start_idx:end_idx],
-            "attention_mask": self.docs[doc_idx]["attention_mask"][start_idx:end_idx],
-            "seq_lens": [self.config.max_input_length],
-            "task_names": self.docs[doc_idx]["document_id"],
-        }
-        return self.build_labels(output)
-
-    def __len__(self):
-        if not hasattr(self, "_len"):
-            if self.deterministic:
-                # always pick the first index of every chunk
-                self._len = sum(self.chunks_per_doc)
-            else:
-                # How many potential starting indices are there ?
-                self._len = (self.max_start_idx + 1).sum().item()
-
-        return self._len
 
 
 @dataclass
