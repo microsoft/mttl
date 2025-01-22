@@ -137,6 +137,7 @@ class BlobStorageEngine(BackendEngine):
         self.cache_dir = cache_dir
         # Quiet down the azure logging
         logging.getLogger("azure").setLevel(logging.WARNING)
+        self.last_modified_cache = None
 
     @property
     def cache_dir(self):
@@ -200,16 +201,25 @@ class BlobStorageEngine(BackendEngine):
         storage_uri, container = self._parse_repo_id_to_storage_info(repo_id)
         return self._get_blob_client(repo_id, use_async).get_container_client(container)
 
-    def _last_modified(self, repo_id: str) -> datetime.datetime:
+    def _last_modified(self, repo_id: str, set_cache: bool=False) -> datetime.datetime:
         """Get the last modified date of a repository."""
-        try:
-            return (
-                self._get_container_client(repo_id)
-                .get_container_properties()
-                .last_modified
-            )
-        except ResourceNotFoundError as error:
-            raise ValueError(f"Repository {repo_id} not found") from error
+        
+        # if cached version exists, return cache. We want to avoid repetitive calls to the API
+        if self.last_modified_cache:
+            return self.last_modified_cache
+
+        else:
+            try:
+                last_modified =  (
+                    self._get_container_client(repo_id)
+                    .get_container_properties()
+                    .last_modified
+                )
+                if set_cache:
+                    self.last_modified_cache = last_modified
+                return last_modified
+            except ResourceNotFoundError as error:
+                raise ValueError(f"Repository {repo_id} not found") from error
 
     def get_repository_cache_dir(self, repo_id: str) -> Path:
         """Get the cache directory for a repository. If it doesn't exist, create it.
@@ -280,23 +290,17 @@ class BlobStorageEngine(BackendEngine):
         except ResourceNotFoundError:
             logger.info(f"Container {repo_id} not found.")
 
-    def create_commit(self, repo_id, operations, commit_message="", async_mode=False):
+    def create_commit(self, repo_id, operations, commit_message="", async_mode=True):
         asyncio.run(
             self.async_create_commit(repo_id, operations, async_mode=async_mode)
         )
 
     async def async_create_commit(self, repo_id, operations, async_mode=False):
         tasks = []
+        upload_batch = []
         for op in operations:
             if isinstance(op, CommitOperationAdd):
-                tasks.append(
-                    self._async_upload_blob(
-                        repo_id=repo_id,
-                        filename=op.path_in_repo,
-                        buffer=op.path_or_fileobj,
-                        overwrite=True,
-                    )
-                )
+                upload_batch.append(op)
             elif isinstance(op, CommitOperationCopy):
                 tasks.append(
                     self._async_copy_blob(
@@ -314,11 +318,13 @@ class BlobStorageEngine(BackendEngine):
                         filename=op.path_in_repo,
                     )
                 )
-        if async_mode:
-            await asyncio.gather(*tasks)
-        else:
-            for task in tasks:
-                await task
+
+        # upload blobs in batch, using async!
+        await self.async_upload_blobs(
+            repo_id,
+            filenames=[op.path_in_repo for op in upload_batch],
+            buffers=[op.path_or_fileobj for op in upload_batch],
+        )
 
     def preupload_lfs_files(self, repo_id, additions):
         # for blob storage, these operations are done in create_commit
@@ -390,28 +396,35 @@ class BlobStorageEngine(BackendEngine):
         else:
             if len(buffers) != len(filenames):
                 raise ValueError("Filenames and buffers must have the same length.")
-        tasks = [
-            self._async_upload_blob(repo_id, filename, buffer, overwrite)
-            for filename, buffer in zip(filenames, buffers)
-        ]
-        await asyncio.gather(*tasks)
-        return filenames[0] if is_str else filenames
-
-    async def _async_upload_blob(self, repo_id, filename, buffer=None, overwrite=True):
-        storage_uri, container = self._parse_repo_id_to_storage_info(repo_id)
+            
+        self._last_modified(repo_id, set_cache=True) # set the cache for last_modified
 
         async with self._get_blob_client(
             repo_id, use_async=True
         ) as blob_service_client:
-            blob_client = blob_service_client.get_blob_client(
-                container=container, blob=filename
-            )
-            if buffer is not None:
-                await blob_client.upload_blob(buffer, overwrite=overwrite)
-            else:
-                local_cache = self._get_local_filepath(repo_id, filename)
-                with open(file=local_cache, mode="rb") as blob_file:
-                    await blob_client.upload_blob(blob_file, overwrite=overwrite)
+            tasks = [
+                self._async_upload_blob(blob_service_client, repo_id, filename, buffer, overwrite)
+                for filename, buffer in zip(filenames, buffers)
+            ]
+            await asyncio.gather(*tasks)
+
+        self.last_modified_cache = None # reset the cache
+
+        return filenames[0] if is_str else filenames
+    
+    async def _async_upload_blob(self, blob_service_client, repo_id, filename, buffer=None, overwrite=True):
+        storage_uri, container = self._parse_repo_id_to_storage_info(repo_id)
+
+        blob_client = blob_service_client.get_blob_client(container=container, blob=filename)
+
+        if buffer is not None:
+            await blob_client.upload_blob(buffer, overwrite=overwrite)
+
+        else:
+            local_cache = self._get_local_filepath(repo_id, filename)
+
+            with open(file=local_cache, mode="rb") as blob_file:
+                await blob_client.upload_blob(blob_file, overwrite=overwrite)
 
     async def async_download_blobs(
         self, repo_id: str, filesnames: Union[List[str], str]
@@ -419,32 +432,40 @@ class BlobStorageEngine(BackendEngine):
         is_str = isinstance(filesnames, str)
         if is_str:
             filesnames = [filesnames]
-        tasks = [
-            self._async_download_blob(repo_id, filename) for filename in filesnames
-        ]
-        local_filenames = await asyncio.gather(*tasks)
-        return local_filenames[0] if is_str else local_filenames
 
-    async def _async_download_blob(self, repo_id, filename):
-        storage_uri, container = self._parse_repo_id_to_storage_info(repo_id)
+        self._last_modified(repo_id, set_cache=True) # set the cache for last_modified
+
         async with self._get_blob_client(
             repo_id, use_async=True
         ) as blob_service_client:
-            # already cached!
-            local_filename = self._get_local_filepath(repo_id, filename)
-            if local_filename.exists():
-                return local_filename
+            tasks = [
+                self._async_download_blob(blob_service_client, repo_id, filename)
+                for filename in filesnames
+            ]
+            local_filesnames = await asyncio.gather(*tasks)
 
-            blob_client = blob_service_client.get_blob_client(
-                container=container, blob=filename
-            )
+        self.last_modified_cache = None # reset the cache
 
-            os.makedirs(os.path.dirname(local_filename), exist_ok=True)
-            with open(file=local_filename, mode="wb") as blob_file:
-                download_stream = await blob_client.download_blob()
-                data = await download_stream.readall()
-                blob_file.write(data)
+        return local_filesnames[0] if is_str else local_filesnames
+
+
+    async def _async_download_blob(self, blob_service_client, repo_id, filename):
+        # already cached!
+        local_filename = self._get_local_filepath(repo_id, filename)
+        if local_filename.exists():
             return local_filename
+
+        storage_uri, container = self._parse_repo_id_to_storage_info(repo_id)
+        blob_client = blob_service_client.get_blob_client(
+            container=container, blob=filename
+        )
+
+        os.makedirs(os.path.dirname(local_filename), exist_ok=True)
+        async with open(file=local_filename, mode="wb") as blob_file:
+            download_stream = await blob_client.download_blob()
+            data = await download_stream.readall()
+            blob_file.write(data)
+        return local_filename
 
     async def async_copy_blobs(
         self,

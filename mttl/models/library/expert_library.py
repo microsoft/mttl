@@ -1,3 +1,4 @@
+import asyncio
 import glob
 import io
 import os
@@ -141,31 +142,48 @@ class ExpertLibrary:
                 logger.error("Repository not found: %s", self.repo_id)
             raise e
 
-        # Function to download and process a single .meta file
-        def download_and_process_meta_file(file):
-            path_or_bytes = self.hf_hub_download(self.repo_id, file)
+        if isinstance(self, BlobExpertLibrary):
+            local_filenames = asyncio.run(self.async_download_blobs(
+                self.repo_id,
+                meta_files,
+            ))
 
-            metadata_entry = MetadataEntry.fromdict(
-                torch.load(path_or_bytes, map_location="cpu", weights_only=False)
-            )
-            return metadata_entry
-
-        # Use ThreadPoolExecutor for multithreading
-        with ThreadPoolExecutor() as executor:
-            # Submit tasks to the executor
-            future_to_file = {
-                executor.submit(download_and_process_meta_file, file): file
-                for file in meta_files
-            }
-
+            # process every meta file in new local directory
             metadata = []
-            for future in as_completed(future_to_file):
-                file = future_to_file[future]
-                try:
-                    data = future.result()
-                    metadata.append(data)
-                except Exception as exc:
-                    logger.error("%r generated an exception: %s" % (file, exc))
+            for file in local_filenames:
+                metadata_entry = MetadataEntry.fromdict(
+                    torch.load(file, map_location="cpu", weights_only=False)
+                )
+                metadata.append(metadata_entry)
+        
+        else:
+            pass
+
+            # Function to download and process a single .meta file
+            def download_and_process_meta_file(file):
+                path_or_bytes = self.hf_hub_download(self.repo_id, file)
+
+                metadata_entry = MetadataEntry.fromdict(
+                    torch.load(path_or_bytes, map_location="cpu", weights_only=False)
+                )
+                return metadata_entry
+
+            # Use ThreadPoolExecutor for multithreading
+            with ThreadPoolExecutor() as executor:
+                # Submit tasks to the executor
+                future_to_file = {
+                    executor.submit(download_and_process_meta_file, file): file
+                    for file in meta_files
+                }
+
+                metadata = []
+                for future in as_completed(future_to_file):
+                    file = future_to_file[future]
+                    try:
+                        data = future.result()
+                        metadata.append(data)
+                    except Exception as exc:
+                        logger.error("%r generated an exception: %s" % (file, exc))
 
         for metadatum in metadata:
             if self.model_name is not None and metadatum.model != self.model_name:
@@ -282,7 +300,7 @@ class ExpertLibrary:
         return len(self.data)
 
     def add_expert(
-        self, expert_dump: Expert, expert_name: str = None, force: bool = False
+        self, expert_dump: Expert, expert_name: str = None, force: bool = False, update_readme: bool = True
     ):
         if self.sliced:
             raise ValueError("Cannot add expert to sliced library.")
@@ -307,7 +325,9 @@ class ExpertLibrary:
         self._upload_weights(metadata.expert_name, expert_dump)
         self._upload_metadata(metadata)
         self.data[metadata.expert_name] = metadata
-        self._update_readme()
+        # only update readme if requested. This is useful when adding multiple experts in a batch
+        if update_readme:
+            self._update_readme()
 
     def list_auxiliary_data(self) -> Dict[str, Tuple[int, str]]:
         """List auxiliary data in the library, returns a dictionary with the data type, the number of records, and a string representation of the config file."""
@@ -770,9 +790,16 @@ class ExpertLibrary:
 
         only_tasks = only_tasks or self.tasks
         with new_lib.batched_commit():
+            update_readme = False
             for name, expert in self.items():
                 if expert.name not in new_lib:
-                    new_lib.add_expert(expert, name, force=force)
+                    new_lib.add_expert(expert, name, force=force, update_readme=False) 
+                    update_readme = True
+
+            # only update readme if we added new experts
+            if update_readme:
+                new_lib._update_readme()
+
 
         # if the new_lib already exists, delete experts that
         # are in this lib but were deleted from the expert_lib
