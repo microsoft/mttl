@@ -143,10 +143,12 @@ class ExpertLibrary:
             raise e
 
         if isinstance(self, BlobExpertLibrary):
-            local_filenames = asyncio.run(self.async_download_blobs(
-                self.repo_id,
-                meta_files,
-            ))
+            local_filenames = asyncio.run(
+                self.async_download_blobs(
+                    self.repo_id,
+                    meta_files,
+                )
+            )
 
             # process every meta file in new local directory
             metadata = []
@@ -155,7 +157,7 @@ class ExpertLibrary:
                     torch.load(file, map_location="cpu", weights_only=False)
                 )
                 metadata.append(metadata_entry)
-        
+
         else:
             pass
 
@@ -300,7 +302,11 @@ class ExpertLibrary:
         return len(self.data)
 
     def add_expert(
-        self, expert_dump: Expert, expert_name: str = None, force: bool = False, update_readme: bool = True
+        self,
+        expert_dump: Expert,
+        expert_name: str = None,
+        force: bool = False,
+        update_readme: bool = True,
     ):
         if self.sliced:
             raise ValueError("Cannot add expert to sliced library.")
@@ -793,13 +799,12 @@ class ExpertLibrary:
             update_readme = False
             for name, expert in self.items():
                 if expert.name not in new_lib:
-                    new_lib.add_expert(expert, name, force=force, update_readme=False) 
+                    new_lib.add_expert(expert, name, force=force, update_readme=False)
                     update_readme = True
 
             # only update readme if we added new experts
             if update_readme:
                 new_lib._update_readme()
-
 
         # if the new_lib already exists, delete experts that
         # are in this lib but were deleted from the expert_lib

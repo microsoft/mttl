@@ -201,16 +201,18 @@ class BlobStorageEngine(BackendEngine):
         storage_uri, container = self._parse_repo_id_to_storage_info(repo_id)
         return self._get_blob_client(repo_id, use_async).get_container_client(container)
 
-    def _last_modified(self, repo_id: str, set_cache: bool=False) -> datetime.datetime:
+    def _last_modified(
+        self, repo_id: str, set_cache: bool = False
+    ) -> datetime.datetime:
         """Get the last modified date of a repository."""
-        
+
         # if cached version exists, return cache. We want to avoid repetitive calls to the API
         if self.last_modified_cache:
             return self.last_modified_cache
 
         else:
             try:
-                last_modified =  (
+                last_modified = (
                     self._get_container_client(repo_id)
                     .get_container_properties()
                     .last_modified
@@ -396,26 +398,32 @@ class BlobStorageEngine(BackendEngine):
         else:
             if len(buffers) != len(filenames):
                 raise ValueError("Filenames and buffers must have the same length.")
-            
-        self._last_modified(repo_id, set_cache=True) # set the cache for last_modified
+
+        self._last_modified(repo_id, set_cache=True)  # set the cache for last_modified
 
         async with self._get_blob_client(
             repo_id, use_async=True
         ) as blob_service_client:
             tasks = [
-                self._async_upload_blob(blob_service_client, repo_id, filename, buffer, overwrite)
+                self._async_upload_blob(
+                    blob_service_client, repo_id, filename, buffer, overwrite
+                )
                 for filename, buffer in zip(filenames, buffers)
             ]
             await asyncio.gather(*tasks)
 
-        self.last_modified_cache = None # reset the cache
+        self.last_modified_cache = None  # reset the cache
 
         return filenames[0] if is_str else filenames
-    
-    async def _async_upload_blob(self, blob_service_client, repo_id, filename, buffer=None, overwrite=True):
+
+    async def _async_upload_blob(
+        self, blob_service_client, repo_id, filename, buffer=None, overwrite=True
+    ):
         storage_uri, container = self._parse_repo_id_to_storage_info(repo_id)
 
-        blob_client = blob_service_client.get_blob_client(container=container, blob=filename)
+        blob_client = blob_service_client.get_blob_client(
+            container=container, blob=filename
+        )
 
         if buffer is not None:
             await blob_client.upload_blob(buffer, overwrite=overwrite)
@@ -433,7 +441,7 @@ class BlobStorageEngine(BackendEngine):
         if is_str:
             filesnames = [filesnames]
 
-        self._last_modified(repo_id, set_cache=True) # set the cache for last_modified
+        self._last_modified(repo_id, set_cache=True)  # set the cache for last_modified
 
         async with self._get_blob_client(
             repo_id, use_async=True
@@ -444,10 +452,9 @@ class BlobStorageEngine(BackendEngine):
             ]
             local_filesnames = await asyncio.gather(*tasks)
 
-        self.last_modified_cache = None # reset the cache
+        self.last_modified_cache = None  # reset the cache
 
         return local_filesnames[0] if is_str else local_filesnames
-
 
     async def _async_download_blob(self, blob_service_client, repo_id, filename):
         # already cached!
