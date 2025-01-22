@@ -25,10 +25,14 @@ class KMDatasetConfig(DatasetConfig):
     task_name_field: str = "document_id"
     # field in the dataset that contains the task source
     task_source_field: str = "document_id"
-    # for train / dev split, split by document chunk, or split the list of summary / q/a's ?
-    split_train_dev_on: str = "document_chunk"
+    # ..
+    split_train_dev_on: str = None
     # flip inputs and outputs
     flip_inputs_outputs: bool = False
+
+    def __post_init__(self):
+        if self.split_train_dev_on:
+            logger.warning("split_train_dev_on is not in use anymore.")
 
 
 class KMDataCollator(DefaultCollator):
@@ -56,8 +60,6 @@ class KMDatasetModule(DataModule):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-
-        assert self.config.split_train_dev_on in ["document_chunk", "output"]
 
     def setup_dataset(self):
         dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
@@ -185,16 +187,7 @@ class KMDatasetModule(DataModule):
                     return_dict["source"].append(source_str)
                     return_dict["target"].append(output_str)
                     return_dict["prompt"].append(prompt_str)
-
-                    if self.config.split_train_dev_on == "output":
-                        # ensure that 95% or at least 1 point goes to dev
-                        if i < max(int(len(outputs) * 0.05), 1):
-                            return_dict["split"].append("dev")
-                        else:
-                            return_dict["split"].append("train")
-
                     return_dict[self.config.task_name_field].append(subject)
-
             return return_dict
 
         (
@@ -218,16 +211,9 @@ class KMDatasetModule(DataModule):
             remove_columns=train_dataset.column_names,
         )
 
-        if self.config.split_train_dev_on == "document_chunk":
-            self.train_dataset, self.dev_dataset = self.create_train_valid_split(
-                train_dataset
-            )
-        else:
-            # split on `split` column
-            self.train_dataset, self.dev_dataset, _ = split_on_split_column(
-                train_dataset
-            )
-
+        self.train_dataset, self.dev_dataset = self.create_train_valid_split(
+            train_dataset
+        )
         self.test_dataset = self.dev_dataset
 
 
