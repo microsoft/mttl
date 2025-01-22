@@ -113,13 +113,13 @@ class KMDatasetModule(DataModule):
                                 prompt_str = (
                                     "Generate a question given the preceding passage."
                                 )
-                            output_str = f"{output['question']}"
+                            output_str = output["question"]
                         elif type_ == "a":
                             if self.config.flip_inputs_outputs:
                                 prompt_str = "Generate a passage containing the preceding answer."
                             else:
                                 prompt_str = f"Answer the following question given the preceding passage.\nQuestion: {output['question']}"
-                            output_str = f"{output['answer']}"
+                            output_str = output["answer"]
                         elif type_ == "summary":
                             if self.config.flip_inputs_outputs:
                                 prompt_str = "Generate a passage which can be summarized by the previous summary."
@@ -158,6 +158,8 @@ class KMDatasetModule(DataModule):
                                 f"For legacy dataset, only qa, summary and next_chunk are supported!"
                             )
                         output_str = output
+
+                    assert output_str is not None
 
                     if self.config.flip_inputs_outputs:
                         input, output_str = output_str, input
