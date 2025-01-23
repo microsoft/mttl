@@ -961,7 +961,11 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
     """A local library stored on disk."""
 
     def add_expert(
-        self, expert_dump: Expert, expert_name: str = None, force: bool = False
+        self,
+        expert_dump: Expert,
+        expert_name: str = None,
+        force: bool = False,
+        update_readme: bool = True,
     ):
         expert_name = expert_name or expert_dump.expert_info.expert_name
         if "/" in expert_name:
