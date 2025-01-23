@@ -178,7 +178,7 @@ def get_tokenizer_with_args(
 def apply_custom_split_file(dataset, split_file):
     assert split_file.endswith(".json"), "split_file must be a json file"
     split_file = json.load(open(split_file, "r"))
-    assert list(split_file.keys()) == ["train", "dev", "test"]
+    assert set(split_file.keys()) == {"train", "dev", "test"}
 
     doc_to_split = {
         doc: split for split in ["train", "dev", "test"] for doc in split_file[split]
