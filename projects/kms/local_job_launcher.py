@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import random
+import re
 import signal
 import time
 from time import sleep
@@ -83,8 +84,17 @@ class JobQueue:
                     )
                     return 0
 
-                str_int = lines[-1].strip()
-                return_code = 0 if "0" in str_int else 1
+                return_codes = lines[-1].strip()
+                # parse each digit (including negative)
+                numbers = [int(x) for x in re.findall(r"-?\d", return_codes)]
+                return_code = numbers[-1]
+
+                if 0 in numbers and numbers[-1] != 0:
+                    logger.warning(
+                        f"Task {task} has completed successfully in the past, but has a non-zero return code: {numbers[-1]}"
+                    )
+                    return numbers[-1]
+
             except Exception as e:
                 # copy done file to done_error{launcher}.txt
                 done_error_file = os.path.join(
@@ -226,9 +236,7 @@ class JobQueue:
             await asyncio.sleep(30)
 
 
-async def run_job(
-    gpu_id, doc_id, config_file, output_dir, train_script, config_id, launcher_id
-):
+async def run_job(gpu_id, doc_id, output_dir, python_script, config_id, launcher_id):
 
     # Because the file system is on the network, when creating a file one the network,
     # it may take a while for the file creation to be visible to other nodes.
@@ -255,24 +263,38 @@ async def run_job(
                 return doc_id, JOB_ALREADY_STARTED
 
     env = os.environ.copy()
-    env["CUDA_VISIBLE_DEVICES"] = str(int(env.get("GPU_OFFSET", 0)) + int(gpu_id))
-    command = [
-        "python",
-        f"{train_script}.py",
-        "-c",
-        config_file,
-        "-k",
-        f"finetune_task_name={doc_id}",
-        "-k",
-        f"wandb_run_name={config_id}-{doc_id}",
-        "-k",
-        f"output_dir={output_dir}/{doc_id}",
-    ]
-    print(f"Assigning DOC_ID={doc_id} to GPU_ID={gpu_id}")
+
+    # TODO: pass in a `create_command` method instead
+    if "train" in python_script:
+        env["CUDA_VISIBLE_DEVICES"] = str(int(env.get("GPU_OFFSET", 0)) + int(gpu_id))
+        command = [
+            "python",
+            f"{python_script}.py",
+            "-c",
+            f"{config_id}",
+            "-k",
+            f"finetune_task_name={doc_id}",
+            "-k",
+            f"output_dir={output_dir}/{doc_id}",
+        ]
+        print(f"Assigning DOC_ID={doc_id} to GPU_ID={gpu_id}")
+    else:
+        assert "eval" in python_script
+        env["CUDA_VISIBLE_DEVICES"] = str(int(env.get("GPU_OFFSET", 0)) + int(gpu_id))
+        command = [
+            "python",
+            f"{python_script}.py",
+            "-c",
+            f"{doc_id}",
+            "-k",
+            f"output_dir={output_dir}/{doc_id}",
+        ]
+
+    print(f"command : {command}")
 
     async def stream_output(stream, job_name):
-        job_name = str(job_name)[:10]
-        job_name = job_name.ljust(9)
+        job_name = str(job_name)[:30]
+        job_name = job_name.ljust(29)
         try:
             async for line in stream:
                 print(f"<{job_name}>: {line.decode().strip()}")
@@ -285,7 +307,7 @@ async def run_job(
     async def doc_heartbeat(launcher_id):
         while True:
             with open(heartbeat_file, "a") as f:
-                f.write(f"{time.time()} - {launcher_id}\n")
+                f.write(f"{format_timestamp(time.time())} - {launcher_id}\n")
             await asyncio.sleep(30)
 
     # Make sure doc_id directory exists
@@ -298,6 +320,7 @@ async def run_job(
         env=env,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
+        limit=1024 * 128,
     )
 
     # If this task gets cancelled, we ensure to terminate the subprocess
@@ -342,7 +365,7 @@ def parse_arguments():
     parser.add_argument("--tasks-file-split", type=str, default=None)
     parser.add_argument("--config-id", type=str, required=True, help="Configuration ID")
     parser.add_argument(
-        "--train-script",
+        "--python-script",
         type=str,
         required=True,
         help="Training script filename without extension",
@@ -356,7 +379,7 @@ def parse_arguments():
     parser.add_argument(
         "--seconds-to-crashed",
         type=int,
-        default=5 * 60,
+        default=15 * 60,
     )
     args = parser.parse_args()
     return args
@@ -385,8 +408,10 @@ class GPUMonitor:
 
 async def main():
     args = parse_arguments()
-    config_file = f"configs/{args.config_id}.json"
+    args.eval = "eval" in args.python_script
     output_dir = f"/mnt/output/kms/{args.config_id}"
+    if args.eval:
+        os.environ["CONFIG_PATH"] = "eval_configs"
 
     # if running locally, change the output_dir
     if os.path.exists("/data/lucas"):
@@ -481,14 +506,13 @@ async def main():
                 run_job(
                     gpu_id,
                     doc_id,
-                    config_file,
                     output_dir,
-                    args.train_script,
+                    args.python_script,
                     args.config_id,
                     job_queue.launcher_id,
                 )
             )
-            sleep(5)
+            sleep(1)
             running_tasks.append((task, gpu_id, doc_id))
             logger.info(f"gpu usage : {gpu_monitor.gpu_usage}")
 
