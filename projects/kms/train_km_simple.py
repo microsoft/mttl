@@ -120,7 +120,6 @@ class KMArguments(ExpertConfig):
     logit_factor: float = 1.0
     hidden_factor: float = 1.0
     temp: float = 1.0
-    loss_on_topk: float = None
     callback_during_training: bool = False
     eval_after_training: bool = True
     patience: int = None
@@ -174,7 +173,6 @@ def train_km(training_args: KMArguments):
             dcd_loss,
             logit_factor=training_args.logit_factor,
             hidden_factor=training_args.hidden_factor,
-            loss_on_topk=training_args.loss_on_topk,
             tokenizer=datamodule.tokenizer,
             temp=training_args.temp,
         )
@@ -264,6 +262,8 @@ def train_km(training_args: KMArguments):
             loss = loss / args.gradient_accumulation_steps
             loss_accum += loss.detach()
             loss.backward()
+            del loss
+            torch.cuda.empty_cache()
 
         if loss_accum:
             norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
