@@ -154,6 +154,10 @@ def train_km(training_args: KMArguments):
         attn_implementation=training_args.attn_implementation,
     ).to(device)
 
+    # deactivate use_cache for Phi
+    if "Phi" in args.model:
+        model.model.config.use_cache = False
+
     if is_dist_avail_and_initialized():
         model = DDP(model, device_ids=[get_local_rank()])
 
