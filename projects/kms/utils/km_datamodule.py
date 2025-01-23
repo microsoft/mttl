@@ -42,15 +42,14 @@ class KMDataCollator(DefaultCollator):
 
         output_batch = super().__call__(batch)
 
-        prompts = [b["prompt"] for b in batch]
+        nc_inputs = [b["nc_source"] for b in batch]
         labels = [b["target"] for b in batch]
-        prompt_batch = self.prepare_inputs_for_gpt_family(prompts, labels)
+        prompt_batch = self.prepare_inputs_for_gpt_family(nc_inputs, labels)
 
         # no context tensors used for context distillation loss
         output_batch["nc_input_ids"] = prompt_batch["input_ids"]
         output_batch["nc_attention_mask"] = prompt_batch["attention_mask"]
         output_batch["nc_labels"] = prompt_batch["labels"]
-
         return output_batch
 
 
@@ -164,17 +163,6 @@ class KMDatasetModule(DataModule):
                     if self.config.flip_inputs_outputs:
                         input, output_str = output_str, input
 
-                    prompt_str = self.tokenizer.apply_chat_template(
-                        [
-                            {
-                                "role": "user",
-                                "content": prompt_str,
-                            }
-                        ],
-                        tokenize=False,
-                        add_generation_prompt=True,
-                    )
-
                     source_str = self.tokenizer.apply_chat_template(
                         [
                             {
@@ -185,10 +173,11 @@ class KMDatasetModule(DataModule):
                         tokenize=False,
                         add_generation_prompt=True,
                     )
+                    nc_source_str = source_str[source_str.find(prompt_str) :]
 
                     return_dict["source"].append(source_str)
                     return_dict["target"].append(output_str)
-                    return_dict["prompt"].append(prompt_str)
+                    return_dict["nc_source"].append(nc_source_str)
                     return_dict[self.config.task_name_field].append(subject)
             return return_dict
 
