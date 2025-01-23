@@ -159,7 +159,6 @@ class ExpertLibrary:
                 metadata.append(metadata_entry)
 
         else:
-            pass
 
             # Function to download and process a single .meta file
             def download_and_process_meta_file(file):
