@@ -5,6 +5,7 @@ import random
 import re
 import signal
 import time
+from os.path import exists, getmtime, join
 from time import sleep
 
 got_exit_signal = False
@@ -31,10 +32,12 @@ logger.setLevel(logging.INFO)
 
 
 def format_timestamp(timestamp):
+    """Format a timestamp as a human-readable string"""
     return time.strftime("%d-%m-%Y %H:%M:%S", time.localtime(timestamp))
 
 
 def handle_exit_signal(signum, frame):
+    """Signal handler for graceful shutdown"""
     logger.warning(
         f"`local_job_launcher.py` received exit signal {signum}, initiating graceful shutdown..."
     )
@@ -68,12 +71,12 @@ class JobQueue:
         )
 
     def task_is_done(self, task):
-        done_file = os.path.join(self.output_dir, task, "done.txt")
-        return os.path.exists(done_file)
+        done_file = join(self.output_dir, task, "done.txt")
+        return exists(done_file)
 
     def get_return_code(self, task):
-        done_file = os.path.join(self.output_dir, task, "done.txt")
-        assert os.path.exists(done_file), f"Done file {done_file} does not exist"
+        done_file = join(self.output_dir, task, "done.txt")
+        assert exists(done_file), f"Done file {done_file} does not exist"
 
         with open(done_file, "r") as f:
             lines = f.readlines()
@@ -89,7 +92,7 @@ class JobQueue:
                 numbers = [int(x) for x in re.findall(r"-?\d", return_codes)]
                 return_code = numbers[-1]
 
-                if 0 in numbers and numbers[-1] != 0:
+                if FINISHED in numbers and numbers[-1] != FINISHED:
                     logger.warning(
                         f"Task {task} has completed successfully in the past, but has a non-zero return code: {numbers[-1]}"
                     )
@@ -97,7 +100,7 @@ class JobQueue:
 
             except Exception as e:
                 # copy done file to done_error{launcher}.txt
-                done_error_file = os.path.join(
+                done_error_file = join(
                     self.output_dir, task, f"done_error{self.launcher_id}.txt"
                 )
                 os.system(f"cp {done_file} {done_error_file}")
@@ -110,13 +113,13 @@ class JobQueue:
 
     def count_retries(self, task):
         # check how many files are named `retry_*.txt`
-        task_output_dir = os.path.join(self.output_dir, task)
+        task_output_dir = join(self.output_dir, task)
         retry_files = [f for f in os.listdir(task_output_dir) if f.startswith("retry_")]
         return len(retry_files)
 
     def get_run_status(self, task):
-        task_output_dir = os.path.join(self.output_dir, task)
-        if os.path.exists(task_output_dir):
+        task_output_dir = join(self.output_dir, task)
+        if exists(task_output_dir):
             if len(os.listdir(task_output_dir)) > 0:
                 if self.task_is_done(task):
                     return_code = self.get_return_code(task)
@@ -139,13 +142,11 @@ class JobQueue:
             return "queued"
 
     def get_timestamp(self, task):
-        task_output_dir = os.path.join(self.output_dir, task)
+        task_output_dir = join(self.output_dir, task)
         files = os.listdir(task_output_dir)
 
         if len(files) > 0:
-            return max(
-                os.path.getmtime(os.path.join(task_output_dir, f)) for f in files
-            )
+            return max(getmtime(join(task_output_dir, f)) for f in files)
 
     def get_next_job(self):
 
@@ -176,12 +177,10 @@ class JobQueue:
                         )
 
                         # actually, let's print the name and timestamp of every file in the task directory
-                        task_output_dir = os.path.join(self.output_dir, task)
+                        task_output_dir = join(self.output_dir, task)
                         task_files = os.listdir(task_output_dir)
                         for f in task_files:
-                            timestamp = os.path.getmtime(
-                                os.path.join(task_output_dir, f)
-                            )
+                            timestamp = getmtime(join(task_output_dir, f))
                             logger.info(f"{f} - {format_timestamp(timestamp)}")
                         if len(task_files) == 0:
                             logger.info(f"Task {task} has Empty directory")
@@ -192,7 +191,7 @@ class JobQueue:
                         if n_retries < self.n_retries:
                             doc_id = task
                             # create a file called `retry_{timestamp}.txt` to indicate that the task is being retried
-                            retry_file = os.path.join(
+                            retry_file = join(
                                 self.output_dir, task, f"retry_{time.time()}.txt"
                             )
                             with open(retry_file, "a") as f:
@@ -245,13 +244,13 @@ async def run_job(gpu_id, doc_id, output_dir, python_script, config_id, launcher
     # to the newest runner.
     # sleep command for io job
     await asyncio.sleep(15)
-    task_output_dir = os.path.join(output_dir, doc_id)
-    started_file = os.path.join(task_output_dir, f"started_{launcher_id}.txt")
-    started_file_timestamp = os.path.getmtime(started_file)
+    task_output_dir = join(output_dir, doc_id)
+    started_file = join(task_output_dir, f"started_{launcher_id}.txt")
+    started_file_timestamp = getmtime(started_file)
     for afile in os.listdir(task_output_dir):
         if afile.startswith("started_") and afile != f"started_{launcher_id}.txt":
-            other_started_file = os.path.join(task_output_dir, afile)
-            other_started_file_timestamp = os.path.getmtime(other_started_file)
+            other_started_file = join(task_output_dir, afile)
+            other_started_file_timestamp = getmtime(other_started_file)
             if other_started_file_timestamp > started_file_timestamp:
                 print(f"Another runner has started this job. Exiting.")
                 print(
@@ -264,6 +263,10 @@ async def run_job(gpu_id, doc_id, output_dir, python_script, config_id, launcher
 
     env = os.environ.copy()
 
+    # instead of running experiments directly in `output_dir`, we will create a temporary directory in $HOME,
+    # and copy the contents to the `output_dir` after the experiment is done
+    tmp_dir = join(os.environ["HOME"], doc_id)
+
     # TODO: pass in a `create_command` method instead
     if "train" in python_script:
         env["CUDA_VISIBLE_DEVICES"] = str(int(env.get("GPU_OFFSET", 0)) + int(gpu_id))
@@ -275,7 +278,7 @@ async def run_job(gpu_id, doc_id, output_dir, python_script, config_id, launcher
             "-k",
             f"finetune_task_name={doc_id}",
             "-k",
-            f"output_dir={output_dir}/{doc_id}",
+            f"output_dir={tmp_dir}",
         ]
         print(f"Assigning DOC_ID={doc_id} to GPU_ID={gpu_id}")
     else:
@@ -287,7 +290,7 @@ async def run_job(gpu_id, doc_id, output_dir, python_script, config_id, launcher
             "-c",
             f"{doc_id}",
             "-k",
-            f"output_dir={output_dir}/{doc_id}",
+            f"output_dir={tmp_dir}",
         ]
 
     print(f"command : {command}")
@@ -302,7 +305,7 @@ async def run_job(gpu_id, doc_id, output_dir, python_script, config_id, launcher
             # Stream output cancelled, just return
             return
 
-    heartbeat_file = os.path.join(output_dir, doc_id, "heartbeat.txt")
+    heartbeat_file = join(task_output_dir, "heartbeat.txt")
 
     async def doc_heartbeat(launcher_id):
         while True:
@@ -311,7 +314,7 @@ async def run_job(gpu_id, doc_id, output_dir, python_script, config_id, launcher
             await asyncio.sleep(30)
 
     # Make sure doc_id directory exists
-    os.makedirs(os.path.join(output_dir, doc_id), exist_ok=True)
+    os.makedirs(task_output_dir, exist_ok=True)
 
     heartbeat_task = asyncio.create_task(doc_heartbeat(launcher_id))
 
@@ -341,14 +344,24 @@ async def run_job(gpu_id, doc_id, output_dir, python_script, config_id, launcher
     return_code = await process.wait()
     print(f"Process finished with exit code: {return_code} for DOC_ID={doc_id}")
 
-    done_file = os.path.join(output_dir, doc_id, "done.txt")
-    launcher_done_file = os.path.join(output_dir, doc_id, f"done{launcher_id}.txt")
+    if return_code == FINISHED:
+        # copy the contents of the temporary directory to the output directory
+        # actually, let's move instead of copy
+        os.system(f"mv {tmp_dir}/* {task_output_dir}")
 
+    done_file = join(output_dir, doc_id, "done.txt")
+    launcher_done_file = join(output_dir, doc_id, f"done{launcher_id}.txt")
+
+    # Keep timestamps for when the job finished in launcher file
     with open(launcher_done_file, "a") as f:
-        f.write(str(return_code))
+        f.write(f"{format_timestamp(time.time())} - {return_code}")
 
-    # copy the file as `done.txt`
-    os.system(f"cp {launcher_done_file} {done_file}")
+    # Append to the shared `done.txt` file
+    try:
+        with open(done_file, "a") as f:
+            f.write(str(return_code))
+    except Exception as e:
+        logger.error(f"Error writing to done.txt for task {doc_id}: {e}")
 
     return doc_id, return_code
 
@@ -414,7 +427,7 @@ async def main():
         os.environ["CONFIG_PATH"] = "eval_configs"
 
     # if running locally, change the output_dir
-    if os.path.exists("/data/lucas"):
+    if exists("/data/lucas"):
         output_dir = f"/data/lucas/{output_dir}"
 
     # get the document ids
@@ -483,7 +496,7 @@ async def main():
 
             if previous_status == "failed":
                 # need to delete `done.txt` file
-                done_file = os.path.join(output_dir, doc_id, "done.txt")
+                done_file = join(output_dir, doc_id, "done.txt")
                 logger.info(f"deleting done file : {done_file}")
                 try:
                     os.remove(done_file)
@@ -494,13 +507,22 @@ async def main():
                     )
 
             # create a directory for the task ASAP
-            os.makedirs(os.path.join(output_dir, doc_id), exist_ok=True)
+            os.makedirs(join(output_dir, doc_id), exist_ok=True)
             # create a file called `started.txt` to indicate that the task has started
-            started_file = os.path.join(
+            started_file = join(
                 output_dir, doc_id, f"started_{job_queue.launcher_id}.txt"
             )
             with open(started_file, "a") as f:
-                f.write(f"{time.time()} - {job_queue.launcher_id}\n")
+                f.write(f"{format_timestamp(time.time())} - {job_queue.launcher_id}\n")
+
+            # Useful to keep track of a shared `started.txt` file across different launcher
+            try:
+                with open(join(output_dir, doc_id, "started.txt"), "a") as f:
+                    f.write(
+                        f"{format_timestamp(time.time())} - {job_queue.launcher_id}\n"
+                    )
+            except Exception as e:
+                logger.error(f"Error writing to started.txt for task {doc_id}: {e}")
 
             task = asyncio.create_task(
                 run_job(
