@@ -163,16 +163,20 @@ class KMDatasetModule(DataModule):
                     if self.config.flip_inputs_outputs:
                         input, output_str = output_str, input
 
-                    source_str = self.tokenizer.apply_chat_template(
-                        [
-                            {
-                                "role": "user",
-                                "content": input + "\n\n" + prompt_str,
-                            }
-                        ],
-                        tokenize=False,
-                        add_generation_prompt=True,
-                    )
+                    if self.tokenizer.chat_template is not None:
+                        source_str = self.tokenizer.apply_chat_template(
+                            [
+                                {
+                                    "role": "user",
+                                    "content": input + "\n\n" + prompt_str,
+                                }
+                            ],
+                            tokenize=False,
+                            add_generation_prompt=True,
+                        )
+                    else:
+                        source_str = input + "\n\n" + prompt_str
+
                     nc_source_str = source_str[source_str.find(prompt_str) :]
 
                     return_dict["source"].append(source_str)
