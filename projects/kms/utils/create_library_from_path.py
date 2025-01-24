@@ -59,7 +59,7 @@ def create(ckpt_path, library_path, model_name):
     library.update_readme(
         extra_info=f"Training arguments:\n```json\n{training_args}\n```"
     )
-    print("Library uploaded to: ", f"https://huggingface.co/{library_path}")
+    print("Library uploaded to: ", f"{library_path}")
 
 
 if __name__ == "__main__":
