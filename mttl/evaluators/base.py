@@ -123,7 +123,7 @@ class Evaluator(ABC):
             """<cropped for brevity>"""
 
             def default(self, obj):
-                if isinstance(obj, (np.ndarray, np.number)):
+                if isinstance(obj, (np.ndarray, np.number, torch.Tensor)):
                     return obj.tolist()
                 elif isinstance(obj, set):
                     return list(obj)
@@ -271,6 +271,7 @@ class GenerativeEvaluator(Evaluator):
 
     def generate_for_batch(self, model, batch):
         import time
+
         from mttl.models.expert_model import BaseExpertModel
         from mttl.models.lightning.base_module import LightningEfficientCheckpoint
         from mttl.models.utils import transfer_batch_to_device
@@ -372,7 +373,7 @@ class GenerativeEvaluator(Evaluator):
                 sequences_texts=sequences_texts,
                 sources_texts=sources_texts,
                 generated_texts=generated_texts,
-                time_per_request=float(end - start)/len(sequences_texts),
+                time_per_request=float(end - start) / len(sequences_texts),
                 num_prompt_tokens=num_prompt_tokens,
             )
         )

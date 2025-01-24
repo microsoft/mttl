@@ -10,7 +10,6 @@ from torch.utils.data import get_worker_info
 
 from mttl.datamodule.base import DataModule, DatasetConfig, DefaultCollator
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task, split_on_split_column
-from mttl.dist_utils import ddp_rank, ddp_world_size
 from mttl.logging import logger
 from mttl.models.library.dataset_library import DatasetLibrary
 
@@ -65,12 +64,14 @@ class PITDatasetModule(DataModule):
                 type_ = example["type"][i]
                 subject = example[self.config.task_name_field][i]
 
-                if type_ not in 'summary':
+                if type_ not in "summary":
                     continue
 
                 for i, output in enumerate(outputs):
                     # for QA, we want to show the question as well as the prompt
-                    prompt_str = "Generate a summary and the corresponding full paragraph."
+                    prompt_str = (
+                        "Generate a summary and the corresponding full paragraph."
+                    )
 
                     if type(output) == dict:
                         summary = output["summary"]
@@ -135,7 +136,7 @@ class PITDatasetModule(DataModule):
             )
 
         self.test_dataset = self.dev_dataset
-        
+
         logger.info("PIT Datamodule set-up!")
         logger.info(f"Example source: {self.train_dataset[0]['source']}")
         logger.info(f"Example target: {self.train_dataset[0]['target']}")

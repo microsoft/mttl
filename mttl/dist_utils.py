@@ -1,32 +1,54 @@
 import os
+import random
+from dataclasses import dataclass
 from typing import List
 
 import numpy as np
 import torch
 import torch.distributed as dist
 
-# assuming nccl here
-if (
-    int(os.environ.get("RANK", -1)) != -1
-    and int(os.environ.get("LOCAL_RANK", -1)) != -1
-):
-    dist.init_process_group(backend="nccl")
 
-    ddp = True
-    ddp_rank = int(os.environ.get("RANK", 0))
-    ddp_local_rank = int(os.environ.get("LOCAL_RANK", 0))
-    ddp_world_size = int(os.environ.get("WORLD_SIZE", 1))
-    master_process = ddp_rank == 0
-else:
-    ddp = False
-    ddp_rank = 0
-    ddp_local_rank = 0
-    ddp_world_size = 1
-    master_process = True
+@dataclass
+class DistributedState:
+    ddp: bool = False
+    ddp_rank: int = 0
+    ddp_local_rank: int = 0
+    ddp_world_size: int = 1
+    master_process: bool = True
+
+
+ddp_state = DistributedState()
+
+
+def init_ddp():
+    global ddp_state
+
+    # assuming nccl here
+    if (
+        int(os.environ.get("RANK", -1)) != -1
+        and int(os.environ.get("LOCAL_RANK", -1)) != -1
+    ):
+        dist.init_process_group(backend="nccl")
+
+        ddp_state.ddp = True
+        ddp_state.ddp_rank = int(os.environ.get("RANK", 0))
+        ddp_state.ddp_local_rank = int(os.environ.get("LOCAL_RANK", 0))
+        ddp_state.ddp_world_size = int(os.environ.get("WORLD_SIZE", 1))
+        ddp_state.master_process = ddp_state.ddp_rank == 0
+
+
+init_ddp()
+
+
+def seed_everything(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
 
 
 def is_dist_avail_and_initialized():
-    return ddp
+    return ddp_state.ddp
 
 
 def get_data_sampler(dataset):
@@ -58,15 +80,15 @@ def get_device():
 
 
 def get_local_rank():
-    return ddp_local_rank
+    return ddp_state.ddp_local_rank
 
 
 def get_world_size():
-    return ddp_world_size
+    return ddp_state.ddp_world_size
 
 
 def get_rank():
-    return ddp_rank
+    return ddp_state.ddp_rank
 
 
 def is_main_process():
