@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from functools import partial
 
 import torch
-from lightning_fabric import seed_everything
 from torch.distributed import destroy_process_group, init_process_group
 from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm import tqdm
@@ -22,6 +21,7 @@ from mttl.dist_utils import (
     get_local_rank,
     is_dist_avail_and_initialized,
     is_main_process,
+    seed_everything,
 )
 from mttl.logging import logger, setup_logging
 from mttl.models.expert_model import ExpertModel, ExpertModelConfig
