@@ -1,5 +1,36 @@
 #!/bin/bash
 
+MAX_RETRIES=3
+
+run_training() {
+  local doc_id=$1
+  local gpu=$2
+  local config_file=$3
+  local output_dir=$4
+
+  local attempt=1
+  while [ $attempt -le $MAX_RETRIES ]; do
+    echo "Starting attempt $attempt for $doc_id on GPU $gpu"
+    CUDA_VISIBLE_DEVICES=$gpu python train_km_simple.py \
+      -c "$config_file" \
+      -k finetune_task_name="$doc_id" \
+      -k wandb_run_name="$AMLT_EXPERIMENT_NAME-$doc_id" \
+      -k output_dir="$output_dir/$doc_id"
+
+    if [ $? -eq 0 ]; then
+      echo "Training for $doc_id succeeded."
+      return 0
+    fi
+
+    echo "Training for $doc_id failed (attempt $attempt)."
+    attempt=$((attempt + 1))
+  done
+
+  echo "Exceeded max retries for $doc_id. Skipping."
+  return 1
+}
+
+
 # Check if the correct number of arguments is provided
 if [ $# -lt 4 ]; then
     echo "Usage: $0 <worker_id> <num_workers> <json_file> <config_id>"
@@ -11,6 +42,8 @@ WORKER_ID=$1
 NUM_WORKERS=$2
 JSON_FILE=$3
 CONFIG_ID=$4
+NUM_GPUS_PER_NODE=${5:-1}
+
 export WANDB_PROJECT=knowledge-modules-${CONFIG_ID}
 export WANDB_MODE="online"
 
@@ -51,6 +84,16 @@ fi
 export PYTHONPATH=$PWD/../../
 ls -l $PWD/../../
 
+# Function to wait if we already have $NUM_GPUS_PER_NODE background jobs
+wait_for_slot() {
+  while [ "$(jobs -p | wc -l)" -ge "$NUM_GPUS_PER_NODE" ]; do
+    sleep 1
+  done
+}
+
+GPU_INDEX=0
+PIDS=()
+
 IFS=$'\n'
 for DOC_ID in $DOCUMENT_IDS; do
     if [ -d "$OUTPUT_DIR/$DOC_ID/best_model" ]; then
@@ -59,9 +102,17 @@ for DOC_ID in $DOCUMENT_IDS; do
     fi
 
     mkdir -p "$OUTPUT_DIR/$DOC_ID"
-    python train_km_simple.py \
-        -c "$CONFIG_FILE" \
-        -k finetune_task_name="$DOC_ID" \
-        -k wandb_run_name="$AMLT_EXPERIMENT_NAME-$DOC_ID" \
-        -k output_dir="$OUTPUT_DIR/$DOC_ID"
+
+    wait_for_slot
+
+    echo "Starting training for $DOC_ID on GPU $GPU."
+    GPU=$((GPU_INDEX % NUM_GPUS_PER_NODE))
+    GPU_INDEX=$((GPU_INDEX + 1))
+
+    # Launch training in the background on a specific GPU
+    run_training "$DOC_ID" "$GPU" "$CONFIG_FILE" "$OUTPUT_DIR" &
 done
+
+# Wait for all background jobs to complete
+wait
+echo "All training processes finished."
