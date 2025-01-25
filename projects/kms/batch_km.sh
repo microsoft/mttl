@@ -98,10 +98,11 @@ IFS=$'\n'
 for DOC_ID in $DOCUMENT_IDS; do
     wait_for_slot
 
-    echo "Starting training for $DOC_ID on GPU $GPU."
     GPU=$((GPU_INDEX % NUM_GPUS_PER_NODE))
     GPU_INDEX=$((GPU_INDEX + 1))
 
+    echo "Starting training for $DOC_ID on GPU $GPU."
+    
     # Launch training in the background on a specific GPU
     run_training "$DOC_ID" "$GPU" "$CONFIG_FILE" "$OUTPUT_DIR" &
 done
