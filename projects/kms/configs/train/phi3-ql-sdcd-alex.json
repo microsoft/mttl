@@ -1,10 +1,7 @@
 {
     "loss_function": "dcd",
     "dataset_type": "dcd_km",
-    "evaluate_on": "quality-rag",
-    "include_context": true,
-    "topk_context": 5,
-    "callback_during_training": true,
+    "evaluate_on": "quality",
     "overwrite_output_dir": true,
     "dataset": "az://mttldata/quality-summaries-qa-phi-3-medium",
     "padding_side": "right",
