@@ -35,21 +35,19 @@ run_training() {
 
 # Check if the correct number of arguments is provided
 if [ $# -lt 4 ]; then
-    echo "Usage: $0 <worker_id> <num_workers> <json_file> <config_id>"
+    echo "Usage: $0 <worker_id> <num_workers> <task_file> <config_file>"
     exit 1
 fi
 
 # Assign command-line arguments to variables
 WORKER_ID=$1
 NUM_WORKERS=$2
-JSON_FILE=$3
-CONFIG_ID=$4
+TASK_FILE=$3
+CONFIG_FILE=$4
 NUM_GPUS_PER_NODE=${5:-1}
 
-export WANDB_PROJECT=knowledge-modules-${CONFIG_ID}
-export WANDB_MODE="online"
-
-CONFIG_FILE=configs/${CONFIG_ID}.json
+CONFIG_FILE=$CONFIG_FILE
+CONFIG_ID=$(basename $CONFIG_FILE .json)
 OUTPUT_DIR=/mnt/output/kms/${CONFIG_ID}/
 
 # Validate that WORKER_ID and NUM_WORKERS are integers
@@ -70,7 +68,7 @@ if [ $WORKER_ID -ge $NUM_WORKERS ]; then
 fi
 
 # Flatten the input json file
-jq -r '.[] | .[]' "$JSON_FILE" > input.txt
+jq -r '.[] | .[]' "$TASK_FILE" > input.txt
 
 # Extract IDs assigned to this worker
 DOCUMENT_IDS=$(awk -v wid=$WORKER_ID -v nworkers=$NUM_WORKERS '{
@@ -96,7 +94,8 @@ wait_for_slot() {
 GPU_INDEX=0
 PIDS=()
 
-for DOC_ID in "$DOCUMENT_IDS[@]"; do
+IFS=$'\n'
+for DOC_ID in $DOCUMENT_IDS; do
     wait_for_slot
 
     echo "Starting training for $DOC_ID on GPU $GPU."
