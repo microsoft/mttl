@@ -11,6 +11,9 @@ run_training() {
   local attempt=1
   while [ $attempt -le $MAX_RETRIES ]; do
     echo "Starting attempt $attempt for $doc_id on GPU $gpu"
+
+    mkdir -p "$output_dir/$doc_id"
+
     CUDA_VISIBLE_DEVICES=$gpu python train_km_simple.py \
       -c "$config_file" \
       -k finetune_task_name="$doc_id" \
@@ -29,7 +32,6 @@ run_training() {
   echo "Exceeded max retries for $doc_id. Skipping."
   return 1
 }
-
 
 # Check if the correct number of arguments is provided
 if [ $# -lt 4 ]; then
@@ -94,10 +96,7 @@ wait_for_slot() {
 GPU_INDEX=0
 PIDS=()
 
-IFS=$'\n'
-for DOC_ID in $DOCUMENT_IDS; do
-    mkdir -p "$OUTPUT_DIR/$DOC_ID"
-
+for DOC_ID in "$DOCUMENT_IDS[@]"; do
     wait_for_slot
 
     echo "Starting training for $DOC_ID on GPU $GPU."
