@@ -2,20 +2,21 @@
 
 MAX_RETRIES=3
 
-run_training() {
+run_eval() {
   local library_uri=$1
   local gpu=$2
-  local evals_dir=$3
-  local config_id=$4
-  local output_dir=$5
-
+  local eval_file=$3
+  local output_dir=$4
   local attempt=1
+
+  config_id=$(basename "$eval_file" .json)
   mkdir -p "$output_dir/$config_id"
 
+
   while [ $attempt -le $MAX_RETRIES ]; do
-    echo "Starting attempt $attempt for $doc_id on GPU $gpu"
+    echo "Starting attempt $attempt for $config_id on GPU $gpu"
     CUDA_VISIBLE_DEVICES=$gpu python eval_qa.py \
-      -c configs/eval/"$config_id" \
+      -c "$eval_file" \
       -k output_dir="$output_dir/$config_id" \
       -k library_id="$library_uri"
 
@@ -46,6 +47,12 @@ JOB_ID=$3
 EVAL_FILES=$4
 NUM_GPUS_PER_NODE=${5:-1}
 
+echo "WORKER_ID: $WORKER_ID"
+echo "NUM_WORKERS: $NUM_WORKERS"
+echo "JOB_ID: $JOB_ID"
+echo "EVAL_FILES: $EVAL_FILES"
+echo "NUM_GPUS_PER_NODE: $NUM_GPUS_PER_NODE"
+
 # Assumes this library is present in the blob storage
 LIBRARY_URI=local:///mnt/output/kms/library-${JOB_ID}/
 OUTPUT_DIR=/mnt/output/kms/evals/library-${JOB_ID}/
@@ -67,12 +74,6 @@ if [ $WORKER_ID -ge $NUM_WORKERS ]; then
     exit 1
 fi
 
-# Check if DOCUMENT_IDS is empty
-if [ -z "$DOCUMENT_IDS" ]; then
-    echo "No documents assigned to worker $WORKER_ID. Exiting."
-    exit 0
-fi
-
 export PYTHONPATH=$PWD/../../
 ls -l $PWD/../../
 
@@ -83,25 +84,22 @@ wait_for_slot() {
   done
 }
 
-EVAL_IDS=()
-for fp in "${EVAL_FILES[@]}"; do
-  EVAL_DIR=$(dirname "$fp")
-  EVAL_IDS+=$(basename "$fp" .json)
-done
+# comma separated
+IFS=',' read -r -a EVAL_ARRAY <<< "$EVAL_FILES"
 
 GPU_INDEX=0
 PIDS=()
 
-IFS=$'\n'
-for EVAL_ID in $EVAL_IDS; do
+for EVAL_FILE in "${EVAL_ARRAY[@]}"; do
     wait_for_slot
 
-    echo "Starting evaluating $LIBRARY_URI on GPU $GPU."
     GPU=$((GPU_INDEX % NUM_GPUS_PER_NODE))
     GPU_INDEX=$((GPU_INDEX + 1))
 
+    echo "Starting evaluating $LIBRARY_URI on GPU $GPU."
+
     # Launch training in the background on a specific GPU
-    run_training "$LIBRARY_URI" "$GPU" "$EVAL_DIR" "$EVAL_ID" "$OUTPUT_DIR" &
+    run_eval "$LIBRARY_URI" "$GPU" "$EVAL_FILE" "$OUTPUT_DIR" &
 done
 
 # Wait for all background jobs to complete
