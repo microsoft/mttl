@@ -528,7 +528,7 @@ class TaskNameSelector(Selector):
                 and len(self.task_to_expert_name)
             ):
                 raise ValueError(
-                    "Experts for all tasks have not been loaded! Set a default expert?"
+                    f"Experts for all tasks have not been loaded! Set a default expert? Task name not found: {task_names}"
                 )
             experts = [
                 self.task_to_expert_name.get(task_name, self.default_expert_name)
