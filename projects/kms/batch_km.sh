@@ -116,3 +116,7 @@ echo "All training processes finished."
 python utils/create_library_from_path.py \
   --ckpt_path ${OUTPUT_DIR} \
   --library_path local:///mnt/output/kms/library-${CONFIG_ID}
+
+python utils/create_library_from_path.py \
+  --ckpt_path ${OUTPUT_DIR} \
+  --library_path az://mttldata/library-${CONFIG_ID}

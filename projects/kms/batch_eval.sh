@@ -35,7 +35,7 @@ run_training() {
 
 # Check if the correct number of arguments is provided
 if [ $# -lt 4 ]; then
-    echo "Usage: $0 <worker_id> <num_workers> <job_id> <evals_dir>"
+    echo "Usage: $0 <worker_id> <num_workers> <job_id> <eval_files> [num_gpus_per_node]"
     exit 1
 fi
 
@@ -43,7 +43,7 @@ fi
 WORKER_ID=$1
 NUM_WORKERS=$2
 JOB_ID=$3
-EVALS_DIR=$4
+EVAL_FILES=$4
 NUM_GPUS_PER_NODE=${5:-1}
 
 # Assumes this library is present in the blob storage
@@ -67,17 +67,6 @@ if [ $WORKER_ID -ge $NUM_WORKERS ]; then
     exit 1
 fi
 
-# Ensure Bash does not treat *.json as literal if no files are found
-shopt -s nullglob
-
-EVAL_CONFIGS=()
-for file in "$EVALS_DIR"/*.json; do
-  filename=$(basename "$file" .json)
-  EVAL_CONFIGS+=("$filename")
-done
-
-shopt -u nullglob  # Reset nullglob if you wish
-
 # Check if DOCUMENT_IDS is empty
 if [ -z "$DOCUMENT_IDS" ]; then
     echo "No documents assigned to worker $WORKER_ID. Exiting."
@@ -94,11 +83,17 @@ wait_for_slot() {
   done
 }
 
+EVAL_IDS=()
+for fp in "${EVAL_FILES[@]}"; do
+  EVAL_DIR=$(dirname "$fp")
+  EVAL_IDS+=$(basename "$fp" .json)
+done
+
 GPU_INDEX=0
 PIDS=()
 
 IFS=$'\n'
-for CONFIG_ID in $EVAL_CONFIGS; do
+for EVAL_ID in $EVAL_IDS; do
     wait_for_slot
 
     echo "Starting evaluating $LIBRARY_URI on GPU $GPU."
@@ -106,7 +101,7 @@ for CONFIG_ID in $EVAL_CONFIGS; do
     GPU_INDEX=$((GPU_INDEX + 1))
 
     # Launch training in the background on a specific GPU
-    run_training "$LIBRARY_URI" "$GPU" "$EVALS_DIR" "$CONFIG_ID" "$OUTPUT_DIR" &
+    run_training "$LIBRARY_URI" "$GPU" "$EVAL_DIR" "$EVAL_ID" "$OUTPUT_DIR" &
 done
 
 # Wait for all background jobs to complete
