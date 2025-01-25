@@ -8,6 +8,12 @@ run_training() {
   local config_file=$3
   local output_dir=$4
 
+  # Skip if last_model already exists
+  if [ -e "$output_dir/$doc_id/last_model" ]; then
+    echo "Model for $doc_id already exists. Skipping."
+    return 0
+  fi
+
   local attempt=1
   while [ $attempt -le $MAX_RETRIES ]; do
     echo "Starting attempt $attempt for $doc_id on GPU $gpu"
