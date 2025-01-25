@@ -123,6 +123,7 @@ class KMArguments(ExpertConfig):
     callback_during_training: bool = False
     eval_after_training: bool = True
     patience: int = None
+    overwrite_output_dir: bool = False
 
 
 def train_km(training_args: KMArguments):
@@ -362,8 +363,9 @@ def train_km(training_args: KMArguments):
 if __name__ == "__main__":
     args = KMArguments.parse()
 
-    if os.path.exists(args.output_dir + "/last_model/mttl_weights.bin"):
-        logger.info("Model already trained, skipping")
-        exit(0)
+    if not args.overwrite_output_dir:
+        if os.path.exists(args.output_dir + "/last_model/mttl_weights.bin"):
+            logger.info("Model already trained, skipping")
+            exit(0)
 
     train_km(args)
