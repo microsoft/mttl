@@ -15,10 +15,17 @@ run_eval() {
 
   while [ $attempt -le $MAX_RETRIES ]; do
     echo "Starting attempt $attempt for $config_id on GPU $gpu"
-    CUDA_VISIBLE_DEVICES=$gpu python eval_qa.py \
-      -c "$eval_file" \
-      -k output_dir="$output_dir/$config_id" \
-      -k library_id="$library_uri"
+
+    if [ $library_uri == "local:///mnt/output/kms/library-base/" ]; then
+      CUDA_VISIBLE_DEVICES=$gpu python eval_qa.py \
+        -c "$eval_file" \
+        -k output_dir="$output_dir/$config_id"
+    else
+      CUDA_VISIBLE_DEVICES=$gpu python eval_qa.py \
+        -c "$eval_file" \
+        -k output_dir="$output_dir/$config_id" \
+        -k library_id="$library_uri"
+    fi
 
     if [ $? -eq 0 ]; then
       echo "Eval for $config_id succeeded."
@@ -36,26 +43,26 @@ run_eval() {
 
 # Check if the correct number of arguments is provided
 if [ $# -lt 4 ]; then
-    echo "Usage: $0 <worker_id> <num_workers> <job_id> <eval_files> [num_gpus_per_node]"
+    echo "Usage: $0 <worker_id> <num_workers> <library_id> <eval_files> [num_gpus_per_node]"
     exit 1
 fi
 
 # Assign command-line arguments to variables
 WORKER_ID=$1
 NUM_WORKERS=$2
-JOB_ID=$3
+LIBRARY_ID=$3
 EVAL_FILES=$4
 NUM_GPUS_PER_NODE=${5:-1}
 
 echo "WORKER_ID: $WORKER_ID"
 echo "NUM_WORKERS: $NUM_WORKERS"
-echo "JOB_ID: $JOB_ID"
+echo "JOB_ID: $LIBRARY_ID"
 echo "EVAL_FILES: $EVAL_FILES"
 echo "NUM_GPUS_PER_NODE: $NUM_GPUS_PER_NODE"
 
 # Assumes this library is present in the blob storage
-LIBRARY_URI=local:///mnt/output/kms/library-${JOB_ID}/
-OUTPUT_DIR=/mnt/output/kms/evals/library-${JOB_ID}/
+LIBRARY_URI=local:///mnt/output/kms/library-${LIBRARY_ID}/
+OUTPUT_DIR=/mnt/output/kms/evals/library-${LIBRARY_ID}/
 
 # Validate that WORKER_ID and NUM_WORKERS are integers
 if ! [[ $WORKER_ID =~ ^[0-9]+$ ]] ; then
