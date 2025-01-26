@@ -338,6 +338,7 @@ class DefaultCollator(PackedMixin):
                 padding=self.padding,
                 return_tensors=self.return_tensors,
                 truncation=True,
+                add_special_tokens=False,
             )
             tokenized_labels = self.tokenizer(
                 labels,
@@ -345,6 +346,7 @@ class DefaultCollator(PackedMixin):
                 padding=self.padding,
                 return_tensors=self.return_tensors,
                 truncation=True,
+                add_special_tokens=False,
             )
             output_batch["input_ids"] = tokenized_sources["input_ids"]
             output_batch["attention_mask"] = tokenized_sources["attention_mask"]
@@ -359,6 +361,7 @@ class DefaultCollator(PackedMixin):
                     padding=self.padding,
                     return_tensors=self.return_tensors,
                     truncation=True,
+                    add_special_tokens=False,
                 )
             else:
                 tokenized_sources = self.tokenizer(
@@ -367,6 +370,7 @@ class DefaultCollator(PackedMixin):
                     padding=self.padding,
                     return_tensors=self.return_tensors,
                     truncation=True,
+                    add_special_tokens=False,
                 )
 
             tok_sources_plus_labels = self.tokenizer(
@@ -376,18 +380,21 @@ class DefaultCollator(PackedMixin):
                 return_tensors=self.return_tensors,
                 truncation=True,
                 pad_to_multiple_of=self.pad_to_multiple_of,
+                add_special_tokens=False,
             )
         else:
             tokenized_sources = self.tokenizer(
                 sources,
                 padding="longest",
                 return_tensors=self.return_tensors,
+                add_special_tokens=False,
             )
             tok_sources_plus_labels = self.tokenizer(
                 [i + t for i, t in zip(sources, labels)],
                 padding="longest",
                 return_tensors=self.return_tensors,
                 pad_to_multiple_of=self.pad_to_multiple_of,
+                add_special_tokens=False,
             )
 
         targets = tok_sources_plus_labels["input_ids"].clone()
