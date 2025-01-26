@@ -1,7 +1,8 @@
 {
     "loss_function": "lm",
     "dataset_type": "doc_km",
-    "dataset": "az://mttldata/quality-summaries-qa-llama-8b-instruct",
+    "dataset": "az://mttldata/quality-sanitized",
+    "overwrite_output_dir": true,
     "padding_side": "right",
     "truncation_side": "left",
     "evaluate_on": "quality",
