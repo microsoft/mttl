@@ -23,7 +23,7 @@ from mttl.logging import logger, setup_logging
 from mttl.models.containers.selectors.km_selector import (
     KnowledgeExtractorSelectorConfig,
 )
-from mttl.models.expert_model import MoEModel
+from mttl.models.expert_model import MoEModel, MultiExpertModel, MultiExpertModelConfig
 from mttl.models.km_model import KEMoEModelConfig
 from mttl.models.library.expert import load_expert
 from mttl.models.library.expert_library import ExpertLibrary
@@ -37,17 +37,10 @@ from projects.kms.train_km_simple import (
 
 @dataclass
 class QAEvalArguments(MultiExpertConfig):
-    ke_expert_name: str = "KE"
     # split
     split: str = "test"
-    # Where to load the KE expert from
-    ke_hf_path: str = None
     # Which datamodule to use
     evaluate_on: str = None
-    # Default router should be ke selector
-    router_selector: str = "ke_selector"
-    # By default, we don't throw an error if the KE expert is not found
-    allow_missing_ke: bool = True
     # whether to print evluator input / output
     verbose: bool = False
 
@@ -61,17 +54,11 @@ def eval_qa(training_args):
 
     remote_login(training_args.remote_token, raise_error=False)
 
-    # Build model (will have 0 experts if `library_id` is None)
-    model_config = KEMoEModelConfig(
-        base_model=training_args.model,
-        library_id=None,
-        expert_selection=training_args.finetune_task_name,
-        selector_config=training_args.selector_config,
-    )
-
-    # create a model without any experts
     device = get_device()
-    model = MoEModel(
+    model_config = MultiExpertModelConfig(
+        base_model=training_args.model,
+    )
+    model = MultiExpertModel(
         model_config,
         precision=training_args.precision,
         attn_implementation=training_args.attn_implementation,
@@ -96,11 +83,7 @@ def eval_qa(training_args):
             training_args.library_id, selection=expert_selection
         )
         model.add_experts_from_library(expert_lib)
-
-    # We first try to load a QA expert if provided
-    if training_args.ke_hf_path:
-        ke_expert = load_expert(training_args.ke_hf_path)
-        model.add_expert_instance(ke_expert, expert_name=training_args.ke_expert_name)
+        print("Loaded: ", len(model.experts_names))
 
     result = evaluator.evaluate(
         model,

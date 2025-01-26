@@ -1,41 +1,24 @@
 #!/bin/bash
 
-MAX_RETRIES=3
-
 run_training() {
   local doc_id=$1
   local gpu=$2
   local config_file=$3
   local output_dir=$4
 
-  # Skip if last_model already exists
+  mkdir -p "$output_dir/$doc_id"
+
+  CUDA_VISIBLE_DEVICES=$gpu python train_km_simple.py \
+    -c "$config_file" \
+    -k finetune_task_name="$doc_id" \
+    -k wandb_run_name="$AMLT_EXPERIMENT_NAME-$doc_id" \
+    -k output_dir="$output_dir/$doc_id"
+
   if [ -e "$output_dir/$doc_id/last_model" ]; then
-    echo "Model for $doc_id already exists. Skipping."
+    echo "Training for $doc_id succeeded."
     return 0
   fi
 
-  local attempt=1
-  while [ $attempt -le $MAX_RETRIES ]; do
-    echo "Starting attempt $attempt for $doc_id on GPU $gpu"
-
-    mkdir -p "$output_dir/$doc_id"
-
-    CUDA_VISIBLE_DEVICES=$gpu python train_km_simple.py \
-      -c "$config_file" \
-      -k finetune_task_name="$doc_id" \
-      -k wandb_run_name="$AMLT_EXPERIMENT_NAME-$doc_id" \
-      -k output_dir="$output_dir/$doc_id"
-
-    if [ $? -eq 0 ]; then
-      echo "Training for $doc_id succeeded."
-      return 0
-    fi
-
-    echo "Training for $doc_id failed (attempt $attempt)."
-    attempt=$((attempt + 1))
-  done
-
-  echo "Exceeded max retries for $doc_id. Skipping."
   return 1
 }
 
@@ -97,31 +80,49 @@ wait_for_slot() {
   done
 }
 
+# Function to understand if we have already trained the model
+count_last_models() {
+  find "$OUTPUT_DIR" -type d -name "last_model" | wc -l
+}
+
+DOC_ARRAY=($DOCUMENT_IDS)
+TOTAL_DOCS=${#DOC_ARRAY[@]}
+
 GPU_INDEX=0
-PIDS=()
+while :; do
+  COMPLETED=$(count_last_models)
+  echo "Completed models: $COMPLETED / $TOTAL_DOCS"
 
-IFS=$'\n'
-for DOC_ID in $DOCUMENT_IDS; do
-    wait_for_slot
+  if [ "$COMPLETED" -ge "$TOTAL_DOCS" ]; then
+    echo "All documents have last_model. Done."
+    break
+  fi
 
-    GPU=$((GPU_INDEX % NUM_GPUS_PER_NODE))
-    GPU_INDEX=$((GPU_INDEX + 1))
+  for DOC_ID in $DOCUMENT_IDS; do
+      if [ ! -e "$OUTPUT_DIR/$DOC_ID/last_model" ]; then
+        wait_for_slot
 
-    echo "Starting training for $DOC_ID on GPU $GPU."
-    
-    # Launch training in the background on a specific GPU
-    run_training "$DOC_ID" "$GPU" "$CONFIG_FILE" "$OUTPUT_DIR" &
+        GPU=$((GPU_INDEX % NUM_GPUS_PER_NODE))
+        GPU_INDEX=$((GPU_INDEX + 1))
+
+        echo "Starting training for $DOC_ID on GPU $GPU."
+
+        # Launch training in the background on a specific GPU
+        run_training "$DOC_ID" "$GPU" "$CONFIG_FILE" "$OUTPUT_DIR" &
+        sleep 1
+      else
+        echo "Model for $DOC_ID already exists. Skipping."
+      fi
+  done
+
+  # Wait for all background jobs to complete
+  wait
 done
 
-# Wait for all background jobs to complete
-wait
+
 echo "All training processes finished."
 
 # Now create a library of the best models
 python utils/create_library_from_path.py \
   --ckpt_path ${OUTPUT_DIR} \
   --library_path local:///mnt/output/kms/library-${CONFIG_ID}
-
-python utils/create_library_from_path.py \
-  --ckpt_path ${OUTPUT_DIR} \
-  --library_path az://mttldata/library-${CONFIG_ID}
