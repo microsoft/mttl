@@ -18,6 +18,8 @@ from mttl.models.library.dataset_library import DatasetLibrary
 class KMDatasetConfig(DatasetConfig):
     # there might be multiple types, i.e. "qa", "summary", or "next_chunk" or maybe else in the future
     use_only_type: str = "summary"
+    # if True, we will use the chat template to generate the prompt
+    use_chat_template: bool = True
     # for each input example, we could have several outputs (e.g. several summaries or QA pairs), we can only use N of these
     num_outputs_per_chunk: int = -1
     # field in the dataset that contains the task name
@@ -85,7 +87,7 @@ class KMDatasetModule(DataModule):
                 input = example["input"][i]
                 outputs = example["outputs"][i]
                 type_ = example["type"][i]
-                subject = example[self.config.task_name_field][i]
+                document = example[self.config.task_name_field][i]
 
                 if type_ not in allowed_types:
                     if type_ == "qa" and "q" in allowed_types:
@@ -124,14 +126,6 @@ class KMDatasetModule(DataModule):
                             else:
                                 prompt_str = "Summarize the preceding passage."
                             output_str = output["summary"]
-                        elif type_ == "next_chunk":
-                            if self.config.flip_inputs_outputs:
-                                raise ValueError(
-                                    "Cannot flip inputs and outputs for `next_chunk`"
-                                )
-                            else:
-                                prompt_str = "Generate the continuation of the previous passage, make sure to keep the same style and narrative flow."
-                            output_str = output["next_chunk"]
                     else:
                         # fallback to default prompt
                         if type_ == "qa":
@@ -144,13 +138,6 @@ class KMDatasetModule(DataModule):
                                 prompt_str = "Generate a passage which can be summarized as follows."
                             else:
                                 prompt_str = "Summarize the preceding passage."
-                        elif type_ == "next_chunk":
-                            if self.config.flip_inputs_outputs:
-                                raise ValueError(
-                                    "Cannot flip inputs and outputs for `next_chunk`"
-                                )
-                            else:
-                                prompt_str = "Generate the continuation of the previous passage, make sure to keep the same style and narrative flow."
                         else:
                             raise ValueError(
                                 f"For legacy dataset, only qa, summary and next_chunk are supported!"
@@ -162,7 +149,7 @@ class KMDatasetModule(DataModule):
                     if self.config.flip_inputs_outputs:
                         input, output_str = output_str, input
 
-                    if self.tokenizer.chat_template is not None:
+                    if self.config.use_chat_template:
                         source_str = self.tokenizer.apply_chat_template(
                             [
                                 {
@@ -175,13 +162,12 @@ class KMDatasetModule(DataModule):
                         )
                     else:
                         source_str = input + "\n\n" + prompt_str
-
                     nc_source_str = source_str[source_str.find(prompt_str) :]
 
                     return_dict["source"].append(source_str)
                     return_dict["target"].append(output_str)
                     return_dict["nc_source"].append(nc_source_str)
-                    return_dict[self.config.task_name_field].append(subject)
+                    return_dict[self.config.task_name_field].append(document)
             return return_dict
 
         (
