@@ -18,7 +18,7 @@
     "modify_layers": "q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj",
     "trainable_param_names": ".*lora_[ab].*",
     "learning_rate": 1e-3,
-    "micro_batch_size": 8,
+    "micro_batch_size": 4,
     "train_batch_size": 8,
     "predict_batch_size": 16,
     "precision": "bf16",
@@ -31,5 +31,6 @@
     "truncation_side": "left",
     "attn_implementation": "flash_attention_2",
     "evaluate_on": "quality",
-    "task_name_field": "document_id"
+    "task_name_field": "document_id",
+    "eval_after_training": true
 }

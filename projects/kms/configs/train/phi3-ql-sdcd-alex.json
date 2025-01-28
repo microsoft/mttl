@@ -1,8 +1,9 @@
 {
     "loss_function": "dcd",
     "dataset_type": "dcd_km",
-    "evaluate_on": "quality",
-    "overwrite_output_dir": true,
+    "evaluate_on": "quality-rag",
+    "include_context": true,
+    "topk_context": 5,
     "dataset": "az://mttldata/quality-summaries-qa-phi-3-medium",
     "padding_side": "right",
     "truncation_side": "left",
@@ -29,5 +30,7 @@
     "optimizer": "adamw",
     "warmup_proportion": 0.06,
     "attn_implementation": "flash_attention_2",
-    "task_name_field": "document_id"
+    "task_name_field": "document_id",
+    "eval_after_training": false,
+    "patience": 3
 }
