@@ -9,6 +9,8 @@ from tqdm import tqdm
 
 # register this datamodule!
 from projects.kms.utils.km_datamodule import KMDatasetModule
+from projects.kms.utils.nqa_datamodule import NQADatamodule
+from projects.kms.utils.pit_datamodule import PITDatasetModule
 
 # isort: split
 
@@ -50,11 +52,8 @@ from projects.kms.train_km_simple import KMArguments
 
 @dataclass
 class KEArguments(MultiExpertConfig, KMArguments):
-    nqa_dataset: str = None
     # Where to save the KE expert
-    ke_hf_path: str = None
-    # offload experts
-    offload_experts: bool = False
+    ke_uri: str = None
     # max kms
     max_kms: int = None
     # whether to overwrite / force upload of the new expert
@@ -62,7 +61,7 @@ class KEArguments(MultiExpertConfig, KMArguments):
 
 
 def train_ke(training_args):
-    seed_everything(training_args.seed, workers=True)
+    seed_everything(training_args.seed)
 
     # get directory of the current file
     setup_logging(training_args.output_dir)
@@ -95,7 +94,6 @@ def train_ke(training_args):
             library_id=training_args.library_id,
             expert_selection=expert_selection,
             selector_config=training_args.selector_config,
-            offload_experts=training_args.offload_experts,
         )
         model = KEMoEModel(model_config)
 
@@ -158,12 +156,7 @@ def train_ke(training_args):
             datamodule,
             model,
             loss_function,
-            (
-                evaluator
-                if training_args.callback_during_training
-                and not training_args.offload_experts
-                else None
-            ),
+            (evaluator if training_args.callback_during_training else None),
         )
         met_logger.log_metrics(
             {"val_loss": val_loss, eval_metric: eval_score}, step=global_step
@@ -251,12 +244,7 @@ def train_ke(training_args):
                 datamodule,
                 model,
                 loss_function,
-                (
-                    evaluator
-                    if training_args.callback_during_training
-                    and not training_args.offload_experts
-                    else None
-                ),
+                (evaluator if training_args.callback_during_training else None),
             )
 
             met_logger.log_metrics(
@@ -294,7 +282,7 @@ def train_ke(training_args):
     model = model_class.from_pretrained(training_args.output_dir + "/best_model")
 
     # Maybe save to Expert Library
-    if args.ke_hf_path:
+    if args.ke_uri:
         # TODO: make sure that pushing expert in MoE works
         if isinstance(model, KEMoEModel):
             ke_expert = model.get_expert_instance(model.ke_expert_name)
@@ -302,9 +290,27 @@ def train_ke(training_args):
             ke_expert = model.as_expert()
 
         # create a library and upload that expert
-        lib_path, exp_name = args.ke_hf_path.rsplit("/", 1)
+        lib_path, exp_name = args.ke_uri.rsplit("/", 1)
         expert_library = ExpertLibrary.get_expert_library(lib_path, create=True)
         expert_library.add_expert(ke_expert, exp_name, force=True)
+
+    if training_args.eval_after_training:
+        val_loss, eval_score = do_evaluation(
+            datamodule,
+            model,
+            loss_function,
+            evaluator,
+        )
+
+        met_logger.log_metrics(
+            {"val_loss": val_loss, eval_metric: eval_score}, step=global_step
+        )
+
+        logger.info(f"Validation Loss: {val_loss}, {eval_metric}: {eval_score}")
+        logger.info(
+            f"Losses so far: {print_metrics(met_logger.get_metric('val_loss'))}"
+        )
+        logger.info(f"Eval so far: {print_metrics(met_logger.get_metric(eval_metric))}")
 
 
 if __name__ == "__main__":
@@ -317,10 +323,10 @@ if __name__ == "__main__":
     ):
         logger.warning(f"Found expert checkpoint. in {args.output_dir}/last_model")
         exit(0)
-    elif not args.force and args.ke_hf_path:
+    elif not args.force and args.ke_uri:
         try:
-            expert = load_expert(args.ke_hf_path)
-            logger.warning(f"Found expert in {args.ke_hf_path}")
+            expert = load_expert(args.ke_uri)
+            logger.warning(f"Found expert in {args.ke_uri}")
             exit(0)
         except:
             pass
