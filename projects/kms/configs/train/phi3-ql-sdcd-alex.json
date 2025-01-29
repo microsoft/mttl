@@ -1,9 +1,7 @@
 {
     "loss_function": "dcd",
     "dataset_type": "dcd_km",
-    "evaluate_on": "quality-rag",
-    "include_context": true,
-    "topk_context": 5,
+    "evaluate_on": "quality",
     "dataset": "az://mttldata/quality-summaries-qa-phi-3-medium",
     "padding_side": "right",
     "truncation_side": "left",
@@ -31,6 +29,5 @@
     "warmup_proportion": 0.06,
     "attn_implementation": "flash_attention_2",
     "task_name_field": "document_id",
-    "eval_after_training": false,
-    "patience": 3
+    "eval_after_training": true
 }
