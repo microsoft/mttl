@@ -69,18 +69,6 @@ def dcd_loss(
     nc_attention_mask = inputs["nc_attention_mask"]
     nc_valid_idx = nc_labels != -100
 
-    # length of the context!
-    all_length = attention_mask.sum(1)
-    context_length = all_length - nc_attention_mask.sum(1)
-    position_ids = torch.arange(
-        0,
-        nc_input_ids.size(1),
-        device=input_ids.device,
-        dtype=torch.long,
-    )
-
-    position_ids = context_length.unsqueeze(1) + position_ids.unsqueeze(0)
-
     raw_model = (
         model.module
         if isinstance(model, torch.nn.parallel.DistributedDataParallel)
@@ -109,7 +97,6 @@ def dcd_loss(
         output_hidden_states=True,
         return_dict=True,
         task_names=inputs.get("task_names"),
-        position_ids=position_ids,
     )
 
     loss = 0.0

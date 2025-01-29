@@ -18,8 +18,6 @@ from mttl.models.library.dataset_library import DatasetLibrary
 class KMDatasetConfig(DatasetConfig):
     # there might be multiple types, i.e. "qa", "summary", or "next_chunk" or maybe else in the future
     use_only_type: str = "summary"
-    # if True, we will use the chat template to generate the prompt
-    use_chat_template: bool = True
     # for each input example, we could have several outputs (e.g. several summaries or QA pairs), we can only use N of these
     num_outputs_per_chunk: int = -1
     # field in the dataset that contains the task name
@@ -30,6 +28,8 @@ class KMDatasetConfig(DatasetConfig):
     split_train_dev_on: str = None
     # flip inputs and outputs
     flip_inputs_outputs: bool = False
+    # whether to use the context for distillation
+    subsample_context: float = 0.0
 
     def __post_init__(self):
         if self.split_train_dev_on:
@@ -60,6 +60,21 @@ class KMDatasetModule(DataModule):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+    def subsample_string(self, input, max_proportion=0.0):
+        """Subsample a string by a random amount between 0. and max_proportion of len(input)."""
+        if max_proportion == 0.0:
+            return
+
+        input = input.split(" ")
+        proportion = np.random.uniform(0.0, max_proportion)
+        nwords = int(len(input) * proportion)
+
+        if proportion == 0.0:
+            return
+
+        start_idx = np.random.randint(0, len(input) - nwords + 1)
+        return " ".join(input[start_idx : start_idx + nwords])
 
     def setup_dataset(self):
         dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
@@ -99,45 +114,46 @@ class KMDatasetModule(DataModule):
 
                 for i, output in enumerate(outputs):
                     # for QA, we want to show the question as well as the prompt
+                    input_prompt = "Consider the following passage:"
                     if type(output) == dict:
                         if type_ == "qa":
                             if self.config.flip_inputs_outputs:
-                                prompt_str = "Generate a passage containing the preceding question-answer pair."
+                                task_str = "Generate a passage containing the preceding question-answer pair."
                             else:
-                                prompt_str = "Generate a question-answer pair given the preceding passage."
+                                task_str = "Generate a question-answer pair given the preceding passage."
                             output_str = f"\nQuestion: {output['question']}\nAnswer: {output['answer']}"
                         elif type_ == "q":
                             if self.config.flip_inputs_outputs:
-                                prompt_str = "Generate a passage containing the preceding question."
+                                task_str = "Generate a passage containing the preceding question."
                             else:
-                                prompt_str = (
+                                task_str = (
                                     "Generate a question given the preceding passage."
                                 )
                             output_str = output["question"]
                         elif type_ == "a":
                             if self.config.flip_inputs_outputs:
-                                prompt_str = "Generate a passage containing the preceding answer."
+                                task_str = "Generate a passage containing the preceding answer."
                             else:
-                                prompt_str = f"Answer the following question given the preceding passage.\nQuestion: {output['question']}"
+                                task_str = f"Answer the following question given the preceding passage.\nQuestion: {output['question']}"
                             output_str = output["answer"]
                         elif type_ == "summary":
                             if self.config.flip_inputs_outputs:
-                                prompt_str = "Generate a passage which can be summarized by the previous summary."
+                                task_str = "Generate a passage which can be summarized by the previous summary."
                             else:
-                                prompt_str = "Summarize the preceding passage."
+                                task_str = "Summarize the preceding passage."
                             output_str = output["summary"]
                     else:
                         # fallback to default prompt
                         if type_ == "qa":
                             if self.config.flip_inputs_outputs:
-                                prompt_str = "Generate a passage containing the preceding question-answer pair."
+                                task_str = "Generate a passage containing the preceding question-answer pair."
                             else:
-                                prompt_str = "Generate a question-answer pair given the preceding passage."
+                                task_str = "Generate a question-answer pair given the preceding passage."
                         elif type_ == "summary":
                             if self.config.flip_inputs_outputs:
-                                prompt_str = "Generate a passage which can be summarized as follows."
+                                task_str = "Generate a passage which can be summarized as follows."
                             else:
-                                prompt_str = "Summarize the preceding passage."
+                                task_str = "Summarize the preceding passage."
                         else:
                             raise ValueError(
                                 f"For legacy dataset, only qa, summary and next_chunk are supported!"
@@ -149,25 +165,69 @@ class KMDatasetModule(DataModule):
                     if self.config.flip_inputs_outputs:
                         input, output_str = output_str, input
 
-                    if self.config.use_chat_template:
-                        source_str = self.tokenizer.apply_chat_template(
+                    source_str = self.tokenizer.apply_chat_template(
+                        [
+                            {
+                                "role": "user",
+                                "content": input_prompt
+                                + "\n\n"
+                                + input
+                                + "\n\n"
+                                + task_str,
+                            }
+                        ],
+                        tokenize=False,
+                        add_generation_prompt=True,
+                    )
+
+                    if self.config.subsample_context > 0.0:
+                        # we sample 5 times to get a good mix of context lengths
+                        for _ in range(5):
+                            nc_source_str = task_str
+
+                            subsampled_input = self.subsample_string(
+                                input, self.config.subsample_context
+                            )
+                            if subsampled_input:
+                                nc_source_str = (
+                                    input_prompt
+                                    + "\n\n"
+                                    + subsampled_input
+                                    + "\n\n"
+                                    + nc_source_str
+                                )
+
+                            nc_source_str = self.tokenizer.apply_chat_template(
+                                [
+                                    {
+                                        "role": "user",
+                                        "content": nc_source_str,
+                                    }
+                                ],
+                                tokenize=False,
+                                add_generation_prompt=True,
+                            )
+
+                            return_dict["source"].append(source_str)
+                            return_dict["target"].append(output_str)
+                            return_dict["nc_source"].append(nc_source_str)
+                            return_dict[self.config.task_name_field].append(document)
+                    else:
+                        nc_source_str = self.tokenizer.apply_chat_template(
                             [
                                 {
                                     "role": "user",
-                                    "content": input + "\n\n" + prompt_str,
+                                    "content": task_str,
                                 }
                             ],
                             tokenize=False,
                             add_generation_prompt=True,
                         )
-                    else:
-                        source_str = input + "\n\n" + prompt_str
-                    nc_source_str = source_str[source_str.find(prompt_str) :]
 
-                    return_dict["source"].append(source_str)
-                    return_dict["target"].append(output_str)
-                    return_dict["nc_source"].append(nc_source_str)
-                    return_dict[self.config.task_name_field].append(document)
+                        return_dict["source"].append(source_str)
+                        return_dict["target"].append(output_str)
+                        return_dict["nc_source"].append(nc_source_str)
+                        return_dict[self.config.task_name_field].append(document)
             return return_dict
 
         (
