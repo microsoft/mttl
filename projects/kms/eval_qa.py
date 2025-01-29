@@ -20,6 +20,7 @@ from mttl.dist_utils import (
     is_main_process,
 )
 from mttl.logging import logger, setup_logging
+from mttl.models.containers.selectors import TaskNameSelectorConfig
 from mttl.models.containers.selectors.km_selector import (
     KnowledgeExtractorSelectorConfig,
 )
@@ -43,6 +44,8 @@ class QAEvalArguments(MultiExpertConfig):
     evaluate_on: str = None
     # whether to print evluator input / output
     verbose: bool = False
+    # maybe load a trained KE
+    ke_uri: str = None
 
 
 def eval_qa(training_args):
@@ -54,9 +57,19 @@ def eval_qa(training_args):
 
     remote_login(training_args.remote_token, raise_error=False)
 
+    # We want to support 3 use-cases
+    # 1) Only the KM is present --> Resort to TaskNameSelector (default)
+    # 2) Only the KE is present --> Resort to DefaultExpert
+    # 3) Both are present --> Resort to KE
+    if training_args.library_id and training_args.ke_uri:
+        selector_class = KnowledgeExtractorSelectorConfig
+    else:
+        selector_class = TaskNameSelectorConfig
+
     device = get_device()
     model_config = MultiExpertModelConfig(
         base_model=training_args.model,
+        selector_config=selector_class.from_training_config(training_args),
     )
     model = MultiExpertModel(
         model_config,
@@ -85,6 +98,13 @@ def eval_qa(training_args):
         model.add_experts_from_library(expert_lib)
         print("Loaded: ", len(model.experts_names))
 
+    if training_args.ke_uri:
+        ke_expert = load_expert(training_args.ke_uri)
+        model.add_expert_instance(ke_expert, expert_name="KE")
+        if training_args.library_id is None:
+            # set the default expert to the KE
+            model.set_default_expert("KE")
+
     result = evaluator.evaluate(
         model,
         split=args.split,
@@ -98,4 +118,12 @@ def eval_qa(training_args):
 
 if __name__ == "__main__":
     args = QAEvalArguments.parse()
+
+    # check if `metrics.json` exists. If true, we skip the evaluation
+    if os.path.exists(os.path.join(args.output_dir, "metrics.json")):
+        logger.info(
+            f"Skipping evaluation as metrics.json already exists in {args.output_dir}"
+        )
+        exit(0)
+
     eval_qa(args)
