@@ -18,6 +18,7 @@ class QualityDatasetConfig(DatasetConfig):
     )
     include_context: bool = False
     topk_context: int = 10
+    include_all_answers: bool = True
 
 
 @DataModule.register("quality", config_cls=QualityDatasetConfig)
@@ -97,14 +98,29 @@ class QualityDatamodule(MultiChoiceDataModule):
                             }
                         ]
 
-                    batch["source"].append(
-                        tokenizer.apply_chat_template(
-                            source, add_generation_prompt=True, tokenize=False
+                    if self.config.include_all_answers:
+                        batch["source"].append(
+                            tokenizer.apply_chat_template(
+                                source, add_generation_prompt=True, tokenize=False
+                            )
                         )
-                    )
-                    batch["target"].append(options)
-                    batch["label_index"].append(label_index)
-                    batch["document_id"].append(examples["document_id"][i])
+                        batch["target"].append(options)
+                        batch["label_index"].append(label_index)
+                        batch["document_id"].append(examples["document_id"][i])
+                    else:
+                        batch["source"].append(
+                            tokenizer.apply_chat_template(
+                                source, add_generation_prompt=True, tokenize=False
+                            )
+                        )
+                        if label_index is None:
+                            batch["target"].append(None)
+                            batch["label_index"].append(-1)
+                        else:
+                            batch["target"].append([options[label_index]])
+                            batch["label_index"].append(0)
+                        batch["document_id"].append(examples["document_id"][i])
+
             return batch
 
         if self.tokenizer.chat_template is None:
@@ -144,3 +160,13 @@ class QualityDatamodule(MultiChoiceDataModule):
                 remove_columns=train_dataset.column_names,
             )
             self.train_dataset = self.dev_dataset = self.test_dataset = train_dataset
+
+
+@dataclass
+class QualityTrainDatasetConfig(QualityDatasetConfig):
+    include_all_answers: bool = False
+
+
+@DataModule.register("quality_train", config_cls=QualityTrainDatasetConfig)
+class QualityTrainDatamodule(QualityDatamodule):
+    pass
