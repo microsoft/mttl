@@ -181,8 +181,8 @@ class KMDatasetModule(DataModule):
                     )
 
                     if self.config.subsample_context > 0.0:
-                        # we sample 10 times to get a good mix of context lengths
-                        for _ in range(10):
+                        # we sample 5 times to get a good mix of context lengths
+                        for _ in range(5):
                             nc_source_str = task_str
 
                             subsampled_input = self.subsample_string(
