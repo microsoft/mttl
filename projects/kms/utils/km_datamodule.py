@@ -10,7 +10,6 @@ from torch.utils.data import get_worker_info
 
 from mttl.datamodule.base import DataModule, DatasetConfig, DefaultCollator
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task, split_on_split_column
-from mttl.dist_utils import ddp_rank, ddp_world_size
 from mttl.logging import logger
 from mttl.models.library.dataset_library import DatasetLibrary
 
