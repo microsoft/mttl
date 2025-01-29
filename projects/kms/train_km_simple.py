@@ -187,7 +187,6 @@ def train_km(training_args: KMArguments):
             dcd_loss,
             logit_factor=training_args.logit_factor,
             hidden_factor=training_args.hidden_factor,
-            tokenizer=datamodule.tokenizer,
             temp=training_args.temp,
         )
     elif training_args.loss_function == "lm":
