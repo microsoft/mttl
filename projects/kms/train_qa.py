@@ -294,24 +294,6 @@ def train_ke(training_args):
         expert_library = ExpertLibrary.get_expert_library(lib_path, create=True)
         expert_library.add_expert(ke_expert, exp_name, force=True)
 
-    if training_args.eval_after_training:
-        val_loss, eval_score = do_evaluation(
-            datamodule,
-            model,
-            loss_function,
-            evaluator,
-        )
-
-        met_logger.log_metrics(
-            {"val_loss": val_loss, eval_metric: eval_score}, step=global_step
-        )
-
-        logger.info(f"Validation Loss: {val_loss}, {eval_metric}: {eval_score}")
-        logger.info(
-            f"Losses so far: {print_metrics(met_logger.get_metric('val_loss'))}"
-        )
-        logger.info(f"Eval so far: {print_metrics(met_logger.get_metric(eval_metric))}")
-
 
 if __name__ == "__main__":
     args = KEArguments.parse()
