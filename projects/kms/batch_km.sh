@@ -5,6 +5,7 @@ run_training() {
   local gpu=$2
   local config_file=$3
   local output_dir=$4
+  local lock_dir=$5
 
   mkdir -p "$output_dir/$doc_id"
 
@@ -19,8 +20,10 @@ run_training() {
     return 0
   fi
 
+  rm -f "${lock_dir}/${doc_id}.lock"
   return 1
 }
+
 
 # Check if the correct number of arguments is provided
 if [ $# -lt 4 ]; then
@@ -38,6 +41,9 @@ NUM_GPUS_PER_NODE=${5:-1}
 CONFIG_FILE=$CONFIG_FILE
 CONFIG_ID=$(basename $CONFIG_FILE .json)
 OUTPUT_DIR=/mnt/output/kms/${CONFIG_ID}/
+LOCK_DIR=/mnt/output/kms/${CONFIG_ID}-locks/
+
+mkdir -p "$LOCK_DIR"
 
 # Validate that WORKER_ID and NUM_WORKERS are integers
 if ! [[ $WORKER_ID =~ ^[0-9]+$ ]] ; then
@@ -60,15 +66,9 @@ fi
 jq -r '.[] | .[]' "$TASK_FILE" > input.txt
 
 # Extract IDs assigned to this worker
-DOCUMENT_IDS=$(awk -v wid=$WORKER_ID -v nworkers=$NUM_WORKERS '{
-    if ((NR - 1) % nworkers == wid) print $0
+ALL_DOCUMENT_IDS=$(awk '{
+    print $0
 }' "input.txt")
-
-# Check if DOCUMENT_IDS is empty
-if [ -z "$DOCUMENT_IDS" ]; then
-    echo "No documents assigned to worker $WORKER_ID. Exiting."
-    exit 0
-fi
 
 export PYTHONPATH=$PWD/../../
 ls -l $PWD/../../
@@ -85,42 +85,58 @@ count_last_models() {
   find "$OUTPUT_DIR" -type d -name "last_model" | wc -l
 }
 
-DOC_ARRAY=($DOCUMENT_IDS)
-TOTAL_DOCS=${#DOC_ARRAY[@]}
+ALL_DOCUMENT_ARRAY=($ALL_DOCUMENT_IDS)
+ALL_DOCS=${#ALL_DOCUMENT_ARRAY[@]}
 
 GPU_INDEX=0
 while :; do
   COMPLETED=$(count_last_models)
-  echo "Completed models: $COMPLETED / $TOTAL_DOCS"
+  echo "Worker $WORKER_ID sees $COMPLETED / $ALL_DOCS completed."
 
-  if [ "$COMPLETED" -ge "$TOTAL_DOCS" ]; then
-    echo "All documents have last_model. Done."
+  if [ "$COMPLETED" -ge "$ALL_DOCS" ]; then
+    echo "All docs done."
     break
   fi
 
-  for DOC_ID in $DOCUMENT_IDS; do
-      if [ ! -e "$OUTPUT_DIR/$DOC_ID/last_model" ]; then
-        wait_for_slot
+  CLAIMED_DOC=""
+  for DOC_ID in "${ALL_DOCUMENT_ARRAY[@]}"; do
+    if [ -e "$OUTPUT_DIR/$DOC_ID/last_model" ] || [ -e "$LOCK_DIR/$DOC_ID.lock" ]; then
+      continue
+    fi
 
-        GPU=$((GPU_INDEX % NUM_GPUS_PER_NODE))
-        GPU_INDEX=$((GPU_INDEX + 1))
-
-        echo "Starting training for $DOC_ID on GPU $GPU."
-
-        # Launch training in the background on a specific GPU
-        run_training "$DOC_ID" "$GPU" "$CONFIG_FILE" "$OUTPUT_DIR" &
-        sleep 1
-      else
-        echo "Model for $DOC_ID already exists. Skipping."
-      fi
+    if ( set -o noclobber; echo "$WORKER_ID" > "$LOCK_DIR/$DOC_ID.lock" ) 2>/dev/null; then
+      CLAIMED_DOC="$DOC_ID"
+      break
+    fi
   done
 
-  # Wait for all background jobs to complete
-  wait
+  if [ -z "$CLAIMED_DOC" ]; then
+    echo "Worker $WORKER_ID: no doc to claim, waiting..."
+    sleep 5
+    continue
+  fi
+
+  wait_for_slot
+  GPU=$((GPU_INDEX % NUM_GPUS_PER_NODE))
+  GPU_INDEX=$((GPU_INDEX + 1))
+
+  echo "Worker $WORKER_ID starts training $CLAIMED_DOC on GPU $GPU."
+  run_training "$CLAIMED_DOC" "$GPU" "$CONFIG_FILE" "$OUTPUT_DIR" "$LOCK_DIR" &
+  sleep 1
 done
 
+# Wait for all background jobs to complete
+wait
 
 echo "All training processes finished."
+sleep 10
+
+# if count of all models is equal to all documents, and this is worker 0, then we can create the library
+# else we can just exit
+if [ "$WORKER_ID" -ne 0 ]; then
+  echo "Worker $WORKER_ID is not worker 0. Exiting."
+  exit 0
+fi
 
 # Now create a library of the best models
 python utils/create_library_from_path.py \
