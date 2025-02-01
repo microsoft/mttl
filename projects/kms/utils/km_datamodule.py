@@ -135,22 +135,21 @@ class KMDatasetModule(DataModule):
                     if self.config.flip_inputs_outputs:
                         input, output_str = output_str, input
 
-                    no_context_source = self.tokenizer.apply_chat_template(
-                        [
-                            {
-                                "role": "user",
-                                "content": prompt_str,
-                            }
-                        ],
-                        tokenize=False,
-                        add_generation_prompt=True,
-                    )
-
                     context_source = self.tokenizer.apply_chat_template(
                         [
                             {
                                 "role": "user",
                                 "content": input + "\n\n" + prompt_str,
+                            }
+                        ],
+                        tokenize=False,
+                        add_generation_prompt=True,
+                    )
+                    no_context_source = self.tokenizer.apply_chat_template(
+                        [
+                            {
+                                "role": "user",
+                                "content": prompt_str,
                             }
                         ],
                         tokenize=False,
