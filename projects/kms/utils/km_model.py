@@ -33,7 +33,6 @@ class KEMoEModelConfig(MoEModelConfig):
     selector_config: AutoSelectorConfig = None
     # if modifier_config is not None, then we create moe_num_experts with this modifier
     modifier_config: AutoModifierConfig = None
-    offload_experts: bool = False
 
 
 @BaseExpertModel.register("moe_ke", config_cls=KEMoEModelConfig)
@@ -77,42 +76,6 @@ class KEMoEModel(BaseExpertModel, MultiExpertMixin):
             self.ke_expert_name, expert_config=an_expert.expert_config
         )
         logger.info("Added KE expert: %s", self.ke_expert_name)
-
-    @property
-    def lora_containers(self):
-        return [mod for mod in self.modules() if isinstance(mod, LoRAExpertContainer)]
-
-    def forward(self, *args, **kwargs):
-        if self.config.offload_experts:
-            # get active expert numbers
-            active_experts = list(set(kwargs["task_names"] + [self.ke_expert_name]))
-            for lora_container in self.lora_containers:
-                for expert_name in lora_container.expert_names:
-                    device = "cuda" if expert_name in active_experts else "cpu"
-                    lora_container.lora_a[expert_name] = lora_container.lora_a[
-                        expert_name
-                    ].to(device)
-                    lora_container.lora_b[expert_name] = lora_container.lora_b[
-                        expert_name
-                    ].to(device)
-
-        return super().forward(*args, **kwargs)
-
-    # overwrite pytorch's `to(device)` method
-    def to(self, device):
-        if self.config.offload_experts:
-            for buf in self.model.buffers():
-                buf.data = buf.data.to(device)
-            for name, param in self.model.named_parameters():
-                if "lora_a" in name or "lora_b" in name:
-                    # logger.info(f'CPU: Offloading {name}')
-                    param.data = param.data.cpu()
-                else:
-                    logger.info(f"{device}: Offloading {name}")
-                    param.data = param.data.to(device)
-            return self
-        else:
-            return super().to(device)
 
 
 @dataclass

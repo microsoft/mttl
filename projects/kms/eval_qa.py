@@ -25,7 +25,6 @@ from mttl.models.containers.selectors.km_selector import (
     KnowledgeExtractorSelectorConfig,
 )
 from mttl.models.expert_model import MoEModel, MultiExpertModel, MultiExpertModelConfig
-from mttl.models.km_model import KEMoEModelConfig
 from mttl.models.library.expert import load_expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.utils import remote_login
@@ -34,6 +33,7 @@ from projects.kms.train_km_simple import (
     evaluate_datasets,
     evaluate_metrics,
 )
+from projects.kms.utils.km_model import KEMoEModelConfig
 
 
 @dataclass

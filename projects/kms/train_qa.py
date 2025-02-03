@@ -44,10 +44,10 @@ from projects.kms.utils.simple_utils import (
 
 # import Selector before args
 from mttl.models.expert_model import ExpertModel, ExpertModelConfig
-from mttl.models.km_model import KEMoEModel, KEMoEModelConfig
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.utils import remote_login
 from projects.kms.train_km_simple import KMArguments
+from projects.kms.utils.km_model import KEMoEModel, KEMoEModelConfig
 
 
 @dataclass
@@ -201,6 +201,9 @@ def train_ke(training_args):
                 batch = transfer_batch_to_device(batch, device)
                 loss = loss_function(model, batch)
 
+            model.require_backward_grad_sync = (
+                step + 1 == args.gradient_accumulation_steps
+            )
             loss = loss / args.gradient_accumulation_steps
             loss_accum += loss.detach()
             loss.backward()
