@@ -15,12 +15,13 @@ run_training() {
     -k wandb_run_name="$AMLT_EXPERIMENT_NAME-$doc_id" \
     -k output_dir="$output_dir/$doc_id"
 
+  rm -f "${lock_dir}/${doc_id}.lock"
+
   if [ -e "$output_dir/$doc_id/last_model" ]; then
     echo "Training for $doc_id succeeded."
     return 0
   fi
 
-  rm -f "${lock_dir}/${doc_id}.lock"
   return 1
 }
 

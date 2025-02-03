@@ -6,5 +6,6 @@
     "dataset_type": "quality",
     "learning_rate": 1e-4,
     "dataset": "az://mttldata/quality-sanitized",
-    "micro_batch_size": 2
+    "micro_batch_size": 2,
+    "predict_batch_size": 1
 }
