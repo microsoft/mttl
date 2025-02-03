@@ -150,6 +150,7 @@ def train_ke(training_args):
     )
 
     global_step = 0
+    best_score = eval_score = 0
     best_val = val_loss = float("inf")
     met_logger = SimpleLogger(training_args.output_dir)
 
@@ -269,8 +270,9 @@ def train_ke(training_args):
                 f"Eval so far: {print_metrics(met_logger.get_metric(eval_metric))}"
             )
 
-            if eval_score > best_val and is_main_process():
-                best_val = eval_score
+            if val_loss < best_val and is_main_process():
+                best_val = val_loss
+                best_score = eval_score
                 model.save_pretrained(training_args.output_dir + "/best_model")
                 training_args.save_config(training_args.output_dir + "/best_model")
                 logger.info(f"Saving model to {training_args.output_dir}")
@@ -288,7 +290,7 @@ def train_ke(training_args):
         training_args.save_config(training_args.output_dir + "/last_model")
 
         met_logger.log_metrics(
-            {"best_val": best_val, "final_val": eval_score}, step=global_step
+            {"best_val": best_val, "best_score": best_score}, step=global_step
         )
 
     # Maybe save to Expert Library
