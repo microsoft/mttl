@@ -32,6 +32,7 @@ from projects.kms.train_km_simple import (
     evaluate_datasets,
     evaluate_metrics,
 )
+from projects.kms.utils.quality_datamodule import QualityDatamodule
 from projects.kms.utils.simple_utils import (
     EarlyStopper,
     SimpleLogger,
@@ -134,7 +135,8 @@ def train_ke(training_args):
     )
 
     # For KE training, loss function is always LM
-    loss_function = mc_loss if "quality" in training_args.dataset else lm_loss
+    is_quality = isinstance(datamodule, QualityDatamodule)
+    loss_function = mc_loss if is_quality else lm_loss
 
     # compute number of trainable parameters
     num_trainable_params = sum(
