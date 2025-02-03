@@ -121,8 +121,8 @@ def test_hard_prompt(padding_side, dm_batch):
         )
         inputs_and_prompts, attn_masks, labels_and_prompts = new_inputs
         assert tokenizer.batch_decode(inputs_and_prompts) == [
-            "This is a test prompt\nThis is a dev sentence a <|endoftext|>",
-            "Test test\nThis is dev b <|endoftext|>" + "<|endoftext|>" * padding_size,
+            "This is a test prompt\nThis is a dev sentence a<|endoftext|>",
+            "Test test\nThis is dev b<|endoftext|>" + "<|endoftext|>" * padding_size,
         ]
         assert torch.equal(
             attn_masks,
