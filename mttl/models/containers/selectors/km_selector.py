@@ -1,5 +1,7 @@
 from dataclasses import dataclass, field
 
+import torch
+
 from mttl.logging import warn_once
 from mttl.models.containers.selectors.base import (
     Selector,
@@ -14,8 +16,6 @@ from mttl.models.containers.selectors.selector_output import (
 
 @dataclass
 class KnowledgeExtractorSelectorConfig(SelectorConfig):
-    # name of the field matching the expert names
-    field_name: str = "task_names"
     # name of the KE expert
     ke_expert_name: str = "KE"
     # Optionally support the case when a KM is missing
@@ -26,13 +26,12 @@ class KnowledgeExtractorSelectorConfig(SelectorConfig):
 
 @Selector.register("ke_selector", KnowledgeExtractorSelectorConfig)
 class KnowledgeExtractorSelector(Selector):
+    """Offloads experts to CPUs given that it is likely to go OOM."""
+
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchExpertsSelectorOutput:
 
-        assert self.routing_infos and hasattr(
-            self.routing_infos, self.config.field_name
-        )
-        task_names = getattr(self.routing_infos, self.config.field_name)
+        task_names = self.routing_infos.task_names
 
         # Make sure there's only one KE expert
         assert (
