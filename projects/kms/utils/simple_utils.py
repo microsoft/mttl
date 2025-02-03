@@ -13,7 +13,7 @@ from mttl.dist_utils import (
 )
 from mttl.logging import logger
 from mttl.models.expert_model import disable_modifiers
-from mttl.models.utils import transfer_batch_to_device
+from mttl.models.utils import compute_loglike_loss, transfer_batch_to_device
 
 
 def print_metrics(data):
@@ -45,6 +45,47 @@ def print_metrics(data):
         return "".join(spark_chars[idx] for idx in scaled_data)
     except:
         return "<error>"
+
+
+def mc_loss(
+    model,
+    inputs,
+    temp=1.0,
+):
+    """
+    Multiple choice training loss, we normalize the log-likelihood of each answer,
+    and compute cross-entropy on the correct label.
+    """
+    import numpy as np
+
+    input_ids = inputs["input_ids"]
+    labels = inputs[f"labels"]
+    attention_mask = inputs[f"attention_mask"]
+    num_options = inputs["num_options"]
+    labels_index = inputs["labels_index"]
+
+    outputs = model(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        task_names=inputs.get("task_names"),
+    )
+    loss_per_option = compute_loglike_loss(
+        outputs.logits,
+        labels,
+        reduction="none",
+        normalize_length=True,
+    )
+    loss_per_example = [
+        loss_per_option[
+            int(np.sum(num_options[:i])) : int(np.sum(num_options[: i + 1]))
+        ]
+        for i in range(len(labels_index))
+    ]
+    loss_per_example = [
+        -torch.log_softmax(-option_losses, dim=0)[labels_index[i]]
+        for i, option_losses in enumerate(loss_per_example)
+    ]
+    return torch.stack(loss_per_example).mean()
 
 
 def dcd_loss(

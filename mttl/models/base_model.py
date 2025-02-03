@@ -124,6 +124,13 @@ class BaseExpertModel(torch.nn.Module, Registrable, PushToHubMixin):
         )
         return output_model_file, output_config_file
 
+    def load_weights(self, save_directory: str):
+        """Reload the weights from a saved directory."""
+        state_dict = torch.load(
+            os.path.join(save_directory, WEIGHTS_NAME), map_location=self.device
+        )
+        self.load_state_dict(state_dict, strict=False)
+
     @classmethod
     def from_pretrained(
         cls,

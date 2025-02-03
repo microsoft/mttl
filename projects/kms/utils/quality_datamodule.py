@@ -106,7 +106,6 @@ class QualityDatamodule(MultiChoiceDataModule):
                         )
                         batch["target"].append(options)
                         batch["label_index"].append(label_index)
-                        batch["document_id"].append(examples["document_id"][i])
                     else:
                         batch["source"].append(
                             tokenizer.apply_chat_template(
@@ -119,8 +118,7 @@ class QualityDatamodule(MultiChoiceDataModule):
                         else:
                             batch["target"].append([options[label_index]])
                             batch["label_index"].append(0)
-                        batch["document_id"].append(examples["document_id"][i])
-
+                    batch["document_id"].append(examples["document_id"][i])
             return batch
 
         if self.tokenizer.chat_template is None:

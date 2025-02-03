@@ -37,6 +37,7 @@ from projects.kms.utils.simple_utils import (
     SimpleLogger,
     do_evaluation,
     lm_loss,
+    mc_loss,
     print_metrics,
 )
 
@@ -123,14 +124,13 @@ def train_ke(training_args):
 
     if is_dist_avail_and_initialized():
         model.model = DDP(model.model, device_ids=[get_local_rank()])
-        raw_model = model.model.module
 
     (optimizer, scheduler), _ = get_optimizer_and_scheduler(
         model, training_args, num_train_examples=len(datamodule.train_dataset)
     )
 
     # For KE training, loss function is always LM
-    loss_function = lm_loss
+    loss_function = mc_loss if "quality" in training_args.dataset else lm_loss
 
     # compute number of trainable parameters
     num_trainable_params = sum(
@@ -265,7 +265,7 @@ def train_ke(training_args):
 
             if val_loss < best_val and is_main_process():
                 best_val = val_loss
-                raw_model.save_pretrained(training_args.output_dir + "/best_model")
+                model.save_pretrained(training_args.output_dir + "/best_model")
                 training_args.save_config(training_args.output_dir + "/best_model")
                 logger.info(f"Saving model to {training_args.output_dir}")
 
@@ -277,8 +277,9 @@ def train_ke(training_args):
             break
 
     # Also save last model
-    raw_model.save_pretrained(training_args.output_dir + "/last_model")
-    training_args.save_config(training_args.output_dir + "/last_model")
+    if is_main_process():
+        raw_model.save_pretrained(training_args.output_dir + "/last_model")
+        training_args.save_config(training_args.output_dir + "/last_model")
 
     # Can we load the best model and evaluate it ?
     model_class = type(model)
@@ -286,8 +287,7 @@ def train_ke(training_args):
     model = model_class.from_pretrained(training_args.output_dir + "/best_model")
 
     # Maybe save to Expert Library
-    if args.ke_uri:
-        # TODO: make sure that pushing expert in MoE works
+    if args.ke_uri and is_main_process():
         if isinstance(model, KEMoEModel):
             ke_expert = model.get_expert_instance(model.ke_expert_name)
         else:
