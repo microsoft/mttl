@@ -122,7 +122,8 @@ def train_ke(training_args):
     raw_model = model = model.to(device)
 
     if is_dist_avail_and_initialized():
-        model = DDP(model, device_ids=[get_local_rank()])
+        model.model = DDP(model.model, device_ids=[get_local_rank()])
+        raw_model = model.model.module
 
     (optimizer, scheduler), _ = get_optimizer_and_scheduler(
         model, training_args, num_train_examples=len(datamodule.train_dataset)
