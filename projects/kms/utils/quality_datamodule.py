@@ -142,13 +142,7 @@ class QualityDatamodule(MultiChoiceDataModule):
                 num_proc=1,
                 remove_columns=train_dataset.column_names,
             )
-            self.test_dataset = self.test_dataset.map(
-                lambda examples: expand_questions(examples, self.tokenizer),
-                batched=True,
-                batch_size=1000,
-                num_proc=1,
-                remove_columns=train_dataset.column_names,
-            )
+            self.test_dataset = self.dev_dataset
         else:
             train_dataset = train_dataset.map(
                 lambda examples: expand_questions(examples, self.tokenizer),
@@ -158,13 +152,3 @@ class QualityDatamodule(MultiChoiceDataModule):
                 remove_columns=train_dataset.column_names,
             )
             self.train_dataset = self.dev_dataset = self.test_dataset = train_dataset
-
-
-@dataclass
-class QualityTrainDatasetConfig(QualityDatasetConfig):
-    include_all_answers: bool = False
-
-
-@DataModule.register("quality_train", config_cls=QualityTrainDatasetConfig)
-class QualityTrainDatamodule(QualityDatamodule):
-    pass
