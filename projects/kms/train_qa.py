@@ -119,6 +119,10 @@ def train_ke(training_args):
             attn_implementation=training_args.attn_implementation,
         )
 
+    # deactivate use_cache for Phi
+    if "Phi" in args.model:
+        model.model.config.use_cache = False
+
     device = get_device()
     raw_model = model = model.to(device)
 
