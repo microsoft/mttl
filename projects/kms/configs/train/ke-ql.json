@@ -1,0 +1,10 @@
+{
+    "eval_every": 50,
+    "save_every": 50,
+    "total_steps": 500,
+    "router_selector": "ke_selector",
+    "dataset_type": "quality",
+    "learning_rate": 1e-4,
+    "dataset": "az://mttldata/quality-sanitized",
+    "micro_batch_size": 2
+}
