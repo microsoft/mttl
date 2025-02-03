@@ -263,8 +263,8 @@ def train_ke(training_args):
                 f"Eval so far: {print_metrics(met_logger.get_metric(eval_metric))}"
             )
 
-            if val_loss < best_val and is_main_process():
-                best_val = val_loss
+            if eval_score > best_val and is_main_process():
+                best_val = eval_score
                 model.save_pretrained(training_args.output_dir + "/best_model")
                 training_args.save_config(training_args.output_dir + "/best_model")
                 logger.info(f"Saving model to {training_args.output_dir}")
@@ -281,10 +281,9 @@ def train_ke(training_args):
         raw_model.save_pretrained(training_args.output_dir + "/last_model")
         training_args.save_config(training_args.output_dir + "/last_model")
 
-    # Can we load the best model and evaluate it ?
-    model_class = type(model)
-    del model
-    model = model_class.from_pretrained(training_args.output_dir + "/best_model")
+        met_logger.log_metrics(
+            {"best_val": best_val, "final_val": eval_score}, step=global_step
+        )
 
     # Maybe save to Expert Library
     if args.ke_uri and is_main_process():
