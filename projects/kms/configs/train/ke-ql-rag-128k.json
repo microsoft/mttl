@@ -10,5 +10,6 @@
     "topk_context": 5,
     "custom_split_file": "splits/quality/quality_full.json",
     "micro_batch_size": 1,
-    "predict_batch_size": 1
+    "predict_batch_size": 1,
+    "max_input_length": 128000
 }

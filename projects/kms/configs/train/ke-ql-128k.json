@@ -8,5 +8,6 @@
     "dataset": "az://mttldata/quality-sanitized",
     "learning_rate": 1e-4,
     "micro_batch_size": 2,
-    "predict_batch_size": 1
+    "predict_batch_size": 1,
+    "max_input_length": 128000
 }
