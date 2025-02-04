@@ -218,8 +218,12 @@ class SimpleLogger:
         self.output_file = os.path.join(output_dir, "metrics.json")
         os.makedirs(output_dir, exist_ok=True)
 
-        if os.path.exists(self.output_file):
-            os.remove(self.output_file)
+        try:
+            if os.path.exists(self.output_file):
+                with open(self.output_file, "w") as f:
+                    pass
+        except:
+            pass
 
     def get_metric(self, metric_name):
         try:

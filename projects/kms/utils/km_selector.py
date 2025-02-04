@@ -20,8 +20,10 @@ class KnowledgeExtractorSelectorConfig(SelectorConfig):
     ke_expert_name: str = "KE"
     # Optionally support the case when a KM is missing
     allow_missing_kms: bool = False
-    # only need a single selecter
-    router_granularity = "coarsegrained"
+    # only need a single selector
+    router_granularity: str = "coarsegrained"
+    # merge after
+    lora_merge_after: bool = True
 
 
 @Selector.register("ke_selector", KnowledgeExtractorSelectorConfig)
@@ -46,7 +48,7 @@ class KnowledgeExtractorSelector(Selector):
         assert len(missing_km_idx) == 0 or self.config.allow_missing_kms, breakpoint()
 
         # given a `batch_size` list of task names, we build a `batch_size` list of [ke_expert_name, expert_i_name]
-        weights = input.new_ones(size=(len(task_names), 2)).fill_(0.5)
+        weights = input.new_ones(size=(len(task_names), 2)).fill_(1.0)
         expert_names = [
             (
                 [self.config.ke_expert_name, task_names[i]]

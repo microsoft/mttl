@@ -10,9 +10,6 @@ from mttl.models.containers.selectors.base import (
     AutoSelectorConfig,
     DefaultExpertSelectorConfig,
 )
-from mttl.models.containers.selectors.km_selector import (
-    KnowledgeExtractorSelectorConfig,
-)
 from mttl.models.containers.selectors.poly_selector import PolySelectorConfig
 from mttl.models.expert_model import (
     BaseExpertModel,
@@ -22,6 +19,7 @@ from mttl.models.expert_model import (
 )
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.modifiers.base import AutoModifierConfig
+from projects.kms.utils.km_selector import KnowledgeExtractorSelectorConfig
 
 
 @dataclass

@@ -1,22 +1,19 @@
 from typing import Dict
 
-import tqdm
-from mttl.models.base_model import BaseExpertModel
-from mttl.models.expert_model import ExpertModel
-import torch
 import numpy as np
-
-from mttl.dataloader.ni_metrics import compute_metrics
+import torch
+import tqdm
 from transformers import DynamicCache
 
 from mttl.arguments import create_config_class_from_args
+from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.datamodule.base import DataModule, DatasetConfig
 from mttl.datamodule.utils import get_tokenizer, maybe_filter_hf_dataset_by_task
 from mttl.dist_utils import (
     distributed_mean,
-    is_main_process,
-    get_world_size,
     get_local_rank,
+    get_world_size,
+    is_main_process,
 )
 from mttl.evaluators.base import (
     GenerationOutput,
@@ -25,17 +22,22 @@ from mttl.evaluators.base import (
 )
 from mttl.evaluators.loglike_evaluator import LogLikeEvaluator
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
-from mttl.logging import warn_once, logger
-
+from mttl.logging import logger, warn_once
+from mttl.models.base_model import BaseExpertModel
+from mttl.models.expert_model import ExpertModel
 from projects.kms.utils.nqa_datamodule import NQADatamodule, NQADatasetConfig
 
 
 class NQAZeroShotEvaluator(RougeEvaluator):
     def __init__(self, dataset_args: "DataArgs", generation_kwargs: Dict = {}):
+        import copy
+
         from mttl.datamodule.base import get_datamodule
 
-        dataset_args.dataset_type = "narrativeqa"
-        datamodule = get_datamodule(dataset_args, for_generation=True)
+        copy_args = copy.deepcopy(dataset_args)
+        copy_args.dataset_type = "narrativeqa"
+
+        datamodule = get_datamodule(copy_args, for_generation=True)
         super().__init__(datamodule, generation_kwargs=generation_kwargs)
 
     def evaluate(self, model, split=None, **kwargs):
@@ -71,9 +73,7 @@ class SharedNQAEvaluator(NQAZeroShotEvaluator):
         # don't expand questions for this evaluator
         self.config = dataset_args
         self.config.expand_questions = False
-        self.datamodule = NQADatamodule(
-            self.config, for_generation=True
-        )
+        self.datamodule = NQADatamodule(self.config, for_generation=True)
         self.ctx_lengths = []
         self.cmp_lengths = []
 
@@ -235,6 +235,7 @@ class SharedNQAEvaluator(NQAZeroShotEvaluator):
 
     def shard_by_local_rank(self, dataset):
         import math
+
         num_procs = get_world_size()
         total_len = len(dataset)
         shard_size = math.ceil(total_len / num_procs)
@@ -257,7 +258,7 @@ class SharedNQAEvaluator(NQAZeroShotEvaluator):
     ):
         if shuffle:
             logger.info("Shuffle is not supported for this evaluator.")
-        
+
         dataset = getattr(self.datamodule, f"{split}_dataset")
 
         # shard the dataset across processes manually
@@ -294,11 +295,7 @@ class SharedNQAEvaluator(NQAZeroShotEvaluator):
                 forward_kwargs = {}
 
             with torch.no_grad():
-                model(
-                    input_ids=context_ids,
-                    past_key_values=cache,
-                    **forward_kwargs
-                )
+                model(input_ids=context_ids, past_key_values=cache, **forward_kwargs)
 
             self.ctx_lengths.append(context_length)
             self.cmp_lengths.append(cache.get_seq_length())
@@ -321,7 +318,9 @@ class SharedNQAEvaluator(NQAZeroShotEvaluator):
             all_rougeL.extend(eval_metrics["rougeL"])
 
             if verbose:
-                logger.info("Source:\n%s", self.datamodule.tokenizer.decode(context_ids[0]))
+                logger.info(
+                    "Source:\n%s", self.datamodule.tokenizer.decode(context_ids[0])
+                )
                 logger.info("Question:\n%s", questions[0])
                 logger.info("Label:\n%s", gt_answers[0])
                 logger.info("Prediction:\n%s", gen_answers[0])

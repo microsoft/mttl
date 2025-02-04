@@ -21,9 +21,6 @@ from mttl.dist_utils import (
 )
 from mttl.logging import logger, setup_logging
 from mttl.models.containers.selectors import TaskNameSelectorConfig
-from mttl.models.containers.selectors.km_selector import (
-    KnowledgeExtractorSelectorConfig,
-)
 from mttl.models.expert_model import MoEModel, MultiExpertModel, MultiExpertModelConfig
 from mttl.models.library.expert import load_expert
 from mttl.models.library.expert_library import ExpertLibrary
@@ -34,6 +31,7 @@ from projects.kms.train_km_simple import (
     evaluate_metrics,
 )
 from projects.kms.utils.km_model import KEMoEModelConfig
+from projects.kms.utils.km_selector import KnowledgeExtractorSelectorConfig
 
 
 @dataclass

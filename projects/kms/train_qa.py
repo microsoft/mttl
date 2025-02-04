@@ -10,6 +10,7 @@ from tqdm import tqdm
 # register this datamodule!
 from projects.kms.utils.km_datamodule import KMDatasetModule
 from projects.kms.utils.nqa_datamodule import NQADatamodule
+from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator
 from projects.kms.utils.pit_datamodule import PITDatasetModule
 
 # isort: split
@@ -33,6 +34,7 @@ from projects.kms.train_km_simple import (
     evaluate_metrics,
 )
 from projects.kms.utils.quality_datamodule import QualityDatamodule
+from projects.kms.utils.quality_evaluator import QualityEvaluator
 from projects.kms.utils.simple_utils import (
     EarlyStopper,
     SimpleLogger,
@@ -76,10 +78,12 @@ def train_ke(training_args):
     remote_login(training_args.remote_token)
 
     # build evaluator
-    data_args = copy.deepcopy(training_args)
-    data_args.dataset = evaluate_datasets[training_args.evaluate_on]
-    evaluator = evaluate_class[training_args.evaluate_on](data_args)
-    eval_metric = evaluate_metrics[training_args.evaluate_on]
+    if training_args.dataset_type == "quality":
+        eval_metric = "accuracy"
+        evaluator = QualityEvaluator(training_args)
+    elif training_args.dataset_type == "narrativeqa":
+        eval_metric = "rougeL"
+        evaluator = NQAZeroShotEvaluator(training_args)
 
     datamodule = get_datamodule(training_args)
 
