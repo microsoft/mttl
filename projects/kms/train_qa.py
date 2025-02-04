@@ -168,7 +168,7 @@ def train_ke(training_args):
             datamodule,
             model,
             loss_function,
-            (evaluator if training_args.callback_during_training else None),
+            evaluator,
         )
         met_logger.log_metrics(
             {"val_loss": val_loss, eval_metric: eval_score}, step=global_step
@@ -288,14 +288,19 @@ def train_ke(training_args):
         if global_step >= training_args.total_steps:
             break
 
+    # reload the best model
+    raw_model.load_weights(training_args.output_dir + "/best_model")
+
+    val_loss, eval_score = do_evaluation(datamodule, model, loss_function, evaluator)
+    logger.info(f"Final Validation Loss: {val_loss}, {eval_metric}: {eval_score}")
+    met_logger.log_metrics(
+        {"best_val_loss": val_loss, f"best_{eval_metric}": eval_score}, step=global_step
+    )
+
     # Also save last model
     if is_main_process():
         raw_model.save_pretrained(training_args.output_dir + "/last_model")
         training_args.save_config(training_args.output_dir + "/last_model")
-
-        met_logger.log_metrics(
-            {"best_val": best_val, "best_score": best_score}, step=global_step
-        )
 
     # Maybe save to Expert Library
     if args.ke_uri and is_main_process():
