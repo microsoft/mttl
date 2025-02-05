@@ -70,7 +70,7 @@ class KEMoEModel(BaseExpertModel, MultiExpertMixin):
                 "No selector_config provided, defaulting to KnowledgeExtractorSelector"
             )
             config.selector_config = KnowledgeExtractorSelectorConfig(
-                ke_expert_name=config.ke_expert_name, router_granularity="coarsegrained"
+                ke_expert_name=config.ke_expert_name,
             )
         elif not isinstance(config.selector_config, KnowledgeExtractorSelectorConfig):
             raise ValueError(

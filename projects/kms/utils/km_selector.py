@@ -24,11 +24,24 @@ class KnowledgeExtractorSelectorConfig(SelectorConfig):
     router_granularity: str = "coarsegrained"
     # merge after
     lora_merge_after: bool = True
+    # learn w
+    learn_w: bool = False
 
 
 @Selector.register("ke_selector", KnowledgeExtractorSelectorConfig)
 class KnowledgeExtractorSelector(Selector):
     """Offloads experts to CPUs given that it is likely to go OOM."""
+
+    def __init__(self, config, **kwargs):
+        super().__init__(config, **kwargs)
+
+        if self.config.learn_w:
+            self.register_parameter(
+                "KEe_w", torch.nn.Parameter(torch.tensor([1.0]), requires_grad=True)
+            )
+            self.register_parameter(
+                "KEm_w", torch.nn.Parameter(torch.tensor([1.0]), requires_grad=True)
+            )
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchExpertsSelectorOutput:
@@ -48,7 +61,16 @@ class KnowledgeExtractorSelector(Selector):
         assert len(missing_km_idx) == 0 or self.config.allow_missing_kms, breakpoint()
 
         # given a `batch_size` list of task names, we build a `batch_size` list of [ke_expert_name, expert_i_name]
-        weights = input.new_ones(size=(len(task_names), 2)).fill_(1.0)
+        if self.config.learn_w:
+            weights = torch.cat(
+                [
+                    self.KEe_w.unsqueeze(0).repeat(len(task_names), 1),
+                    self.KEm_w.unsqueeze(0).repeat(len(task_names), 1),
+                ],
+                dim=1,
+            )
+        else:
+            weights = input.new_ones(size=(len(task_names), 2)).fill_(1.0)
         expert_names = [
             (
                 [self.config.ke_expert_name, task_names[i]]
