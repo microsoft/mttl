@@ -62,6 +62,8 @@ class KEArguments(MultiExpertConfig, KMArguments):
     max_kms: int = None
     # whether to overwrite / force upload of the new expert
     force: bool = False
+    # keep on cpu
+    cpu_offload: bool = False
 
 
 def train_ke(training_args):
@@ -90,16 +92,19 @@ def train_ke(training_args):
     if training_args.library_id:
         logger.info("Loading expert library: %s", training_args.library_id)
 
-        expert_selection = datamodule.train_task_names + datamodule.dev_task_names
+        expert_selection = datamodule.train_task_names
         if training_args.max_kms:
             random.shuffle(expert_selection)
             expert_selection = expert_selection[: training_args.max_kms]
+
+        expert_selection += datamodule.dev_task_names
 
         model_config = KEMoEModelConfig(
             base_model=training_args.model,
             library_id=training_args.library_id,
             expert_selection=expert_selection,
             selector_config=training_args.selector_config,
+            cpu_offload=training_args.cpu_offload,
         )
         model = KEMoEModel(model_config)
 

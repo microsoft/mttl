@@ -55,15 +55,8 @@ class KEMoEModel(BaseExpertModel, MultiExpertMixin):
             ]
 
             for lora_container in self.experts_containers:
-                for expert_name in lora_container.expert_names:
-                    device = "cuda" if expert_name in active_experts else "cpu"
-                    if lora_container.lora_a[expert_name].device != device:
-                        lora_container.lora_a[expert_name] = lora_container.lora_a[
-                            expert_name
-                        ].to(device)
-                        lora_container.lora_b[expert_name] = lora_container.lora_b[
-                            expert_name
-                        ].to(device)
+                lora_container.lora_a.to("cpu")
+                lora_container.lora_b.to("cpu")
 
         outputs = self.model.forward(
             input_ids, attention_mask=attention_mask, labels=labels, **kwargs

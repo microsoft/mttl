@@ -391,7 +391,7 @@ class SkilledLoRA(LoRA):
         if len(dim_names) != weights.ndim:
             raise ValueError("Not all dimensions are present in the weights tensor.")
 
-        device = skilled_loras[0].lora_a.device
+        device = input.device
         n_skills = skilled_loras[0].lora_a.shape[0]
         assert np.all(skl.n_skills == n_skills for skl in skilled_loras)
 
@@ -413,6 +413,11 @@ class SkilledLoRA(LoRA):
             skilled_loras_b = torch.stack(
                 [lora.lora_b for lora in skilled_loras], dim=0
             )
+
+        # make sure the skilled loras are on the same device as the input
+        if skilled_loras_a.device != device:
+            skilled_loras_a = skilled_loras_a.to(device=device)
+            skilled_loras_b = skilled_loras_b.to(device=device)
 
         expected_dims = ["batch", "sequence", "splits", "experts"]
         for i, dim in enumerate(expected_dims):
