@@ -41,7 +41,7 @@ class KEMoEModel(BaseExpertModel, MultiExpertMixin):
     """MoeModel that can accomodate a Knowledge Extractor"""
 
     def to(self, device):
-        if self.config.offload_experts:
+        if self.config.cpu_offload:
             for buf in self.model.buffers():
                 buf.data = buf.data.to(device)
 
