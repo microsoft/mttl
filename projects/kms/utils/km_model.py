@@ -1,6 +1,6 @@
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import List
+from typing import List, Union
 
 import torch
 
@@ -11,6 +11,7 @@ from mttl.models.containers.selectors.base import (
     DefaultExpertSelectorConfig,
 )
 from mttl.models.containers.selectors.poly_selector import PolySelectorConfig
+from mttl.models.expert_context import InfoContainer
 from mttl.models.expert_model import (
     BaseExpertModel,
     ExpertModelConfig,
@@ -31,14 +32,58 @@ class KEMoEModelConfig(MoEModelConfig):
     selector_config: AutoSelectorConfig = None
     # if modifier_config is not None, then we create moe_num_experts with this modifier
     modifier_config: AutoModifierConfig = None
+    # if cpu_offload is True, then we offload the computation to the CPU
+    cpu_offload: bool = False
 
 
 @BaseExpertModel.register("moe_ke", config_cls=KEMoEModelConfig)
 class KEMoEModel(BaseExpertModel, MultiExpertMixin):
     """MoeModel that can accomodate a Knowledge Extractor"""
 
-    def __init__(self, config, **kwargs):
+    def to(self, device):
+        if self.config.offload_experts:
+            for buf in self.model.buffers():
+                buf.data = buf.data.to(device)
 
+            for name, param in self.model.named_parameters():
+                if "lora_a" in name or "lora_b" in name:
+                    param.data = param.data.cpu()
+                else:
+                    param.data = param.data.to(device)
+            return self
+        else:
+            return super().to(device)
+
+    @InfoContainer.create_context
+    def forward(
+        self,
+        input_ids,
+        attention_mask=None,
+        labels=None,
+        **kwargs,
+    ):
+        if self.config.cpu_offload:
+            # get active expert numbers
+            task_names = InfoContainer.get().routing_infos.task_names
+            active_experts = list(set(task_names + [self.ke_expert_name]))
+
+            for lora_container in self.lora_containers:
+                for expert_name in lora_container.expert_names:
+                    device = "cuda" if expert_name in active_experts else "cpu"
+                    if lora_container.lora_a[expert_name].device != device:
+                        lora_container.lora_a[expert_name] = lora_container.lora_a[
+                            expert_name
+                        ].to(device)
+                        lora_container.lora_b[expert_name] = lora_container.lora_b[
+                            expert_name
+                        ].to(device)
+
+        outputs = self.model.forward(
+            input_ids, attention_mask=attention_mask, labels=labels, **kwargs
+        )
+        return outputs
+
+    def __init__(self, config, **kwargs):
         # If no selectors have been provided, we default to the KnowledgeExtractorSelector
         if config.selector_config is None:
             logger.info(
@@ -73,7 +118,6 @@ class KEMoEModel(BaseExpertModel, MultiExpertMixin):
         self.add_empty_expert(
             self.ke_expert_name, expert_config=an_expert.expert_config
         )
-        logger.info("Added KE expert: %s", self.ke_expert_name)
 
 
 @dataclass

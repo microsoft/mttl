@@ -204,12 +204,16 @@ def do_evaluation(datamodule, model, loss_function, evaluator, **kwargs) -> bool
         with torch.no_grad():
             batch = transfer_batch_to_device(batch, model.device)
             val_loss.append(loss_function(model, batch).item())
+            del batch
+    torch.cuda.empty_cache()
 
     val_loss = distributed_mean(val_loss, model.device)
     if evaluator is not None:
         eval_score = evaluator.evaluate(model, "dev", **kwargs)
     else:
         eval_score = None
+
+    torch.cuda.empty_cache()
     return val_loss, eval_score
 
 
