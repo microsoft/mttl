@@ -40,20 +40,6 @@ class KEMoEModelConfig(MoEModelConfig):
 class KEMoEModel(BaseExpertModel, MultiExpertMixin):
     """MoeModel that can accomodate a Knowledge Extractor"""
 
-    def to(self, device):
-        if self.config.cpu_offload:
-            for buf in self.model.buffers():
-                buf.data = buf.data.to(device)
-
-            for name, param in self.model.named_parameters():
-                if "lora_a" in name or "lora_b" in name:
-                    param.data = param.data.cpu()
-                else:
-                    param.data = param.data.to(device)
-            return self
-        else:
-            return super().to(device)
-
     @InfoContainer.create_context
     def forward(
         self,
@@ -64,10 +50,11 @@ class KEMoEModel(BaseExpertModel, MultiExpertMixin):
     ):
         if self.config.cpu_offload:
             # get active expert numbers
-            task_names = InfoContainer.get().routing_infos.task_names
-            active_experts = list(set(task_names + [self.ke_expert_name]))
+            active_experts = InfoContainer.get().routing_infos.task_names + [
+                self.ke_expert_name
+            ]
 
-            for lora_container in self.lora_containers:
+            for lora_container in self.experts_containers:
                 for expert_name in lora_container.expert_names:
                     device = "cuda" if expert_name in active_experts else "cpu"
                     if lora_container.lora_a[expert_name].device != device:
