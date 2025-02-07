@@ -240,7 +240,17 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
 
     def __getitem__(self, name) -> LoRA:
         """Returns a LoRA module."""
-        return LoRAView(self.config, self.layer, self.lora_a[name], self.lora_b[name])
+        if self.lora_a[name].device != self.layer.weight.device:
+            self.lora_a[name] = self.lora_a[name].to(self.layer.weight.device)
+            self.lora_b[name] = self.lora_b[name].to(self.layer.weight.device)
+
+        view = LoRAView(
+            self.config,
+            self.layer,
+            self.lora_a[name],
+            self.lora_b[name],
+        )
+        return view
 
 
 class SkilledLoRAExpertContainer(LoRAExpertContainer):
