@@ -52,10 +52,18 @@ class KEMoEModel(BaseExpertModel, MultiExpertMixin):
             active_names = set(InfoContainer.get().routing_infos.task_names)
             for lora_container in self.experts_containers:
                 for name in lora_container.expert_names:
-                    device = "cpu" if name != self.ke_expert_name and name not in active_names else "cuda"
+                    device = (
+                        "cpu"
+                        if name != self.ke_expert_name or name not in active_names
+                        else "cuda"
+                    )
                     if device != lora_container.lora_a[name].device:
-                        lora_container.lora_a[name] = lora_container.lora_a[name].to(device)
-                        lora_container.lora_b[name] = lora_container.lora_b[name].to(device)
+                        lora_container.lora_a[name] = lora_container.lora_a[name].to(
+                            device
+                        )
+                        lora_container.lora_b[name] = lora_container.lora_b[name].to(
+                            device
+                        )
             torch.cuda.empty_cache()
 
         outputs = self.model.forward(
