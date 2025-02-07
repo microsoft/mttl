@@ -49,11 +49,6 @@ class KEMoEModel(BaseExpertModel, MultiExpertMixin):
         **kwargs,
     ):
         if self.config.cpu_offload:
-            # get active expert numbers
-            active_experts = InfoContainer.get().routing_infos.task_names + [
-                self.ke_expert_name
-            ]
-
             for lora_container in self.experts_containers:
                 lora_container.lora_a.to("cpu")
                 lora_container.lora_b.to("cpu")
