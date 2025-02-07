@@ -106,7 +106,10 @@ def train_ke(training_args):
             selector_config=training_args.selector_config,
             cpu_offload=training_args.cpu_offload,
         )
-        model = KEMoEModel(model_config)
+        model = KEMoEModel(
+            model_config,
+            attn_implementation=training_args.attn_implementation
+        )
 
         if model.ke_expert_name not in training_args.trainable_param_names:
             # Let's provide a fix that works for the current setup
@@ -224,6 +227,8 @@ def train_ke(training_args):
             loss = loss / args.gradient_accumulation_steps
             loss_accum += loss.detach()
             loss.backward()
+            del loss, batch
+            torch.cuda.empty_cache()
 
         if loss_accum:
             norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
