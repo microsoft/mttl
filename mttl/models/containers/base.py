@@ -1,8 +1,8 @@
 import abc
+from abc import abstractmethod
 from typing import List, Union
 
 import torch
-from pyparsing import abstractmethod
 from torch import nn
 
 from mttl.models.containers.selectors.base import Selector, TaskNameSelector
