@@ -1,12 +1,11 @@
 import functools
 import threading
-from abc import ABC
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, Union
 
 import torch
-from pyparsing import abstractmethod
 from torch import nn
 
 from mttl.logging import logger

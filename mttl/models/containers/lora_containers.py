@@ -1,5 +1,6 @@
+from typing import Union
+
 import torch
-from pyparsing import Union
 from torch import Tensor, nn
 
 from mttl.logging import warn_once
