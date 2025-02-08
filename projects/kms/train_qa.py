@@ -87,8 +87,6 @@ def train_ke(training_args):
         eval_metric = "rougeL"
         evaluator = NQAZeroShotEvaluator(training_args)
 
-    datamodule = get_datamodule(training_args)
-
     if training_args.library_id:
         logger.info("Loading expert library: %s", training_args.library_id)
 
@@ -99,6 +97,9 @@ def train_ke(training_args):
 
         expert_selection += datamodule.dev_task_names
 
+        training_args.finetune_task_name = ",".join(expert_selection)
+        datamodule = get_datamodule(training_args)
+
         model_config = KEMoEModelConfig(
             base_model=training_args.model,
             library_id=training_args.library_id,
@@ -107,8 +108,7 @@ def train_ke(training_args):
             cpu_offload=training_args.cpu_offload,
         )
         model = KEMoEModel(
-            model_config,
-            attn_implementation=training_args.attn_implementation
+            model_config, attn_implementation=training_args.attn_implementation
         )
 
         if model.ke_expert_name not in training_args.trainable_param_names:
@@ -131,6 +131,7 @@ def train_ke(training_args):
             device_map=training_args.device_map,
             attn_implementation=training_args.attn_implementation,
         )
+        datamodule = get_datamodule(training_args)
 
     # deactivate use_cache for Phi
     if "Phi" in args.model:
