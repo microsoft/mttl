@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 import copy
 import os
 import random
@@ -66,6 +67,25 @@ class KEArguments(MultiExpertConfig, KMArguments):
     cpu_offload: bool = False
 
 
+@contextmanager
+def prepare_kms_for_eval(model, names):
+    """Swap the specified set of KMs from CPU to GPU."""
+    names = set(names)
+    if isinstance(model, KEMoEModel):
+        for container in model.experts_containers:
+            for name in container.lora_a.keys():
+                device = model.device if name in names else "cpu"
+                container.lora_a[name] = container.lora_a[name].to(device)
+                container.lora_b[name] = container.lora_b[name].to(device)
+    yield
+    if isinstance(model, KEMoEModel):
+        for container in model.experts_containers:
+            for name in container.lora_a.keys():
+                device = model.device if name not in names else "cpu"
+                container.lora_a[name] = container.lora_a[name].to(device)
+                container.lora_b[name] = container.lora_b[name].to(device)
+
+
 def train_ke(training_args):
     seed_everything(training_args.seed)
 
@@ -90,6 +110,7 @@ def train_ke(training_args):
     if training_args.library_id:
         logger.info("Loading expert library: %s", training_args.library_id)
 
+        datamodule = get_datamodule(training_args)
         expert_selection = datamodule.train_task_names
         if training_args.max_kms:
             random.shuffle(expert_selection)
@@ -108,7 +129,10 @@ def train_ke(training_args):
             cpu_offload=training_args.cpu_offload,
         )
         model = KEMoEModel(
-            model_config, attn_implementation=training_args.attn_implementation
+            model_config,
+            attn_implementation=training_args.attn_implementation,
+            precision=training_args.precision,
+            device_map=get_device(),
         )
 
         if model.ke_expert_name not in training_args.trainable_param_names:
@@ -128,7 +152,8 @@ def train_ke(training_args):
             model_config,
             load_in_4bit=training_args.load_in_4bit,
             load_in_8bit=training_args.load_in_8bit,
-            device_map=training_args.device_map,
+            device_map=get_device(),
+            precision=training_args.precision,
             attn_implementation=training_args.attn_implementation,
         )
         datamodule = get_datamodule(training_args)
@@ -138,8 +163,6 @@ def train_ke(training_args):
         model.model.config.use_cache = False
 
     device = get_device()
-    raw_model = model = model.to(device)
-
     if is_dist_avail_and_initialized():
         model.model = DDP(model.model, device_ids=[get_local_rank()])
 
@@ -221,7 +244,10 @@ def train_ke(training_args):
                 dtype=torch.bfloat16,
             ):
                 batch = transfer_batch_to_device(batch, device)
-                loss = loss_function(model, batch)
+                if args.dataset_type == "quality":
+                    loss = loss_function(model, batch, iterative=True)
+                else:
+                    loss = loss_function(model, batch)
 
             model.require_backward_grad_sync = (
                 step + 1 == args.gradient_accumulation_steps
@@ -301,9 +327,10 @@ def train_ke(training_args):
             break
 
     # reload the best model
-    raw_model.load_weights(training_args.output_dir + "/best_model")
+    model.load_weights(training_args.output_dir + "/best_model")
 
     val_loss, eval_score = do_evaluation(datamodule, model, loss_function, evaluator)
+
     logger.info(f"Final Validation Loss: {val_loss}, {eval_metric}: {eval_score}")
     met_logger.log_metrics(
         {"best_val_loss": val_loss, f"best_{eval_metric}": eval_score}, step=global_step

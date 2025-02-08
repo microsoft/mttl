@@ -37,15 +37,20 @@ class KnowledgeExtractorSelector(Selector):
 
         if self.config.learn_w:
             self.register_parameter(
-                "KEe_w", torch.nn.Parameter(torch.tensor([1.0]), requires_grad=True)
+                "KEe_w",
+                torch.nn.Parameter(
+                    torch.tensor([1.0], device=self.device), requires_grad=True
+                ),
             )
             self.register_parameter(
-                "KEm_w", torch.nn.Parameter(torch.tensor([1.0]), requires_grad=True)
+                "KEm_w",
+                torch.nn.Parameter(
+                    torch.tensor([1.0], device=self.device), requires_grad=True
+                ),
             )
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchExpertsSelectorOutput:
-
         task_names = self.routing_infos.task_names
 
         # Make sure there's only one KE expert
