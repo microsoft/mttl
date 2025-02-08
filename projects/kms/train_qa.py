@@ -24,6 +24,7 @@ from mttl.dist_utils import (
     is_dist_avail_and_initialized,
     is_main_process,
     seed_everything,
+    get_world_size,
 )
 from mttl.logging import logger, setup_logging
 from mttl.models.get_optimizer import get_optimizer_and_scheduler
@@ -59,6 +60,8 @@ from projects.kms.utils.km_model import KEMoEModel, KEMoEModelConfig
 class KEArguments(MultiExpertConfig, KMArguments):
     # Where to save the KE expert
     ke_uri: str = None
+    # Reload KE expert to do fine-tuning
+    ke_path: str = None
     # max kms
     max_kms: int = None
     # whether to overwrite / force upload of the new expert
@@ -68,22 +71,24 @@ class KEArguments(MultiExpertConfig, KMArguments):
 
 
 @contextmanager
-def prepare_kms_for_eval(model, names):
+def cpu_offload(model, names, enable=False):
     """Swap the specified set of KMs from CPU to GPU."""
-    names = set(names)
+    names = set(names + ['KE'])
     if isinstance(model, KEMoEModel):
         for container in model.experts_containers:
             for name in container.lora_a.keys():
                 device = model.device if name in names else "cpu"
-                container.lora_a[name] = container.lora_a[name].to(device)
-                container.lora_b[name] = container.lora_b[name].to(device)
+                if container.lora_a[name].device != device:
+                    container.lora_a[name] = container.lora_a[name].to(device)
+                    container.lora_b[name] = container.lora_b[name].to(device)
+    torch.cuda.empty_cache()
     yield
     if isinstance(model, KEMoEModel):
         for container in model.experts_containers:
-            for name in container.lora_a.keys():
-                device = model.device if name not in names else "cpu"
-                container.lora_a[name] = container.lora_a[name].to(device)
-                container.lora_b[name] = container.lora_b[name].to(device)
+            for name in names:
+                container.lora_a[name] = container.lora_a[name].to('cpu')
+                container.lora_b[name] = container.lora_b[name].to('cpu')
+    torch.cuda.empty_cache()
 
 
 def train_ke(training_args):
@@ -139,7 +144,6 @@ def train_ke(training_args):
             # Let's provide a fix that works for the current setup
             logger.warning("Overwriting `trainable_param_names` to include the KE")
             training_args.trainable_param_names = f".*{model.ke_expert_name}.*"
-
     else:
         logger.info("Loading model without expert library")
         model_config = ExpertModelConfig(
@@ -163,8 +167,15 @@ def train_ke(training_args):
         model.model.config.use_cache = False
 
     device = get_device()
-    if is_dist_avail_and_initialized():
-        model.model = DDP(model.model, device_ids=[get_local_rank()])
+    # if is_dist_avail_and_initialized():
+    #    model.model = DDP(model.model, device_ids=[get_local_rank()])
+
+    if isinstance(model, KEMoEModel) and training_args.cpu_offload:
+        for container in model.experts_containers:
+            for name in container.lora_a.keys():
+                if name != 'KE':
+                    container.lora_a[name] = container.lora_a[name].to('cpu')
+                    container.lora_b[name] = container.lora_b[name].to('cpu')
 
     (optimizer, scheduler), _ = get_optimizer_and_scheduler(
         model, training_args, num_train_examples=len(datamodule.train_dataset)
@@ -239,29 +250,53 @@ def train_ke(training_args):
                 epoch_finished = True
                 epoch += 1
 
+            task_names = batch.get('task_names')
+            if isinstance(model, KEMoEModel) and training_args.cpu_offload:
+                for container in model.experts_containers:
+                    for name in task_names:
+                        container.lora_a[name] = container.lora_a[name].to(device)
+                        container.lora_b[name] = container.lora_b[name].to(device)
+                torch.cuda.empty_cache()
+
             with torch.autocast(
                 device_type="cuda",
                 dtype=torch.bfloat16,
             ):
                 batch = transfer_batch_to_device(batch, device)
-                if args.dataset_type == "quality":
-                    loss = loss_function(model, batch, iterative=True)
-                else:
-                    loss = loss_function(model, batch)
+                loss = loss_function(model, batch)
 
-            model.require_backward_grad_sync = (
+            model.model.require_backward_grad_sync = (
                 step + 1 == args.gradient_accumulation_steps
             )
             loss = loss / args.gradient_accumulation_steps
             loss_accum += loss.detach()
             loss.backward()
+
+            if isinstance(model, KEMoEModel) and training_args.cpu_offload:
+                for container in model.experts_containers:
+                    for name in task_names:
+                        container.lora_a[name] = container.lora_a[name].to('cpu')
+                        container.lora_b[name] = container.lora_b[name].to('cpu')
+                torch.cuda.empty_cache()
+
             del loss, batch
             torch.cuda.empty_cache()
 
         if loss_accum:
+            # Sum gradients across all workers
+            if is_dist_avail_and_initialized():
+                torch.distributed.barrier()
+
+                for p in model.parameters():
+                    if p.grad is not None:
+                        torch.distributed.all_reduce(p.grad, op=torch.distributed.ReduceOp.SUM)
+                        p.grad /= get_world_size()
+
             norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scheduler.step()
             optimizer.step()
+            if is_dist_avail_and_initialized():
+                torch.distributed.barrier()
             torch.cuda.synchronize()  # wait for the GPU to finish work
             pbar.update(1)
 

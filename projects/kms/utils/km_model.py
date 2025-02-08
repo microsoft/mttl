@@ -14,6 +14,7 @@ from mttl.models.containers.selectors.poly_selector import PolySelectorConfig
 from mttl.models.expert_context import InfoContainer
 from mttl.models.expert_model import (
     BaseExpertModel,
+    ExpertModel,
     ExpertModelConfig,
     MoEModelConfig,
     MultiExpertMixin,
@@ -25,7 +26,10 @@ from projects.kms.utils.km_selector import KnowledgeExtractorSelectorConfig
 
 @dataclass
 class KEMoEModelConfig(MoEModelConfig):
+    # expert name
     ke_expert_name: str = "KE"
+    # expert path
+    ke_expert_path: str = None
     library_id: str = None
     expert_selection: List[str] = None
     # if selector_config is not None, then we use it to select experts
@@ -48,24 +52,6 @@ class KEMoEModel(BaseExpertModel, MultiExpertMixin):
         labels=None,
         **kwargs,
     ):
-        if self.config.cpu_offload:
-            active_names = set(InfoContainer.get().routing_infos.task_names)
-            for lora_container in self.experts_containers:
-                for name in lora_container.expert_names:
-                    device = (
-                        "cpu"
-                        if name != self.ke_expert_name or name not in active_names
-                        else "cuda"
-                    )
-                    if device != lora_container.lora_a[name].device:
-                        lora_container.lora_a[name] = lora_container.lora_a[name].to(
-                            device
-                        )
-                        lora_container.lora_b[name] = lora_container.lora_b[name].to(
-                            device
-                        )
-            torch.cuda.empty_cache()
-
         outputs = self.model.forward(
             input_ids, attention_mask=attention_mask, labels=labels, **kwargs
         )
@@ -98,15 +84,20 @@ class KEMoEModel(BaseExpertModel, MultiExpertMixin):
         for param in self.parameters():
             param.requires_grad = False
 
-        # also need to add an additional expert for the KE
-        # we will use the `ExpertConfig` of the first expert
-        an_expert = self.get_expert_instance(self.experts_names[0])
-
         self.ke_expert_name = self.config.ke_expert_name
-        self.add_empty_expert(
-            self.ke_expert_name, expert_config=an_expert.expert_config
-        )
 
+        if self.config.ke_expert_path:
+            # pretrained expert path!
+            ke_model = ExpertModel.from_pretrained(self.config.ke_expert_path, device_map='cpu')
+            ke_expert = ke_model.as_expert()
+            self.add_expert_instance(ke_expert, self.config.ke_expert_name)
+        else:
+            # also need to add an additional expert for the KE
+            # we will use the `ExpertConfig` of the first expert
+            an_expert = self.get_expert_instance(self.experts_names[0])
+            self.add_empty_expert(
+                self.ke_expert_name, expert_config=an_expert.expert_config
+            )
 
 @dataclass
 class EMAExpertModelConfig(ExpertModelConfig, MoEModelConfig):

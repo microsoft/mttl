@@ -459,10 +459,8 @@ class SkilledLoRA(LoRA):
             A = torch.einsum("blqe,beqdr->blqdr", (weights, skilled_loras_a))
             B = torch.einsum("blqe,berqd->blrqd", (weights, skilled_loras_b))
             batch_size, sequence_length, rank, n_splits, d_split = B.shape
-
             # flatten the "splits" (q) dimension
             A, B = A.flatten(2, 3), B.flatten(3, 4)
-
             partial_out = torch.einsum("bld,bldr->blr", (input_lora, A))
             adapter_out = torch.einsum("blr,blrd->bld", (partial_out, B))
 
