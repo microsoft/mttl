@@ -228,7 +228,7 @@ def train_ke(training_args):
             loss = loss / args.gradient_accumulation_steps
             loss_accum += loss.detach()
             loss.backward()
-            del loss
+            del loss, batch
             torch.cuda.empty_cache()
 
         if loss_accum:
