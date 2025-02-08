@@ -338,7 +338,7 @@ def train_ke(training_args):
 
     # Also save last model
     if is_main_process():
-        raw_model.save_pretrained(training_args.output_dir + "/last_model")
+        model.save_pretrained(training_args.output_dir + "/last_model")
         training_args.save_config(training_args.output_dir + "/last_model")
 
     # Maybe save to Expert Library

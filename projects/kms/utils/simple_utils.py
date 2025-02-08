@@ -82,6 +82,7 @@ def mc_loss(
                 )
             )
             del outputs
+            torch.cuda.empty_cache()
         loss_per_option = torch.stack(loss_per_option, dim=0)
     else:
         outputs = model(
