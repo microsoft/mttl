@@ -211,6 +211,7 @@ def train_ke(training_args):
                 batch = next(iter_train)
             except StopIteration:
                 iter_train = iter(datamodule.train_dataloader())
+                batch = next(iter_train)
                 epoch_finished = True
                 epoch += 1
 
@@ -227,7 +228,7 @@ def train_ke(training_args):
             loss = loss / args.gradient_accumulation_steps
             loss_accum += loss.detach()
             loss.backward()
-            del loss, batch
+            del loss
             torch.cuda.empty_cache()
 
         if loss_accum:
