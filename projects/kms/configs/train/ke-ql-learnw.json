@@ -5,6 +5,7 @@
     "router_selector": "ke_selector",
     "include_context": false,
     "dataset_type": "quality",
+    "callback_during_training": false,
     "dataset": "az://mttldata/quality-sanitized",
     "learning_rate": 1e-4,
     "micro_batch_size": 2,

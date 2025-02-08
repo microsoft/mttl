@@ -4,6 +4,7 @@
     "total_steps": 500,
     "router_selector": "ke_selector",
     "include_context": false,
+    "callback_during_training": false,
     "dataset_type": "quality",
     "dataset": "az://mttldata/quality-sanitized",
     "learning_rate": 1e-4,
