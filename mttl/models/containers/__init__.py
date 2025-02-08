@@ -77,6 +77,7 @@ def create_selector_for_container(
         # Special case when you have a decoder layer in an enc-dec model
         selector = get_selector(
             selector_config,
+            device=container.device,
             layer=container.layer,
         )
         selector_cache.insert(modifier_name, identifier, selector)
