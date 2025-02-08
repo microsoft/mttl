@@ -432,9 +432,11 @@ class SkilledLoRA(LoRA):
         input_lora = skilled_loras[0].dropout_layer(input_lora)
 
         # (n_examples,)
-        scaling = torch.cat(
-            [torch.FloatTensor([lora.scaling]) for lora in skilled_loras], dim=0
-        ).to(device=device, dtype=skilled_loras[0].lora_a.dtype)
+        scaling = torch.tensor(
+            [lora.scaling for lora in skilled_loras],
+            dtype=skilled_loras[0].lora_a.dtype,
+            device=device,
+        )
 
         # (batch, dimension)
         if input_lora.ndim == 2:
@@ -464,7 +466,7 @@ class SkilledLoRA(LoRA):
             partial_out = torch.einsum("bld,bldr->blr", (input_lora, A))
             adapter_out = torch.einsum("blr,blrd->bld", (partial_out, B))
 
-        adapter_out = adapter_out * scaling
+        adapter_out.mul_(scaling)
 
         # squeeze again sequence dimension ("l") if needed
         if layer_out.ndim == 2:
