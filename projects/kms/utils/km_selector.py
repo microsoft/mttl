@@ -39,13 +39,13 @@ class KnowledgeExtractorSelector(Selector):
             self.register_parameter(
                 "KEe_w",
                 torch.nn.Parameter(
-                    torch.tensor([1.0], device=self.device), requires_grad=True
+                    torch.tensor([0.5], device=self.device), requires_grad=True
                 ),
             )
             self.register_parameter(
                 "KEm_w",
                 torch.nn.Parameter(
-                    torch.tensor([1.0], device=self.device), requires_grad=True
+                    torch.tensor([0.5], device=self.device), requires_grad=True
                 ),
             )
 

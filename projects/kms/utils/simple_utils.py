@@ -65,38 +65,18 @@ def mc_loss(
     num_options = inputs["num_options"]
     labels_index = inputs["labels_index"]
 
-    if iterative:
-        loss_per_option = []
-        for i in range(len(input_ids)):
-            outputs = model(
-                input_ids=input_ids[i : i + 1],
-                attention_mask=attention_mask[i : i + 1],
-                task_names=[inputs.get("task_names")[i]],
-            )
-            loss_per_option.append(
-                compute_loglike_loss(
-                    outputs.logits,
-                    labels[i : i + 1],
-                    reduction="none",
-                    normalize_length=True,
-                )
-            )
-            del outputs
-            torch.cuda.empty_cache()
-        loss_per_option = torch.stack(loss_per_option, dim=0)
-    else:
-        outputs = model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            task_names=inputs.get("task_names"),
-        )
-        loss_per_option = compute_loglike_loss(
-            outputs.logits,
-            labels,
-            reduction="none",
-            normalize_length=True,
-        )
-        del outputs, input_ids, attention_mask
+    outputs = model(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        task_names=inputs.get("task_names"),
+    )
+    loss_per_option = compute_loglike_loss(
+        outputs.logits,
+        labels,
+        reduction="none",
+        normalize_length=True,
+    )
+    del outputs, input_ids, attention_mask
     torch.cuda.empty_cache()
 
     loss_per_example = [
