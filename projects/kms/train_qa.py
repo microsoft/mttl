@@ -272,10 +272,10 @@ def train_ke(training_args):
             if is_dist_avail_and_initialized():
                 torch.distributed.barrier()
 
-            for p in model.parameters():
-                if p.grad is not None:
-                    torch.distributed.all_reduce(p.grad, op=torch.distributed.ReduceOp.SUM)
-                    p.grad /= get_world_size()
+                for p in model.parameters():
+                    if p.grad is not None:
+                        torch.distributed.all_reduce(p.grad, op=torch.distributed.ReduceOp.SUM)
+                        p.grad /= get_world_size()
 
             norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             scheduler.step()
