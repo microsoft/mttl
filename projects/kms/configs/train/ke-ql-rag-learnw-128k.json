@@ -15,6 +15,5 @@
     "eval_before_training": false,
     "learn_w": true,
     "max_input_length": 128000,
-    "optimizer": "adamw8bit",
     "router_granularity": "finegrained"
 }
