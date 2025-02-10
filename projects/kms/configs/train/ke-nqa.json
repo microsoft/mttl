@@ -5,8 +5,9 @@
     "eval_before_training": false,
     "dataset_type": "narrativeqa",
     "dataset": "az://mttldata/narrativeqa-sanitized",
-    "max_kms": 250,
+    "patience": 5,
+    "max_train_tasks": 250,
     "learning_rate": 1e-4,
-    "micro_batch_size": 2,
+    "micro_batch_size": 1,
     "predict_batch_size": 1
 }

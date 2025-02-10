@@ -122,8 +122,11 @@ def train_ke(training_args):
         expert_selection = expert_selection[: training_args.max_train_tasks]
     if split == "dev":
         expert_selection += datamodule.dev_task_names
+        eval_task_names = datamodule.dev_task_names
     elif split == "test":
         expert_selection += datamodule.test_task_names
+        eval_task_names = datamodule.test_task_names
+
     expert_selection = list(set(expert_selection))
     logger.info(f"Tasks selected: {len(expert_selection)}")
 
@@ -144,17 +147,18 @@ def train_ke(training_args):
             model_config,
             attn_implementation=training_args.attn_implementation,
             precision=training_args.precision,
+            device_map=get_device() if not training_args.cpu_offload else 'cpu'
         )
+
+        if training_args.cpu_offload:
+            for n, p in model.named_parameters():
+                if 'lora' not in n or model.ke_expert_name in n:
+                    p.data = p.data.to(get_device())
 
         if model.ke_expert_name not in training_args.trainable_param_names:
             # Let's provide a fix that works for the current setup
             logger.warning("Overwriting `trainable_param_names` to include the KE")
             training_args.trainable_param_names = f".*{model.ke_expert_name}.*"
-
-        if training_args.cpu_offload:
-            for n, p in model.named_parameters():
-                if 'lora' not in n or 'KE' in n:
-                    p.data = p.data.to(get_device())
     else:
         logger.info("Loading model without expert library")
         model_config = ExpertModelConfig(
@@ -303,6 +307,7 @@ def train_ke(training_args):
                 f" Norm: {norm:.4f},"
                 f" Lr: {scheduler.get_last_lr()[0]:.4f},"
                 f" Val: {best_val:.4f} ({val_loss:.4f})"
+                f" Mem: {torch.cuda.memory_allocated() / (1024 ** 2)}"
             )
 
         global_step += 1
@@ -320,7 +325,7 @@ def train_ke(training_args):
         )
         if do_eval_on_step or do_eval_on_epoch:
             with cpu_offload(
-                model, datamodule.dev_task_names, training_args.cpu_offload
+                model, eval_task_names, training_args.cpu_offload
             ):
                 val_loss, eval_score = do_evaluation(
                     datamodule,
@@ -360,7 +365,7 @@ def train_ke(training_args):
     # reload the best model
     model.load_weights(training_args.output_dir + "/best_model")
 
-    with cpu_offload(model, datamodule.dev_task_names, training_args.cpu_offload):
+    with cpu_offload(model, eval_task_names, training_args.cpu_offload):
         val_loss, eval_score = do_evaluation(
             datamodule,
             model,
