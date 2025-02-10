@@ -202,23 +202,32 @@ def lm_loss(model, inputs, prefix=""):
     return outputs.loss
 
 
-def do_evaluation(datamodule, model, loss_function, evaluator, **kwargs) -> bool:
-    val_loss = []
-    for batch in tqdm(datamodule.val_dataloader(), disable=not is_main_process()):
+def do_evaluation(
+    datamodule, model, loss_function, evaluator=None, evaluator_split="dev", split="dev", **kwargs
+) -> bool:
+
+    if split == "dev":
+        eval_dataloader = datamodule.val_dataloader()
+    else:
+        eval_dataloader = datamodule.test_dataloader()
+
+    eval_loss = []
+    for batch in tqdm(eval_dataloader, disable=not is_main_process()):
         with torch.no_grad():
             batch = transfer_batch_to_device(batch, model.device)
             val_loss.append(loss_function(model, batch).item())
             del batch
     torch.cuda.empty_cache()
 
-    val_loss = distributed_mean(val_loss, model.device)
+    eval_loss = distributed_mean(eval_loss, model.device)
+
     if evaluator is not None:
-        eval_score = evaluator.evaluate(model, "dev", **kwargs)
+        eval_score = evaluator.evaluate(model, split=evaluator_split, **kwargs)
     else:
         eval_score = None
 
     torch.cuda.empty_cache()
-    return val_loss, eval_score
+    return eval_loss, eval_score
 
 
 class SimpleLogger:

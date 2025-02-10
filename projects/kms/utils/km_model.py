@@ -88,7 +88,9 @@ class KEMoEModel(BaseExpertModel, MultiExpertMixin):
 
         if self.config.ke_expert_path:
             # pretrained expert path!
-            ke_model = ExpertModel.from_pretrained(self.config.ke_expert_path, device_map='cpu')
+            ke_model = ExpertModel.from_pretrained(
+                self.config.ke_expert_path, device_map="cpu"
+            )
             ke_expert = ke_model.as_expert()
             self.add_expert_instance(ke_expert, self.config.ke_expert_name)
         else:
@@ -98,6 +100,7 @@ class KEMoEModel(BaseExpertModel, MultiExpertMixin):
             self.add_empty_expert(
                 self.ke_expert_name, expert_config=an_expert.expert_config
             )
+
 
 @dataclass
 class EMAExpertModelConfig(ExpertModelConfig, MoEModelConfig):
