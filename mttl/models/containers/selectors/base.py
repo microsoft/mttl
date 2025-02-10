@@ -268,7 +268,7 @@ class Selector(nn.Module, Registrable):
         self._task_to_expert_name = {}
         # dependency injection filled from ExpertContainer
         self.__layer_name__ = None
-        self.device = kwargs.get('device', None)
+        self.device = kwargs.get("device", None)
 
     @property
     def expert_names(self) -> list:

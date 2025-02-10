@@ -203,7 +203,13 @@ def lm_loss(model, inputs, prefix=""):
 
 
 def do_evaluation(
-    datamodule, model, loss_function, evaluator=None, evaluator_split="dev", split="dev", **kwargs
+    datamodule,
+    model,
+    loss_function,
+    evaluator=None,
+    evaluator_split="dev",
+    split="dev",
+    **kwargs,
 ) -> bool:
 
     if split == "dev":
