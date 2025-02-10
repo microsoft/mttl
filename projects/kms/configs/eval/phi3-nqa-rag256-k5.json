@@ -5,11 +5,11 @@
     "topk_context": 5,
     "split": "test",
     "custom_split_file": "splits/nqa/nqa_test.json",
-    "model": "meta-llama/Llama-3.1-8B-Instruct",
-    "max_input_length": 128000,
+    "model": "microsoft/Phi-3-mini-4k-instruct",
     "model_family": "gpt",
     "padding_side": "left",
     "truncation_side": "left",
+    "max_input_length": 4096,
     "precision": "bf16",
     "predict_batch_size": 1,
     "max_output_length": 64

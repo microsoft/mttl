@@ -62,8 +62,8 @@ class KEArguments(MultiExpertConfig, KMArguments):
     ke_uri: str = None
     # Reload KE expert to do fine-tuning
     ke_path: str = None
-    # max kms
-    max_kms: int = None
+    #
+    max_train_tasks: int = None
     # whether to overwrite / force upload of the new expert
     force: bool = False
     # keep on cpu
@@ -72,8 +72,7 @@ class KEArguments(MultiExpertConfig, KMArguments):
 
 @contextmanager
 def cpu_offload(model, names, enable=False):
-    """Swap the specified set of KMs from CPU to GPU.
-    """
+    """Swap the specified set of KMs from CPU to GPU."""
     if enable:
         names = set(names)
         if isinstance(model, KEMoEModel):
@@ -88,8 +87,8 @@ def cpu_offload(model, names, enable=False):
         if isinstance(model, KEMoEModel):
             for container in model.experts_containers:
                 for name in names:
-                    container.lora_a[name] = container.lora_a[name].to('cpu')
-                    container.lora_b[name] = container.lora_b[name].to('cpu')
+                    container.lora_a[name] = container.lora_a[name].to("cpu")
+                    container.lora_b[name] = container.lora_b[name].to("cpu")
         torch.cuda.empty_cache()
 
 
@@ -110,23 +109,30 @@ def train_ke(training_args):
     if training_args.dataset_type == "quality":
         eval_metric = "accuracy"
         evaluator = QualityEvaluator(training_args)
+        split = "dev"
     elif training_args.dataset_type == "narrativeqa":
         eval_metric = "rougeL"
         evaluator = NQAZeroShotEvaluator(training_args)
+        split = "test"
+
+    datamodule = get_datamodule(training_args)
+    expert_selection = datamodule.train_task_names
+
+    if training_args.max_train_tasks:
+        random.shuffle(expert_selection)
+        expert_selection = expert_selection[: training_args.max_train_tasks]
+    if split == "dev":
+        expert_selection += datamodule.dev_task_names
+    elif split == "test":
+        expert_selection += datamodule.test_task_names
+    expert_selection = list(set(expert_selection))
+    logger.info(f"Tasks selected: {len(expert_selection)}")
+
+    training_args.finetune_task_name = ",".join(expert_selection)
+    datamodule = get_datamodule(training_args)
 
     if training_args.library_id:
         logger.info("Loading expert library: %s", training_args.library_id)
-
-        datamodule = get_datamodule(training_args)
-        expert_selection = datamodule.train_task_names
-        if training_args.max_kms:
-            random.shuffle(expert_selection)
-            expert_selection = expert_selection[: training_args.max_kms]
-
-        expert_selection += datamodule.dev_task_names
-
-        training_args.finetune_task_name = ",".join(expert_selection)
-        datamodule = get_datamodule(training_args)
 
         model_config = KEMoEModelConfig(
             base_model=training_args.model,
@@ -162,7 +168,6 @@ def train_ke(training_args):
             precision=training_args.precision,
             attn_implementation=training_args.attn_implementation,
         )
-        datamodule = get_datamodule(training_args)
 
     # deactivate use_cache for Phi
     if "Phi" in args.model:
@@ -172,9 +177,9 @@ def train_ke(training_args):
     if isinstance(model, KEMoEModel) and training_args.cpu_offload:
         for container in model.experts_containers:
             for name in container.lora_a.keys():
-                if name != 'KE':
-                    container.lora_a[name] = container.lora_a[name].to('cpu')
-                    container.lora_b[name] = container.lora_b[name].to('cpu')
+                if name != "KE":
+                    container.lora_a[name] = container.lora_a[name].to("cpu")
+                    container.lora_b[name] = container.lora_b[name].to("cpu")
 
     (optimizer, scheduler), _ = get_optimizer_and_scheduler(
         model, training_args, num_train_examples=len(datamodule.train_dataset)
@@ -210,7 +215,9 @@ def train_ke(training_args):
             datamodule,
             model,
             loss_function,
-            evaluator,
+            evaluator=evaluator,
+            evaluator_split=split,
+            split=split,
         )
         met_logger.log_metrics(
             {"val_loss": val_loss, eval_metric: eval_score}, step=global_step
@@ -249,7 +256,9 @@ def train_ke(training_args):
                 epoch_finished = True
                 epoch += 1
 
-            with cpu_offload(model, batch.get('task_names'), enable=training_args.cpu_offload):
+            with cpu_offload(
+                model, batch.get("task_names"), enable=training_args.cpu_offload
+            ):
                 with torch.autocast(
                     device_type="cuda",
                     dtype=torch.bfloat16,
@@ -274,7 +283,9 @@ def train_ke(training_args):
 
                 for p in model.parameters():
                     if p.grad is not None:
-                        torch.distributed.all_reduce(p.grad, op=torch.distributed.ReduceOp.SUM)
+                        torch.distributed.all_reduce(
+                            p.grad, op=torch.distributed.ReduceOp.SUM
+                        )
                         p.grad /= get_world_size()
 
             norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
@@ -311,12 +322,16 @@ def train_ke(training_args):
             and epoch % training_args.eval_every_n_epoch == 0
         )
         if do_eval_on_step or do_eval_on_epoch:
-            with cpu_offload(model, datamodule.dev_task_names, training_args.cpu_offload):
+            with cpu_offload(
+                model, datamodule.dev_task_names, training_args.cpu_offload
+            ):
                 val_loss, eval_score = do_evaluation(
                     datamodule,
                     model,
                     loss_function,
                     (evaluator if training_args.callback_during_training else None),
+                    evaluator_split=split,
+                    split=split,
                 )
 
             met_logger.log_metrics(
@@ -349,7 +364,9 @@ def train_ke(training_args):
     model.load_weights(training_args.output_dir + "/best_model")
 
     with cpu_offload(model, datamodule.dev_task_names, training_args.cpu_offload):
-        val_loss, eval_score = do_evaluation(datamodule, model, loss_function, evaluator)
+        val_loss, eval_score = do_evaluation(
+            datamodule, model, loss_function, evaluator, evaluator_split=split, split=split,
+        )
 
     logger.info(f"Final Validation Loss: {val_loss}, {eval_metric}: {eval_score}")
     met_logger.log_metrics(
