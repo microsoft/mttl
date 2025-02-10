@@ -215,7 +215,7 @@ def do_evaluation(
     for batch in tqdm(eval_dataloader, disable=not is_main_process()):
         with torch.no_grad():
             batch = transfer_batch_to_device(batch, model.device)
-            val_loss.append(loss_function(model, batch).item())
+            eval_loss.append(loss_function(model, batch).item())
             del batch
     torch.cuda.empty_cache()
 
