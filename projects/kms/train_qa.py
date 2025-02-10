@@ -62,7 +62,6 @@ class KEArguments(MultiExpertConfig, KMArguments):
     ke_uri: str = None
     # Reload KE expert to do fine-tuning
     ke_path: str = None
-    #
     max_train_tasks: int = None
     # whether to overwrite / force upload of the new expert
     force: bool = False
@@ -145,13 +144,17 @@ def train_ke(training_args):
             model_config,
             attn_implementation=training_args.attn_implementation,
             precision=training_args.precision,
-            device_map=get_device(),
         )
 
         if model.ke_expert_name not in training_args.trainable_param_names:
             # Let's provide a fix that works for the current setup
             logger.warning("Overwriting `trainable_param_names` to include the KE")
             training_args.trainable_param_names = f".*{model.ke_expert_name}.*"
+
+        if training_args.cpu_offload:
+            for n, p in model.named_parameters():
+                if 'lora' not in n or 'KE' in n:
+                    p.data = p.data.to(get_device())
     else:
         logger.info("Loading model without expert library")
         model_config = ExpertModelConfig(
@@ -174,12 +177,6 @@ def train_ke(training_args):
         model.model.config.use_cache = False
 
     device = get_device()
-    if isinstance(model, KEMoEModel) and training_args.cpu_offload:
-        for container in model.experts_containers:
-            for name in container.lora_a.keys():
-                if name != "KE":
-                    container.lora_a[name] = container.lora_a[name].to("cpu")
-                    container.lora_b[name] = container.lora_b[name].to("cpu")
 
     (optimizer, scheduler), _ = get_optimizer_and_scheduler(
         model, training_args, num_train_examples=len(datamodule.train_dataset)
@@ -365,7 +362,12 @@ def train_ke(training_args):
 
     with cpu_offload(model, datamodule.dev_task_names, training_args.cpu_offload):
         val_loss, eval_score = do_evaluation(
-            datamodule, model, loss_function, evaluator, evaluator_split=split, split=split,
+            datamodule,
+            model,
+            loss_function,
+            evaluator,
+            evaluator_split=split,
+            split=split,
         )
 
     logger.info(f"Final Validation Loss: {val_loss}, {eval_metric}: {eval_score}")

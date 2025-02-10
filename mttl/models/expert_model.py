@@ -380,6 +380,7 @@ class MultiExpertMixin:
         expert_name=None,
         action="route",
         is_default=False,
+        device=None,
     ) -> Expert:
         """
         If action is merge, then the expert is merged with the existing model, and we return None.
@@ -393,9 +394,6 @@ class MultiExpertMixin:
             expert_instance = expert_instance.clone()
             expert_instance.name = expert_name
 
-        # HACK ensuring that the name is an actual string
-        expert_instance.name = str(expert_instance.name)
-
         with self.lock:
             modifier_name = expert_instance.expert_config.modifier_name
             selector_config = self._get_selector_config(modifier_name)
@@ -407,6 +405,7 @@ class MultiExpertMixin:
                 is_default=is_default,
                 selector_config=selector_config,
                 selector_cache=self.selector_cache,
+                device=None,
             )
 
             if action != "merge":
