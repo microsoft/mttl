@@ -237,8 +237,8 @@ def do_evaluation(
 
 
 class SimpleLogger:
-    def __init__(self, output_dir):
-        self.output_file = os.path.join(output_dir, "metrics.json")
+    def __init__(self, output_dir, file="metrics.json"):
+        self.output_file = os.path.join(output_dir, file)
 
         if is_main_process():
             os.makedirs(output_dir, exist_ok=True)
