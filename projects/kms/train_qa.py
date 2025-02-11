@@ -81,16 +81,22 @@ def cpu_offload(model, names, enable=False):
             for container in model.experts_containers:
                 for name in names:
                     device = model.device
+                    requires_grad = container.lora_a[name].requires_grad
                     container.lora_a[name] = container.lora_a[name].to(device)
                     container.lora_b[name] = container.lora_b[name].to(device)
+                    container.lora_a[name].requires_grad = requires_grad
+                    container.lora_b[name].requires_grad = requires_grad
         torch.cuda.empty_cache()
     yield
     if enable:
         if isinstance(model, KEMoEModel):
             for container in model.experts_containers:
                 for name in names:
+                    requires_grad = container.lora_a[name].requires_grad
                     container.lora_a[name] = container.lora_a[name].to("cpu")
                     container.lora_b[name] = container.lora_b[name].to("cpu")
+                    container.lora_a[name].requires_grad = requires_grad
+                    container.lora_b[name].requires_grad = requires_grad
         torch.cuda.empty_cache()
 
 
@@ -163,10 +169,8 @@ def train_ke(training_args):
             for b in model.buffers():
                 b.data = b.data.to(get_device())
 
-        if model.ke_expert_name not in training_args.trainable_param_names:
-            # Let's provide a fix that works for the current setup
-            logger.warning("Overwriting `trainable_param_names` to include the KE")
-            training_args.trainable_param_names = f".*{model.ke_expert_name}.*"
+        logger.warning("Overwriting `trainable_param_names` to include the KE")
+        training_args.trainable_param_names = f".*{model.ke_expert_name}.*"
     else:
         logger.info("Loading model without expert library")
         model_config = ExpertModelConfig(
@@ -269,7 +273,7 @@ def train_ke(training_args):
                     epoch += 1
 
                 with cpu_offload(
-                    model, batch.get("task_names"), enable=training_args.cpu_offload
+                    model, batch["task_names"], enable=training_args.cpu_offload
                 ):
                     with torch.autocast(
                         device_type="cuda",
@@ -278,13 +282,11 @@ def train_ke(training_args):
                         batch = transfer_batch_to_device(batch, device)
                         loss = loss_function(model, batch)
 
-                    model.model.require_backward_grad_sync = (
-                        step + 1 == args.gradient_accumulation_steps
-                    )
                     loss = loss / args.gradient_accumulation_steps
                     loss_accum += loss.detach()
                     loss.backward()
 
+                breakpoint()
                 del loss, batch
                 torch.cuda.empty_cache()
 
@@ -390,6 +392,8 @@ def train_ke(training_args):
 
     logger.info(f"Final Validation Loss: {val_loss}, {eval_metric}: {eval_score}")
     with open(f"{training_args.output_dir}/final_eval.json", "w") as f:
+        import json
+
         f.write(json.dumps({"best_val_loss": val_loss, eval_metric: eval_score}))
 
     if not training_args.do_eval:
