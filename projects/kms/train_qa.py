@@ -389,7 +389,7 @@ def train_ke(training_args):
         )
 
     logger.info(f"Final Validation Loss: {val_loss}, {eval_metric}: {eval_score}")
-    with open(f"{output_dir}/final_eval.json", "w") as f:
+    with open(f"{training_args.output_dir}/final_eval.json", "w") as f:
         f.write(json.dumps({"best_val_loss": val_loss, eval_metric: eval_score}))
 
     if not training_args.do_eval:
