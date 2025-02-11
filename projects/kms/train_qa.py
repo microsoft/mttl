@@ -380,6 +380,9 @@ def train_ke(training_args):
     model.load_weights(training_args.output_dir + "/best_model")
 
     with cpu_offload(model, eval_task_names, training_args.cpu_offload):
+        if is_main_process():
+            os.makedirs(training_args.output_dir + '/eval_output/', exists_ok=True)
+
         val_loss, eval_score = do_evaluation(
             datamodule,
             model,
@@ -387,6 +390,7 @@ def train_ke(training_args):
             evaluator,
             evaluator_split=split,
             split=split,
+            output_path=training_args.output_dir + '/eval_output/',
         )
 
     logger.info(f"Final Validation Loss: {val_loss}, {eval_metric}: {eval_score}")
