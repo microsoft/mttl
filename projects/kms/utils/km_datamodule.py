@@ -14,6 +14,31 @@ from mttl.logging import logger
 from mttl.models.library.dataset_library import DatasetLibrary
 
 
+def create_dcd_pairs(tokenizer, source, target, prompt):
+    """Create DCD pairs, teacher sees the source + prompt, student sees only the prompt."""
+    teacher_source = tokenizer.apply_chat_template(
+        [
+            {
+                "role": "user",
+                "content": source + "\n\n" + prompt,
+            }
+        ],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    student_source = tokenizer.apply_chat_template(
+        [
+            {
+                "role": "user",
+                "content": prompt,
+            }
+        ],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    return teacher_source, student_source
+
+
 @dataclass
 class KMDatasetConfig(DatasetConfig):
     # there might be multiple types, i.e. "qa", "summary", or maybe else in the future
@@ -135,27 +160,9 @@ class KMDatasetModule(DataModule):
                     if self.config.flip_inputs_outputs:
                         input, output_str = output_str, input
 
-                    context_source = self.tokenizer.apply_chat_template(
-                        [
-                            {
-                                "role": "user",
-                                "content": input + "\n\n" + prompt_str,
-                            }
-                        ],
-                        tokenize=False,
-                        add_generation_prompt=True,
+                    context_source, no_context_source = create_dcd_pairs(
+                        self.tokenizer, input, output_str, prompt_str
                     )
-                    no_context_source = self.tokenizer.apply_chat_template(
-                        [
-                            {
-                                "role": "user",
-                                "content": prompt_str,
-                            }
-                        ],
-                        tokenize=False,
-                        add_generation_prompt=True,
-                    )
-
                     return_dict["source"].append(context_source)
                     return_dict["nc_source"].append(no_context_source)
                     return_dict["target"].append(output_str)
