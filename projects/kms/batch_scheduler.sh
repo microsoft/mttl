@@ -37,6 +37,7 @@ while IFS= read -r task_cmd || [ -n "$task_cmd" ]; do
   # Skip empty lines and comments
   [[ -z "$task_cmd" || "$task_cmd" =~ ^# ]] && continue
 
+  echo "Starting task: $task_cmd"
   run_task "$task_cmd"
 done < "$TASK_FILE"
 
