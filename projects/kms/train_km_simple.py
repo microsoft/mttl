@@ -272,6 +272,9 @@ def train_km(training_args: KMArguments):
                 batch = transfer_batch_to_device(batch, device)
                 loss = loss_function(model, batch)
 
+            model.require_backward_grad_sync = (
+                step + 1 == args.gradient_accumulation_steps
+            )
             loss = loss / args.gradient_accumulation_steps
             loss_accum += loss.detach()
             loss.backward()
