@@ -113,7 +113,11 @@ def train(local_rank, args):
         **get_algo_kwargs(args, algos[args.a]),
     )
     algo.model.gradient_checkpointing_enable()
-    algo.model = DDP(algo.model, device_ids=[ddp_state.local_process_index], output_device=ddp_state.local_process_index)
+    algo.model = DDP(
+        algo.model,
+        device_ids=[ddp_state.local_process_index],
+        output_device=ddp_state.local_process_index,
+    )
 
     decay_parameters = get_parameter_names(algo.model, [torch.nn.LayerNorm])
     decay_parameters = [name for name in decay_parameters if "bias" not in name]
@@ -138,7 +142,7 @@ def train(local_rank, args):
     )
     ddp_state.print(torch.cuda.mem_get_info())
 
-    if args.a == 'rloo':
+    if args.a == "rloo":
         num_ex = onl_batch_size * args.k
     else:
         num_ex = onl_batch_size
@@ -172,7 +176,9 @@ def train(local_rank, args):
         algo.model.eval()
         part_queries, part_labels = zip(*partial_batch)
         val_requests = algo.compute_rewards(part_queries, part_labels, k=1)
-        val_reward = torch.tensor(np.mean([r.reward for r in val_requests]), device=ddp_state.device)
+        val_reward = torch.tensor(
+            np.mean([r.reward for r in val_requests]), device=ddp_state.device
+        )
 
     torch.distributed.all_reduce(val_reward, op=torch.distributed.ReduceOp.AVG)
     val_reward = val_reward.item()
@@ -228,16 +234,18 @@ def train(local_rank, args):
             optimizer.zero_grad()
             train_iterator = iter(dataloader)
 
-            for micro_step, batch in enumerate(tqdm(
-                train_iterator,
-                total=len(dataloader),
-                desc="Offline epoch {}".format(off_epoch),
-                disable=not ddp_state.is_main_process,
-            )):
+            for micro_step, batch in enumerate(
+                tqdm(
+                    train_iterator,
+                    total=len(dataloader),
+                    desc="Offline epoch {}".format(off_epoch),
+                    disable=not ddp_state.is_main_process,
+                )
+            ):
                 loss_batch = 0
                 batch = [b.to(ddp_state.device) for b in batch]
 
-                algo.model.require_backward_grad_sync = (micro_step + 1 == acc_steps)
+                algo.model.require_backward_grad_sync = micro_step + 1 == acc_steps
                 loss = algo.compute_loss(batch)
 
                 (loss / acc_steps).backward()
@@ -277,7 +285,9 @@ def train(local_rank, args):
             algo.model.eval()
             part_queries, part_labels = zip(*partial_batch)
             val_requests = algo.compute_rewards(part_queries, part_labels, k=1)
-            val_reward = torch.tensor(np.mean([r.reward for r in val_requests]), device=ddp_state.device)
+            val_reward = torch.tensor(
+                np.mean([r.reward for r in val_requests]), device=ddp_state.device
+            )
 
         torch.distributed.all_reduce(val_reward, op=torch.distributed.ReduceOp.AVG)
         val_reward = val_reward.item()
@@ -383,10 +393,16 @@ if __name__ == "__main__":
     parser.add_argument("--tpsz", type=int, help="Tensor parallel size", default=1)
     parser.add_argument("--ss", type=str, help="Math subset to consider", default="all")
     parser.add_argument("--subs", type=int, help="Subsample examples", default=-1)
-    parser.add_argument("--task", type=str, help="Type of task to solve", default="s_ae", choices=["s_ae", "s_ncp"])
+    parser.add_argument(
+        "--task",
+        type=str,
+        help="Type of task to solve",
+        default="s_ae",
+        choices=["s_ae", "s_ncp"],
+    )
     parser.add_argument("-d", type=str, help="Run description", default=None)
     parser.add_argument("-P", type=int, help="Num Processes", default=1)
-    parser.add_argument("--dmpepc", action='store_true', help="Dumps every epoch")
+    parser.add_argument("--dmpepc", action="store_true", help="Dumps every epoch")
 
     # parse known args first
     partial_args, unknown_args = parser.parse_known_args()
@@ -400,10 +416,5 @@ if __name__ == "__main__":
     if is_server_up():
         raise ValueError("Terminate previous server before starting!")
 
-    os.environ["OMP_NUM_THREADS"] = '1'
-    mp.spawn(
-        train,
-        args=(final_args,),
-        nprocs=final_args.P,
-        join=True
-    )
+    os.environ["OMP_NUM_THREADS"] = "1"
+    mp.spawn(train, args=(final_args,), nprocs=final_args.P, join=True)

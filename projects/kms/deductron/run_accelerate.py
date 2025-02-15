@@ -131,7 +131,7 @@ def train(args):
         lr=args.lr,
     )
 
-    if args.a == 'rloo':
+    if args.a == "rloo":
         num_ex = onl_batch_size * args.k
     else:
         num_ex = onl_batch_size
@@ -168,7 +168,9 @@ def train(args):
     ) as partial_batch:
         part_queries, part_labels = zip(*partial_batch)
         val_requests = algo.compute_rewards(part_queries, part_labels, k=1)
-        val_reward = torch.tensor(np.mean([r.reward for r in val_requests]), device=acc_state.device)
+        val_reward = torch.tensor(
+            np.mean([r.reward for r in val_requests]), device=acc_state.device
+        )
 
     torch.distributed.all_reduce(val_reward, op=torch.distributed.ReduceOp.SUM)
     val_reward = (val_reward / acc_state.num_processes).item()
@@ -223,12 +225,14 @@ def train(args):
         for off_epoch in range(max_off_epochs):
             train_iterator = iter(dataloader)
 
-            for micro_step, batch in enumerate(tqdm(
-                train_iterator,
-                total=len(dataloader),
-                desc="Offline epoch {}".format(off_epoch),
-                disable=not acc_state.is_main_process,
-            )):
+            for micro_step, batch in enumerate(
+                tqdm(
+                    train_iterator,
+                    total=len(dataloader),
+                    desc="Offline epoch {}".format(off_epoch),
+                    disable=not acc_state.is_main_process,
+                )
+            ):
                 loss_batch = 0
                 batch = [b.to(acc_state.device) for b in batch]
 
@@ -238,7 +242,7 @@ def train(args):
 
                     if accelerator.sync_gradients:
                         accelerator.clip_grad_norm_(
-                            algo.model.parameters(), 
+                            algo.model.parameters(),
                             1.0,
                         )
 
@@ -270,7 +274,9 @@ def train(args):
         ) as partial_batch:
             part_queries, part_labels = zip(*partial_batch)
             val_requests = algo.compute_rewards(part_queries, part_labels, k=1)
-            val_reward = torch.tensor(np.mean([r.reward for r in val_requests]), device=acc_state.device)
+            val_reward = torch.tensor(
+                np.mean([r.reward for r in val_requests]), device=acc_state.device
+            )
             torch.distributed.all_reduce(val_reward, op=torch.distributed.ReduceOp.SUM)
             val_reward = (val_reward / acc_state.num_processes).item()
 

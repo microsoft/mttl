@@ -179,8 +179,8 @@ class RLOO(Algo):
         kl_loss = (kl * action_mask).sum(1)
         kl_rewards = (-kl_loss).tolist()
 
-        self.stats.accumulate('kl_loss', kl_loss.mean().item())
-        self.stats.accumulate('kl_reward', np.mean(kl_rewards))
+        self.stats.accumulate("kl_loss", kl_loss.mean().item())
+        self.stats.accumulate("kl_reward", np.mean(kl_rewards))
 
         rewards = [r + self.kl_ctl * nr for r, nr in zip(rewards, kl_rewards)]
         rewards = torch.tensor(rewards, dtype=torch.float32).view(-1, self.k)
@@ -243,7 +243,7 @@ class RLOO(Algo):
         mb_response_mask = mb_response_mask[:, :max_tokens]
         mb_old_logprobs = mb_old_logprobs[:, : max_tokens - 1]
 
-        with torch.amp.autocast(device_type='cuda', dtype=torch.bfloat16):
+        with torch.amp.autocast(device_type="cuda", dtype=torch.bfloat16):
             output = self.model(
                 input_ids=mb_query_response,
                 attention_mask=mb_query_response_mask,
