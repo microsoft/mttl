@@ -48,7 +48,11 @@ class DummyDataModule(DataModule):
 
 @pytest.fixture
 def dm_batch():
-    def _dm_batch(**kwargs):
+    def _dm_batch(
+        padding_side="right",
+        truncation_side="left",
+        for_generation=False,
+    ):
         dm = DummyDataModule(
             DatasetConfig(
                 dataset="tiny_flan_id",
@@ -57,9 +61,10 @@ def dm_batch():
                 max_input_length=1024,
                 train_batch_size=4,
                 predict_batch_size=2,
-                truncation_side="left",
+                padding_side=padding_side,
+                truncation_side=truncation_side,
             ),
-            **kwargs,
+            for_generation=for_generation,
         )
         dl = dm.val_dataloader()
         batch = next(iter(dl))
@@ -80,38 +85,66 @@ def test_hard_prompt(padding_side, dm_batch):
     )
     text_1 = "This is a test prompt"
     text_2 = "Test test"
-    padding_size = 5
     prompt1 = HardPrompt(config, prompt_init=text_1)
     prompt2 = HardPrompt(config, prompt_init=text_2)
 
-    flan_batch_for_generation = dm_batch(for_generation=True, val_mixin=False)
-    flan_batch_for_training = dm_batch()
+    flan_batch_for_training = dm_batch(padding_side=padding_side)
 
     if padding_side == "left":
         new_inputs = HardPrompt.parallel_forward(
-            [prompt1, prompt2], **flan_batch_for_generation
+            [prompt1, prompt2], **flan_batch_for_training
         )
         inputs_and_prompts, attn_masks, labels_and_prompts = new_inputs
         assert tokenizer.batch_decode(inputs_and_prompts) == [
-            "This is a test prompt\nThis is a dev sentence",
-            "<|endoftext|>" * padding_size + "Test test\nThis is dev",
+            "<|endoftext|>This is a test prompt\nThis is a dev sentence a<|endoftext|>",
+            "<|endoftext|>" * 6 + "Test test\nThis is dev b<|endoftext|>",
         ]
         assert torch.equal(
             attn_masks,
             torch.tensor(
                 [
-                    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-                    [0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1],
+                    [0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+                    [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1],
                 ]
             ),
         )
-        assert list(inputs_and_prompts.shape) == [2, 11]
+        assert list(inputs_and_prompts.shape) == [2, 14]
         assert torch.equal(
             labels_and_prompts,
             torch.tensor(
-                [  # not sure if I understand the rolling of labels
-                    [-100, -100, -100, -100, -100, -100, 220, 50256, 257],
-                    [220, 50256, -100, -100, -100, -100, -100, -100, 275],
+                [
+                    [
+                        -100,
+                        -100,
+                        -100,
+                        -100,
+                        -100,
+                        -100,
+                        -100,
+                        -100,
+                        -100,
+                        -100,
+                        -100,
+                        -100,
+                        257,
+                        50256,
+                    ],
+                    [
+                        -100,
+                        -100,
+                        -100,
+                        -100,
+                        -100,
+                        -100,
+                        -100,
+                        -100,
+                        -100,
+                        -100,
+                        -100,
+                        -100,
+                        275,
+                        50256,
+                    ],
                 ]
             ),
         )
@@ -121,15 +154,15 @@ def test_hard_prompt(padding_side, dm_batch):
         )
         inputs_and_prompts, attn_masks, labels_and_prompts = new_inputs
         assert tokenizer.batch_decode(inputs_and_prompts) == [
-            "This is a test prompt\nThis is a dev sentence a<|endoftext|>",
-            "Test test\nThis is dev b<|endoftext|>" + "<|endoftext|>" * padding_size,
+            "This is a test prompt\nThis is a dev sentence a<|endoftext|><|endoftext|>",
+            "Test test\nThis is dev b<|endoftext|>" + "<|endoftext|>" * 6,
         ]
         assert torch.equal(
             attn_masks,
             torch.tensor(
                 [
-                    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-                    [1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0],
+                    [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0],
+                    [1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0],
                 ]
             ),
         )
@@ -150,8 +183,8 @@ def test_hard_prompt(padding_side, dm_batch):
                         -100,
                         -100,
                         257,
-                        220,
                         50256,
+                        -100,
                     ],
                     [
                         -100,
@@ -161,8 +194,8 @@ def test_hard_prompt(padding_side, dm_batch):
                         -100,
                         -100,
                         275,
-                        220,
                         50256,
+                        -100,
                         -100,
                         -100,
                         -100,

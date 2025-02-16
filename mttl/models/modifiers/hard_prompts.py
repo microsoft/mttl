@@ -51,7 +51,7 @@ class HardPrompt(Modifier):
         # move it to GPU
         eps["input_ids"] = eps["input_ids"].to(input_ids.device)
         eps["attention_mask"] = eps["attention_mask"].to(input_ids.device)
-        #
+
         prompt_shifts = eps["attention_mask"].sum(1)
         modify_labels = labels is not None and prompts[0].model_family == "gpt"
 
@@ -62,7 +62,7 @@ class HardPrompt(Modifier):
             if modify_labels:
                 labels = roll_along(labels, shifts, 1)
 
-        if padding_side == "right":
+        elif padding_side == "right":
             # if padding side of tokenizer is right, then we move the padding to the left here
             eps["input_ids"] = roll_along(eps["input_ids"], prompt_shifts, 1)
             eps["attention_mask"] = roll_along(eps["attention_mask"], prompt_shifts, 1)
