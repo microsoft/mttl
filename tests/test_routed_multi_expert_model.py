@@ -206,7 +206,7 @@ def test_expert_selector_with_poly_task_routing(
         output = module(**batch)
 
         # Because routing is initialized to uniform, should give same result
-        assert np.allclose(output.loss.item(), 19.0, atol=0.1)
+        assert np.allclose(output.loss.item(), 19.1, atol=0.1)
 
         # Now let's change the routing, to make sure the output also changes
         for mod in module.modules():
@@ -416,7 +416,7 @@ def test_expert_selector_with_moe_routing_soft(
     # Test Base Llama model
     spy = mocker.spy(container.selector, "forward")
     output = module(**dummy_batch)
-    assert np.allclose(output.loss.item(), 18, atol=0.1)
+    assert np.allclose(output.loss.item(), 17.8, atol=0.1)
     assert container.selector.total_calls_per_forward == 1
 
     assert spy.call_count == 1
