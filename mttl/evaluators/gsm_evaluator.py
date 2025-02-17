@@ -89,8 +89,13 @@ class GsmEvaluator(GenerativeEvaluator):
 
         def extract_code(text):
             match = re.search(r"```(.*?)```", text, re.DOTALL)
+
+            code_block = re.search(r"def solution\(\):.*?</s>", text, re.DOTALL)
             if match:
                 return match.group(1).strip()
+            elif code_block:
+                code_block = code_block.group(0)[:-4]
+                return code_block
             return None
 
         def print_python_code(predictions_texts, batch, file):
@@ -101,7 +106,7 @@ class GsmEvaluator(GenerativeEvaluator):
                 outputs = pred[len(source) - 1 :]
 
                 # convert it to code
-                code = extract_code(outputs)
+                code = outputs
                 data = {}
                 data["answer"] = float(target)
                 data["output_pred"] = code
