@@ -218,7 +218,7 @@ def test_hard_prompt_eval(dm_batch):
         "EleutherAI/gpt-neo-125m", model_family="gpt", for_generation=True
     )
 
-    flan_batch_for_generation = dm_batch(for_generation=True, val_mixin=False)
+    flan_batch_for_generation = dm_batch(for_generation=True)
     outputs = model.generate(
         inputs=flan_batch_for_generation["input_ids"],
         attention_mask=flan_batch_for_generation["attention_mask"],
