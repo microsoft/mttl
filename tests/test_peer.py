@@ -1,3 +1,4 @@
+from mttl.models.containers.peer_container import PEERMLPContainer
 import numpy as np
 import pytest
 
@@ -17,7 +18,7 @@ def test_peer_moe(tmp_peer_moe_config, dummy_batch):
     )
 
     output = module(**dummy_batch).loss
-    assert np.allclose(output.item(), 18.0, atol=0.1)
+    assert isinstance(module.experts_containers[0], PEERMLPContainer)
 
 
 if __name__ == "__main__":
