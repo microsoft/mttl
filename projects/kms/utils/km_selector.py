@@ -84,5 +84,4 @@ class KnowledgeExtractorSelector(Selector):
             )
             for i in range(len(task_names))
         ]
-
         return BatchExpertsAndWeightsSelectorOutput(expert_names, weights)

@@ -28,6 +28,7 @@ from vllm.worker.worker import Worker
 from projects.kms.deductron.utils import DEFAULT_MAX_TOKENS, DEFAULT_TEMP
 from projects.kms.deductron.ddp_utils import ddp_state
 
+
 class VLLMGenerator:
     _instance = None
 

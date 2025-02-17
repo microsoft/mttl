@@ -1,0 +1,6 @@
+{
+    "loss_function": "dcd", 
+    "dataset_type": "dcd_km", 
+    "dataset": "sordonia/nqa_summaries_qa_phi-3_medium",
+    "nqa_dataset": "sordonia/narrativeqa_sanitized"
+}

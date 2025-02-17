@@ -1,0 +1,6 @@
+{
+    "dataset": "az://mttldata/quality-sanitized",
+    "evaluate_on": "quality",
+    "split": "dev",
+    "custom_split_file": "splits/quality/quality_full.json"
+}

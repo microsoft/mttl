@@ -1,0 +1,11 @@
+{
+    "top_k": 10,
+    "final_dataset_id": "az://mttldata/nqa-rag-summaries", 
+    "source_dataset": "az://mttldata/nqa-summaries-qa-phi-3-medium",
+    "source_document_field": "outputs",
+    "chunk_source": 0,
+    "source_dataset_n_items": 1,
+    "model": "Salesforce/SFR-Embedding-2_R",
+    "dataset": "az://mttldata/narrativeqa-sanitized",
+    "source_dataset_type": "summary"
+}

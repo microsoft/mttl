@@ -129,7 +129,7 @@ def kill_sglang_container():
                 container.kill()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     SGLGenerator(model_name="meta-llama/Llama-3.1-8B-Instruct", seed=42)
     while True:
         time.sleep(5)
