@@ -133,9 +133,9 @@ def get_logprobs(
         desc=f"[{ddp_state.local_process_index}] Gathering logprobs...",
         position=ddp_state.local_process_index,
     ):
-        mb_qm = query_response_mask[batch : batch + batch_size].to(ddp_state.device)
-        mb_q = query_response[batch : batch + batch_size].to(ddp_state.device)
-        mb_r = response_mask[batch : batch + batch_size].to(ddp_state.device)
+        mb_qm = query_response_mask[batch : batch + batch_size].to(model.device)
+        mb_q = query_response[batch : batch + batch_size].to(model.device)
+        mb_r = response_mask[batch : batch + batch_size].to(model.device)
         output = model(
             input_ids=mb_q,
             attention_mask=mb_qm,

@@ -110,6 +110,7 @@ class GRPO(Algo):
                 )
             )
 
+        self.ref_model.to(self.model.device)
         rewards = task.get_rewards(
             model=self.ref_model,
             tokenizer=self.tokenizer,
@@ -185,6 +186,7 @@ class GRPO(Algo):
             temperature=self.temperature,
             reduction="none",
         )
+        self.ref_model.to("cpu")
 
         return (
             query_response,

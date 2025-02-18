@@ -84,6 +84,9 @@ def train(local_rank, args):
     np.random.seed(args.s)
     random.seed(args.s)
 
+    print('I am ', local_rank, 'and my device is', ddp_state.device)
+    print(ddp_state)
+
     if args.o == "auto":
         # create a timestamp
         import datetime
