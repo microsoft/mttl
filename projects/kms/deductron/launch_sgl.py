@@ -72,11 +72,10 @@ class SGLGenerator:
         assert cls._instance is not None, "SGLGenerator not initialized"
         return cls._instance
 
-    def __init__(self, model_name, seed, dp_size=2):
+    def __init__(self, model_name, seed):
         self.model_name = model_name
         self.seed = seed
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.dp_size = dp_size
         self.start()
         SGLGenerator._instance = self
 
@@ -92,7 +91,7 @@ class SGLGenerator:
 --log-level warning \
 --random-seed {self.seed} \
 --base-gpu-id 2 \
---dp-size {self.dp_size}
+--dp-size 2
 """
         )
 

@@ -11,6 +11,7 @@ import sys
 import time
 
 import numpy as np
+from projects.kms.deductron.algos.grpo import GRPO
 import torch
 from datasets import load_dataset
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -22,7 +23,7 @@ from projects.kms.deductron.data_utils import (
     MultiTensorDataset,
     chunk_text,
     get_dataloader,
-    prepare_nqa_dataset,
+    prepare_dataset,
 )
 from launch_sgl import SGLGenerator, is_server_up
 from transformers.trainer_pt_utils import get_parameter_names
@@ -49,9 +50,11 @@ models = {
     "ll8b": "meta-llama/Llama-3.1-8B-Instruct",
 }
 
+
 algos = {
     "rft": RFT,
     "rloo": RLOO,
+    "grpo": GRPO,
 }
 
 
@@ -160,8 +163,8 @@ def train(local_rank, args):
     ddp_state.print("Scheduler set! Total steps:", total_steps)
 
     with ddp_state.main_process_first():
-        train_dataset, val_dataset, test_dataset = prepare_nqa_dataset(
-            algo.tokenizer, block_size=2048
+        train_dataset, val_dataset, test_dataset = prepare_dataset(
+            args.dataset, algo.tokenizer, block_size=2048
         )
 
     sample_indices = np.random.choice(len(val_dataset), 32, replace=False)
@@ -372,6 +375,7 @@ if __name__ == "__main__":
     parser.add_argument("-o", type=str, help="Output directory")
     parser.add_argument("-s", type=int, help="Seed", default=42)
     parser.add_argument("-a", type=str, help="Algorithm")
+    parser.add_argument("--dataset", type=str, help="Dataset", default="nqa")
     parser.add_argument("--lr", type=float, help="Learning rate", default=1e-6)
     parser.add_argument("--epc", type=int, help="Number of epochs", default=20)
     parser.add_argument("--onlbsz", type=int, help="Online batch size", default=32)
