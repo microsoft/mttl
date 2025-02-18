@@ -292,7 +292,7 @@ def prepare_dataset(dataset, tokenizer, block_size=2048):
     elif dataset == 'quality':
         dataset = load_dataset("sordonia/quality_sanitized", split="train")
     train_dataset = dataset.filter(lambda x: x["split"] == "train", num_proc=16)
-    valid_dataset = dataset.filter(lambda x: x["split"] == "validation", num_proc=16)
+    valid_dataset = dataset.filter(lambda x: x["split"] in ["valid", "validation", "dev"], num_proc=16)
     test_dataset = dataset.filter(lambda x: x["split"] == "test", num_proc=16)
 
     def chunk_row(example):

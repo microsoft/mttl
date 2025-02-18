@@ -9,7 +9,6 @@ from openai import OpenAI
 from torch.optim.lr_scheduler import _LRScheduler
 from tqdm import tqdm
 
-from accelerate.state import PartialState
 from projects.kms.deductron.ddp_utils import ddp_state
 
 DEFAULT_TEMP = 0.5
@@ -356,8 +355,6 @@ class CosineWarmupScheduler(_LRScheduler):
 def setup_output_directory(output_dir: str):
     import os
     import shutil
-
-    from ddp_utils import ddp_state
 
     if os.path.exists(output_dir):
         shutil.rmtree(output_dir, ignore_errors=True)

@@ -75,6 +75,8 @@ def train(local_rank, args):
     GenerationBackend.init(args.b, model_name=models[args.m], seed=args.s)
     init_ddp(local_rank, args.P)
 
+    GenerationBackend.get()
+
     # output directory
     torch.manual_seed(args.s)
     if torch.cuda.is_available():
@@ -393,7 +395,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--maxtok", type=int, help="Number of tokens", default=DEFAULT_MAX_TOKENS
     )
-    parser.add_argument("-b", type=str, help="Backend", default="sgl")
+    parser.add_argument("-b", type=str, help="Backend", default="sglc")
     parser.add_argument("--tpsz", type=int, help="Tensor parallel size", default=1)
     parser.add_argument("--ss", type=str, help="Math subset to consider", default="all")
     parser.add_argument("--subs", type=int, help="Subsample examples", default=-1)

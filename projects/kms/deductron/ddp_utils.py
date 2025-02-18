@@ -68,8 +68,6 @@ class DDPState:
         yield inputs[start_index:end_index]
 
 
-# from accelerate.state import PartialState
-# ddp_state = PartialState()
 ddp_state = DDPState()
 
 

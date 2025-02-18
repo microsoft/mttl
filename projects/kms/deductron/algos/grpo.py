@@ -21,10 +21,10 @@ from utils import (
     compute_kl_divergence,
 )
 
-from data_utils import create_joint_tensors, get_ending_tokens, pad_query_and_response
-from gen_utils import GenerationBackend
-from algos.algo import Algo, Request, RequestUtils
-from algos.rft import RFT
+from projects.kms.deductron.data_utils import create_joint_tensors, get_ending_tokens, pad_query_and_response
+from projects.kms.deductron.gen_utils import GenerationBackend
+from projects.kms.deductron.algos.algo import Algo, Request, RequestUtils
+from projects.kms.deductron.algos.rft import RFT
 
 
 class GRPO(Algo):
@@ -41,7 +41,6 @@ class GRPO(Algo):
     def __init__(
         self,
         model_name,
-        reward_func,
         k=5,
         temperature=DEFAULT_TEMP,
         max_tokens=DEFAULT_MAX_TOKENS,
@@ -58,12 +57,13 @@ class GRPO(Algo):
         self.tokenizer = AutoTokenizer.from_pretrained(
             model_name,
         )
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
 
         self.task = task
         self.k = k
         self.kl_ctl = algo_kwargs["kl_ctl"]
         self.kl_max = algo_kwargs["kl_max"]
-        self.reward_func = reward_func
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.stats = AccumulatorDict()
@@ -110,8 +110,6 @@ class GRPO(Algo):
                 )
             )
 
-        self.ref_model.to(ddp_state.device)
-
         rewards = task.get_rewards(
             model=self.ref_model,
             tokenizer=self.tokenizer,
@@ -128,6 +126,7 @@ class GRPO(Algo):
         messages = [r.messages for r in evaluation_requests]
         finished = [r.finished for r in evaluation_requests]
         responses = [r.response for r in evaluation_requests]
+        rewards = [r.reward for r in evaluation_requests]
 
         max_reward, avg_reward = RequestUtils.gather_max_avg_reward(evaluation_requests)
         self.stats.accumulate("avg_reward", avg_reward)
