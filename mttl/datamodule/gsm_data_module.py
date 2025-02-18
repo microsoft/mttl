@@ -23,11 +23,7 @@ def generate_math_prompt_with_python(instruction, input=None, few_shot=8):
     prompt = """Let's use Python to solve math problems step by step. Below are a few Instruction-Response pairs on how to do it."""
     prompt += "\n\n"
     for data in cot_data:
-        if few_shot == 8:
-            prompt += f"### Instruction:\n{data['instruction']}\n\n### Response:\n{data['output']}\n\n"
-        elif few_shot == 1:
-            prompt += f"### Instruction:\n{data['instruction']}\n\n### Response:\n{data['output']}\n\n"
-            break
+        prompt += f"### Instruction:\n{data['instruction']}\n\n### Response:\n{data['output']}\n\n"
     prompt += "Now write a function 'solution' encolsed in ``` in Python to solve this Instruction. Write only a code block. Write only valid Python code without using any units with the numerical values and any invalid symbols.\n\n"
     prompt += f"### Instruction:\n{instruction}\n\n### Response:\n"
     return prompt
