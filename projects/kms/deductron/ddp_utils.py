@@ -78,7 +78,7 @@ def init_ddp(local_rank=0, world_size=1):
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "29502"
     ddp_state.process_group = init_process_group(
-        "nccl",
+        "gloo",
         world_size=world_size,
         rank=local_rank,
     )

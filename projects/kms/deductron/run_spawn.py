@@ -150,7 +150,7 @@ def train(local_rank, args):
     )
     ddp_state.print(torch.cuda.mem_get_info())
 
-    if args.a == "rloo":
+    if args.a in ["rloo", "grpo"]:
         num_ex = onl_batch_size * args.k
     else:
         num_ex = onl_batch_size
@@ -188,8 +188,8 @@ def train(local_rank, args):
             np.mean([r.reward for r in val_requests]), device=ddp_state.device
         )
 
-    torch.distributed.all_reduce(val_reward, op=torch.distributed.ReduceOp.AVG)
-    val_reward = val_reward.item()
+    torch.distributed.all_reduce(val_reward, op=torch.distributed.ReduceOp.SUM)
+    val_reward = val_reward.item() / ddp_state.num_processes
     training_stats.append(
         {
             "val_reward": val_reward,
@@ -217,6 +217,7 @@ def train(local_rank, args):
             list(zip(queries_batch, labels_batch))
         ) as partial_batch:
             part_queries, part_labels = zip(*partial_batch)
+            print(f"[{ddp_state.ddp_local_rank}] Gathering episodes...")
             episode_data = algo.gather_episodes(part_queries, part_labels)
 
         epoch_dataset = MultiTensorDataset(*episode_data)
@@ -297,8 +298,8 @@ def train(local_rank, args):
                 np.mean([r.reward for r in val_requests]), device=ddp_state.device
             )
 
-        torch.distributed.all_reduce(val_reward, op=torch.distributed.ReduceOp.AVG)
-        val_reward = val_reward.item()
+        torch.distributed.all_reduce(val_reward, op=torch.distributed.ReduceOp.SUM)
+        val_reward = val_reward.item() / ddp_state.num_processes
         ddp_state.wait_for_everyone()
 
         if ddp_state.is_main_process:
@@ -324,7 +325,7 @@ def train(local_rank, args):
             if epoch == 0 or training_stats[-1]["val_reward"] >= np.max(
                 [t["val_reward"] for t in training_stats[:-1]]
             ):
-                if ddp_state.num_processes > 1:
+                if ddp_state.num_processes >= 1:
                     algo.model.module.save_pretrained(f"{args.o}/model")
                 else:
                     algo.model.save_pretrained(f"{args.o}/model")
@@ -347,6 +348,7 @@ def train(local_rank, args):
             GenerationBackend.get().load_weights(algo.model)
 
         ddp_state.wait_for_everyone()
+        print("Epoch done!", ddp_state)
 
     if ddp_state.local_process_index == 0:
         generator.shutdown()
