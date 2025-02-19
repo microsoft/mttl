@@ -2,7 +2,7 @@
 
 from mttl.datamodule.base import get_datamodule
 from mttl.models.library.expert_library import ExpertLibrary
-
+from mttl.models.containers.selectors.base import UniformSelectorConfig
 from mttl.evaluators.gsm_evaluator import GsmEvaluator
 from mttl.arguments import EvaluationConfig
 from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
@@ -16,8 +16,10 @@ args = EvaluationConfig.parse()
 
 
 from mttl.datamodule.gsm_data_module import GsmDataConfig, GsmDataModule
-
-# datamodule = get_datamodule(args, for_generation=True)
+from mttl.models.library.library_transforms import (
+    WeightedLinearMerge,
+    WeightedLinearMergeConfig,
+)
 
 config = GsmDataConfig(
     model=args.model,
@@ -38,7 +40,11 @@ else:
 
     library = ExpertLibrary.get_expert_library(args.library_id)
     module = MultiExpertModule(**vars(args)).to(device)
-    if args.expert_selection is not None:
+
+    if args.merge_or_route == "uniform":
+        module.add_experts_from_library(args.library_id)
+        module.model.set_selector("lora", UniformSelectorConfig(lora_merge_after=True))
+    elif args.expert_selection is not None:
         expert = library.get_expert(args.expert_selection)
         module.add_expert_instance(expert, is_default=True)
     else:

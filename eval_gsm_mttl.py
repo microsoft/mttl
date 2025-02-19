@@ -31,7 +31,6 @@ with open(args.file, "r") as f:
         code = extract_code(data["output_pred"])
         if code is None:
             invalid_code += 1
-            breakpoint()
             continue
         predict_answer = None
         try:
