@@ -440,7 +440,7 @@ class SkilledLoRA(LoRA):
                 "bld,beqdr->bleqr", input_lora, skilled_loras_a
             )
             adapter_out = torch.einsum(
-                'bleqr,berqd,blqe->blqd', partial_out, skilled_loras_b, weights
+                "bleqr,berqd,blqe->blqd", partial_out, skilled_loras_b, weights
             )
             adapter_out = adapter_out.flatten(2, 3)
         else:
