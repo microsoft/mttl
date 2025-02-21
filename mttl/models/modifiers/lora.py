@@ -132,10 +132,10 @@ class LoRA(Modifier, MergeableModifierMixin):
 
     def create_for_layer(self, layer):
         self.lora_a = nn.Parameter(
-            torch.empty(layer.in_features, self.rank).to(device=layer.weight.device),
+            torch.empty(layer.in_features, self.rank, device=layer.weight.device),
         )
         self.lora_b = nn.Parameter(
-            torch.empty(self.rank, layer.out_features).to(device=layer.weight.device),
+            torch.empty(self.rank, layer.out_features, device=layer.weight.device),
         )
 
     def forward(self, input, **kwargs):
@@ -435,13 +435,10 @@ class SkilledLoRA(LoRA):
         # q = splits
         # e = experts
         if merge_after:
-            partial_out = torch.einsum(
-                "bld,beqdr->bleqr", (input_lora, skilled_loras_a)
-            )
+            partial_out = torch.einsum("bld,beqdr->bleqr", input_lora, skilled_loras_a)
             adapter_out = torch.einsum(
-                "bleqr,berqd->bleqd", (partial_out, skilled_loras_b)
+                "bleqr,berqd,blqe->blqd", partial_out, skilled_loras_b, weights
             )
-            adapter_out = torch.einsum("blqe,bleqd->blqd", (weights, adapter_out))
             adapter_out = adapter_out.flatten(2, 3)
         else:
             A = torch.einsum("blqe,beqdr->blqdr", (weights, skilled_loras_a))
