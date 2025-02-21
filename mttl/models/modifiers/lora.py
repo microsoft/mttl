@@ -19,7 +19,6 @@ class LoRAConfig(ModifierConfig):
     lora_init_b_random: bool = False
 
 
-
 @Modifier.register("lora", config_cls=LoRAConfig)
 class LoRA(Modifier, MergeableModifierMixin):
     def __init__(
@@ -436,9 +435,7 @@ class SkilledLoRA(LoRA):
         # q = splits
         # e = experts
         if merge_after:
-            partial_out = torch.einsum(
-                "bld,beqdr->bleqr", input_lora, skilled_loras_a
-            )
+            partial_out = torch.einsum("bld,beqdr->bleqr", input_lora, skilled_loras_a)
             adapter_out = torch.einsum(
                 "bleqr,berqd,blqe->blqd", partial_out, skilled_loras_b, weights
             )
