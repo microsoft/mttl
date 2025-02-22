@@ -287,12 +287,14 @@ class AccumulatorDict:
 def prepare_dataset(dataset, tokenizer, block_size=2048):
     from datasets import load_dataset
 
-    if dataset == 'nqa':
+    if dataset == "nqa":
         dataset = load_dataset("sordonia/narrativeqa_sanitized", split="train")
-    elif dataset == 'quality':
+    elif dataset == "quality":
         dataset = load_dataset("sordonia/quality_sanitized", split="train")
     train_dataset = dataset.filter(lambda x: x["split"] == "train", num_proc=16)
-    valid_dataset = dataset.filter(lambda x: x["split"] in ["valid", "validation", "dev"], num_proc=16)
+    valid_dataset = dataset.filter(
+        lambda x: x["split"] in ["valid", "validation", "dev"], num_proc=16
+    )
     test_dataset = dataset.filter(lambda x: x["split"] == "test", num_proc=16)
 
     def chunk_row(example):

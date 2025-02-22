@@ -21,7 +21,11 @@ from utils import (
     compute_kl_divergence,
 )
 
-from projects.kms.deductron.data_utils import create_joint_tensors, get_ending_tokens, pad_query_and_response
+from projects.kms.deductron.data_utils import (
+    create_joint_tensors,
+    get_ending_tokens,
+    pad_query_and_response,
+)
 from projects.kms.deductron.gen_utils import GenerationBackend
 from projects.kms.deductron.algos.algo import Algo, Request, RequestUtils
 from projects.kms.deductron.algos.rft import RFT

@@ -84,7 +84,7 @@ def train(local_rank, args):
     np.random.seed(args.s)
     random.seed(args.s)
 
-    print('I am ', local_rank, 'and my device is', ddp_state.device)
+    print("I am ", local_rank, "and my device is", ddp_state.device)
     print(ddp_state)
 
     if args.o == "auto":
@@ -409,7 +409,7 @@ if __name__ == "__main__":
         type=str,
         help="Type of task to solve",
         default="s_ae",
-        choices=["s_ae", "s_ncp"],
+        choices=["s_ae", "s_ncp", "think_ncp"],
     )
     parser.add_argument("-d", type=str, help="Run description", default=None)
     parser.add_argument("-P", type=int, help="Num Processes", default=1)

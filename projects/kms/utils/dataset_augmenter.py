@@ -136,10 +136,7 @@ class GenerationTask(Registrable):
         return text
 
     def process_task(self, chunks, rests, tokenizer, llm, generation_params):
-        prompts = [
-            self.create_task(chunk) 
-            for chunk in chunks
-        ]
+        prompts = [self.create_task(chunk) for chunk in chunks]
 
         outputs = llm.generate(prompts, generation_params)
         results = []
@@ -148,9 +145,9 @@ class GenerationTask(Registrable):
             section = {
                 "input": chunk,
                 "type": self.__class__.registered_name,
-                "outputs": []
+                "outputs": [],
             }
-            
+
             for response in generation_output.outputs:
                 processed = self.postprocess_generation(response.text)
                 if isinstance(processed, list):
@@ -169,6 +166,7 @@ class SubtopicGenerationTask(Registrable):
     """
     First-pass: Extract subtopics (e.g. distinct points, events, or themes).
     """
+
     def get_prompt(self, text: str) -> str:
         return (
             "Read the following text and list the distinct subtopics or key points.\n"
@@ -198,6 +196,7 @@ class SubtopicQAGenerationTask(Registrable):
     """
     Second-pass: For each subtopic, generate multiple Q&A pairs.
     """
+
     questions_per_subtopic: int = 2
 
     def get_prompt(self, text: str, subtopic: str) -> str:
@@ -214,11 +213,11 @@ class SubtopicQAGenerationTask(Registrable):
         import re
 
         question_pattern = r"<question>\s*(.*?)\s*</question>"
-        answer_pattern   = r"<answer>\s*(.*?)\s*</answer>"
-        
+        answer_pattern = r"<answer>\s*(.*?)\s*</answer>"
+
         questions = re.findall(question_pattern, raw_text, re.DOTALL | re.IGNORECASE)
-        answers   = re.findall(answer_pattern,   raw_text, re.DOTALL | re.IGNORECASE)
-        
+        answers = re.findall(answer_pattern, raw_text, re.DOTALL | re.IGNORECASE)
+
         out = []
         for q, a in zip(questions, answers):
             out.append({"question": q.strip(), "answer": a.strip()})
@@ -505,9 +504,15 @@ class DatasetAugmenter:
             generation_params = {
                 "num_completions": self.num_generations,
                 "top_p": self.generation_top_p,
-               "max_tokens": self.max_continuation_length,
+                "max_tokens": self.max_continuation_length,
             }
-            results = task.process(chunks, rests, self.tokenizer, self.llm, generation_params=generation_params)
+            results = task.process(
+                chunks,
+                rests,
+                self.tokenizer,
+                self.llm,
+                generation_params=generation_params,
+            )
             output_dataset.extend(results)
 
             # Print some examples for debugging
