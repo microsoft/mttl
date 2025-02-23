@@ -33,7 +33,8 @@ def main():
     if load_mode == "saved":
         model_identifier = os.path.join(args.model_dir, "model")
     else:
-        model_identifier = train_args.get("m")
+        from run_spawn import models
+        model_identifier = models[train_args.get("m")]
 
     tokenizer = AutoTokenizer.from_pretrained(model_identifier)
     
@@ -55,17 +56,18 @@ def main():
     task = get_task(train_args.get("task"))
 
     results = []
-    for sample in samples:
-        messages = task.encode_template([sample["source"]])[0]
-        # Use temperature, top_p, and max_tokens from training args if available
-        temperature = train_args.get("t", 1.0)
-        max_tokens = train_args.get("maxtok", 128)
-        top_p = 1.0
+    messages = task.encode_template([sample["source"] for sample in samples])
+    # Use temperature, top_p, and max_tokens from training args if available
+    temperature = train_args.get("t", 1.0)
+    max_tokens = train_args.get("maxtok", 128)
+    top_p = 1.0
 
-        # Query SGL server using its chat method (returns a list of responses)
-        output = generator.chat(messages, temperature=temperature, top_p=top_p, max_tokens=max_tokens)
+    # Query SGL server using its chat method (returns a list of responses)
+    outputs = generator.chat(messages, temperature=temperature, top_p=top_p, max_tokens=max_tokens)
+    
+    for i, output in enumerate(outputs):
         results.append({
-            "prompt": messages,
+            "prompt": messages[i],
             "response": output[0] if output else ""
         })
 
