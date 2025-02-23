@@ -351,7 +351,7 @@ def train(local_rank, args):
         print("Epoch done!", ddp_state)
 
     if ddp_state.local_process_index == 0:
-        generator.shutdown()
+        GenerationBackend.get().shutdown()
     ddp_state.wait_for_everyone()
 
 

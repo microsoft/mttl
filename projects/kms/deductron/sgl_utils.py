@@ -246,6 +246,9 @@ class SGLGeneratorClient:
             return outputs, finished
         return outputs
 
+    def shutdown(self):
+        pass
+
 
 class SGLGenerator:
     _instance = None
