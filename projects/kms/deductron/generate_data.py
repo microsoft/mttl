@@ -3,10 +3,11 @@ import json
 import os
 import time
 
+from projects.kms.deductron.sgl_utils import SGLGeneratorClient
 import torch
 from transformers import AutoTokenizer
 
-from projects.kms.deductron.sgl_utils import SGLGenerator
+from projects.kms.deductron.launch_sgl import SGLGenerator
 
 
 def load_args(args_file):
@@ -38,7 +39,8 @@ def main():
     
    # Start SGL server with the chosen model identifier and seed from training args
     seed = train_args.get("s", 42)
-    generator = SGLGenerator(model_identifier, seed)
+    SGLGenerator(model_identifier, seed)
+    generator = SGLGeneratorClient(model_identifier)
 
     # Setup dataset using the dataset name from training args and the tokenizer
     from projects.kms.deductron.data_utils import prepare_dataset
