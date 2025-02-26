@@ -349,7 +349,7 @@ def train_km(training_args: KMArguments):
 
     if not training_args.callback_during_training and training_args.eval_after_training:
         model = (
-            type(model)
+            type(raw_model)
             .from_pretrained(training_args.output_dir + "/best_model")
             .to(device)
         )
