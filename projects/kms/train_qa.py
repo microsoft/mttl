@@ -300,17 +300,22 @@ if __name__ == "__main__":
     assert args.dataset_config
 
     # check if KE expert already exists
+    should_exit = False
     if not args.force and os.path.exists(
         args.output_dir + "/last_model/mttl_weights.bin"
     ):
         logger.warning(f"Found expert checkpoint. in {args.output_dir}/last_model")
-        exit(0)
+        should_exit = True
     elif not args.force and args.ke_uri:
         try:
             expert = load_expert(args.ke_uri)
             logger.warning(f"Found expert in {args.ke_uri}")
-            exit(0)
+            should_exit = True
         except:
             pass
+
+    if should_exit:
+        logger.warning("Exiting without training")
+        exit(0)
 
     train_ke(args)
