@@ -272,6 +272,9 @@ def train_km(training_args: KMArguments):
                 batch = transfer_batch_to_device(batch, device)
                 loss = loss_function(model, batch)
 
+            model.require_backward_grad_sync = (
+                step + 1 == args.gradient_accumulation_steps
+            )
             loss = loss / args.gradient_accumulation_steps
             loss_accum += loss.detach()
             loss.backward()
@@ -347,16 +350,15 @@ def train_km(training_args: KMArguments):
     raw_model.save_pretrained(training_args.output_dir + "/last_model")
     training_args.save_config(training_args.output_dir + "/last_model")
 
-    if not training_args.callback_during_training and training_args.eval_after_training:
-        model = (
-            type(raw_model)
-            .from_pretrained(training_args.output_dir + "/best_model")
-            .to(device)
-        )
+    if training_args.eval_after_training:
+        # reload the best model
+        raw_model.load_weights(training_args.output_dir + "/best_model")
+
         val_loss, eval_score = do_evaluation(
             datamodule, model, loss_function, evaluator
         )
         logger.info(f"Final Validation Loss: {val_loss}, {eval_metric}: {eval_score}")
+
         met_logger.log_metrics(
             {"cv_val_loss": val_loss, eval_metric: eval_score}, step=global_step
         )

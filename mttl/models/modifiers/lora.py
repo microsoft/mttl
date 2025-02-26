@@ -391,7 +391,7 @@ class SkilledLoRA(LoRA):
         if len(dim_names) != weights.ndim:
             raise ValueError("Not all dimensions are present in the weights tensor.")
 
-        device = skilled_loras[0].lora_a.device
+        device = input.device
         n_skills = skilled_loras[0].lora_a.shape[0]
         assert np.all(skl.n_skills == n_skills for skl in skilled_loras)
 
@@ -414,6 +414,11 @@ class SkilledLoRA(LoRA):
                 [lora.lora_b for lora in skilled_loras], dim=0
             )
 
+        # make sure the skilled loras are on the same device as the input
+        if skilled_loras_a.device != device:
+            skilled_loras_a = skilled_loras_a.to(device=device)
+            skilled_loras_b = skilled_loras_b.to(device=device)
+
         expected_dims = ["batch", "sequence", "splits", "experts"]
         for i, dim in enumerate(expected_dims):
             if dim not in dim_names:
@@ -427,9 +432,11 @@ class SkilledLoRA(LoRA):
         input_lora = skilled_loras[0].dropout_layer(input_lora)
 
         # (n_examples,)
-        scaling = torch.cat(
-            [torch.FloatTensor([lora.scaling]) for lora in skilled_loras], dim=0
-        ).to(device=device, dtype=skilled_loras[0].lora_a.dtype)
+        scaling = torch.tensor(
+            [lora.scaling for lora in skilled_loras],
+            dtype=skilled_loras[0].lora_a.dtype,
+            device=device,
+        )
 
         # (batch, dimension)
         if input_lora.ndim == 2:
@@ -452,14 +459,12 @@ class SkilledLoRA(LoRA):
             A = torch.einsum("blqe,beqdr->blqdr", (weights, skilled_loras_a))
             B = torch.einsum("blqe,berqd->blrqd", (weights, skilled_loras_b))
             batch_size, sequence_length, rank, n_splits, d_split = B.shape
-
             # flatten the "splits" (q) dimension
             A, B = A.flatten(2, 3), B.flatten(3, 4)
-
             partial_out = torch.einsum("bld,bldr->blr", (input_lora, A))
             adapter_out = torch.einsum("blr,blrd->bld", (partial_out, B))
 
-        adapter_out = adapter_out * scaling
+        adapter_out.mul_(scaling)
 
         # squeeze again sequence dimension ("l") if needed
         if layer_out.ndim == 2:

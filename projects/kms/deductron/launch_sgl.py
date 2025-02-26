@@ -72,11 +72,16 @@ class SGLGenerator:
         assert cls._instance is not None, "SGLGenerator not initialized"
         return cls._instance
 
-    def __init__(self, model_name, seed, dp_size=2):
+    def shutdown(self):
+        from sglang.utils import terminate_process
+
+        terminate_process(self.process)
+        self.process = None
+
+    def __init__(self, model_name, seed):
         self.model_name = model_name
         self.seed = seed
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.dp_size = dp_size
         self.start()
         SGLGenerator._instance = self
 
@@ -92,7 +97,7 @@ class SGLGenerator:
 --log-level warning \
 --random-seed {self.seed} \
 --base-gpu-id 2 \
---dp-size {self.dp_size}
+--dp-size 2
 """
         )
 
@@ -129,7 +134,7 @@ def kill_sglang_container():
                 container.kill()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     SGLGenerator(model_name="meta-llama/Llama-3.1-8B-Instruct", seed=42)
     while True:
         time.sleep(5)

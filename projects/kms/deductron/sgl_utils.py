@@ -195,7 +195,6 @@ class SGLGeneratorClient:
         import requests
 
         self.save_model(model)
-        ddp_state.wait_for_everyone()
 
         response = requests.post(
             f"http://localhost:{self.port}/update_weights_from_disk",
@@ -246,6 +245,9 @@ class SGLGeneratorClient:
         if return_finished:
             return outputs, finished
         return outputs
+
+    def shutdown(self):
+        pass
 
 
 class SGLGenerator:

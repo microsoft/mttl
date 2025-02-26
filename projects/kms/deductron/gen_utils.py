@@ -1,9 +1,10 @@
 class GenerationBackend:
-    backend = "vllm"
+    backend = None
 
     @classmethod
     def init(cls, backend, **kwargs):
         cls.backend = backend
+
         if cls.backend == "vllm":
             from vllm_utils import VLLMGenerator
 
@@ -21,8 +22,12 @@ class GenerationBackend:
 
             SGLGeneratorClient(**kwargs)
 
+        print(f"Generation backend initialized: {cls.backend}")
+
     @classmethod
     def get(cls):
+        assert cls.backend is not None, "Backend not initialized"
+
         if cls.backend == "vllm":
             from vllm_utils import VLLMGenerator
 

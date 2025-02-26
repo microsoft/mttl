@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 from dataclasses import dataclass
-from typing import List, Union
+from typing import Dict, List, Union
 
 import click
 import tenacity
@@ -134,6 +134,94 @@ class GenerationTask(Registrable):
 
     def postprocess_generation(self, text):
         return text
+
+    def process_task(self, chunks, rests, tokenizer, llm, generation_params):
+        prompts = [self.create_task(chunk) for chunk in chunks]
+
+        outputs = llm.generate(prompts, generation_params)
+        results = []
+
+        for chunk, generation_output, rest in zip(chunks, outputs, rests):
+            section = {
+                "input": chunk,
+                "type": self.__class__.registered_name,
+                "outputs": [],
+            }
+
+            for response in generation_output.outputs:
+                processed = self.postprocess_generation(response.text)
+                if isinstance(processed, list):
+                    section["outputs"].extend(processed)
+                else:
+                    section["outputs"].append(processed)
+
+            if section["outputs"]:
+                section.update(rest)
+                results.append(section)
+        return results
+
+
+@dataclass
+class SubtopicGenerationTask(Registrable):
+    """
+    First-pass: Extract subtopics (e.g. distinct points, events, or themes).
+    """
+
+    def get_prompt(self, text: str) -> str:
+        return (
+            "Read the following text and list the distinct subtopics or key points.\n"
+            "Just provide a clear bullet list. Example format:\n"
+            "- Subtopic 1\n- Subtopic 2\n\n"
+            "********** Text **********\n"
+            f"{text}\n"
+            "********************\n"
+            "Please list the subtopics:"
+        )
+
+    def postprocess_generation(self, raw_text: str) -> List[str]:
+        # Naive bullet-based splitting
+        import re
+
+        lines = re.split(r"[\r\n]+", raw_text)
+        subtopics = []
+        for line in lines:
+            line = line.strip("-• \n\r\t")
+            if line:
+                subtopics.append(line)
+        return subtopics
+
+
+@dataclass
+class SubtopicQAGenerationTask(Registrable):
+    """
+    Second-pass: For each subtopic, generate multiple Q&A pairs.
+    """
+
+    questions_per_subtopic: int = 2
+
+    def get_prompt(self, text: str, subtopic: str) -> str:
+        return (
+            f"Subtopic: {subtopic}\n\n"
+            f"Based on this subtopic, generate {self.questions_per_subtopic} question/answer pairs that "
+            "require careful reading of the relevant text. The Q&A should not repeat the same info. "
+            "Format:\n<question>Q</question>\n<answer>A</answer>\n...\n\n"
+            "********** Original Text Chunk **********\n"
+            f"{text}"
+        )
+
+    def postprocess_generation(self, raw_text: str) -> List[Dict[str, str]]:
+        import re
+
+        question_pattern = r"<question>\s*(.*?)\s*</question>"
+        answer_pattern = r"<answer>\s*(.*?)\s*</answer>"
+
+        questions = re.findall(question_pattern, raw_text, re.DOTALL | re.IGNORECASE)
+        answers = re.findall(answer_pattern, raw_text, re.DOTALL | re.IGNORECASE)
+
+        out = []
+        for q, a in zip(questions, answers):
+            out.append({"question": q.strip(), "answer": a.strip()})
+        return out
 
 
 @GenerationTask.register("qa")
@@ -311,7 +399,7 @@ class DatasetAugmenter:
                     )
                 ),
                 max_num_seqs=64,
-                max_model_len=min(4096, self.tokenizer.model_max_length),
+                max_model_len=max(4096, self.tokenizer.model_max_length),
             )
             logger.warning(
                 f"DatasetAugmenter: Setting max_model_len to {self.tokenizer.model_max_length}."
@@ -397,61 +485,43 @@ class DatasetAugmenter:
             chunks_iterator = chunk_text(text, self.tokenizer, self.block_size)
 
             for chunk in chunks_iterator:
-                for task in self.tasks.values():
-                    chunks.append(chunk)
-                    types.append(task.registered_name)
-                    prompts.append(
-                        task.create_task(chunk, add_chat_template=not self.oai)
-                    )
-                    # append the rest of the columns
-                    rest = {}
-                    for column in dataset.column_names:
-                        if column != "text" and (
-                            carry_columns == "all" or column in carry_columns
-                        ):
-                            rest[column] = dataset[doc_idx][column]
-                    rests.append(rest)
+                chunks.append(chunk)
+                # append the rest of the columns
+                rest = {}
+                for column in dataset.column_names:
+                    if column != "text" and (
+                        carry_columns == "all" or column in carry_columns
+                    ):
+                        rest[column] = dataset[doc_idx][column]
+                rests.append(rest)
 
-        if not self.oai:
-            outputs = self.llm.generate(prompts, self.sampling_params)
-        else:
-            outputs = asyncio.run(
-                oai_get_completions_batched(
-                    prompts,
-                    self.model,
-                    num_completions=self.num_generations,
-                    top_p=self.generation_top_p,
-                    max_tokens=self.max_continuation_length,
-                )
+        # Process each task separately
+        output_dataset = []
+        for task_name, task in tqdm.tqdm(self.tasks.items(), desc="Processing tasks"):
+            logger.info(f"Processing task: {task_name}")
+
+            # For local models, use synchronous processing
+            generation_params = {
+                "num_completions": self.num_generations,
+                "top_p": self.generation_top_p,
+                "max_tokens": self.max_continuation_length,
+            }
+            results = task.process(
+                chunks,
+                rests,
+                self.tokenizer,
+                self.llm,
+                generation_params=generation_params,
             )
+            output_dataset.extend(results)
 
-        for n, (generation_output, chunk, type, rest) in enumerate(
-            zip(outputs, chunks, types, rests)
-        ):
-            section = {}
-            section["input"] = chunk
-            section["type"] = type
-            section["outputs"] = []
-            for i, response in enumerate(generation_output.outputs):
-                text = self.tasks[type].postprocess_generation(response.text)
-                if isinstance(text, list):
-                    for t in text:
-                        section["outputs"].append(t)
-                else:
-                    section["outputs"].append(text)
-
-            if len(section["outputs"]) == 0:
-                continue
-
-            if n < 5:
+            # Print some examples for debugging
+            for n, result in enumerate(results[:5]):
                 print("********************")
-                print("Type: ", section["type"])
-                print("Input: ", section["input"])
-                print("Output: ", section["outputs"][0])
+                print("Type: ", result["type"])
+                print("Input: ", result["input"])
+                print("Output: ", result["outputs"][0])
                 print("********************")
-
-            section.update(rest)
-            output_dataset.append(section)
 
         d = Dataset.from_list(output_dataset)
 

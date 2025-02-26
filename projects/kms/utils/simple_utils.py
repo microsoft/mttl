@@ -13,7 +13,7 @@ from mttl.dist_utils import (
 )
 from mttl.logging import logger
 from mttl.models.expert_model import disable_modifiers
-from mttl.models.utils import transfer_batch_to_device
+from mttl.models.utils import compute_loglike_loss, transfer_batch_to_device
 
 
 def print_metrics(data):
@@ -45,6 +45,51 @@ def print_metrics(data):
         return "".join(spark_chars[idx] for idx in scaled_data)
     except:
         return "<error>"
+
+
+def mc_loss(
+    model,
+    inputs,
+    temp=1.0,
+    iterative=False,
+):
+    """
+    Multiple choice training loss, we normalize the log-likelihood of each answer,
+    and compute cross-entropy on the correct label.
+    """
+    import numpy as np
+
+    input_ids = inputs["input_ids"]
+    labels = inputs[f"labels"]
+    attention_mask = inputs[f"attention_mask"]
+    num_options = inputs["num_options"]
+    labels_index = inputs["labels_index"]
+
+    outputs = model(
+        input_ids=input_ids,
+        attention_mask=attention_mask,
+        task_names=inputs.get("task_names"),
+    )
+    loss_per_option = compute_loglike_loss(
+        outputs.logits,
+        labels,
+        reduction="none",
+        normalize_length=True,
+    )
+    del outputs, input_ids, attention_mask
+    torch.cuda.empty_cache()
+
+    loss_per_example = [
+        loss_per_option[
+            int(np.sum(num_options[:i])) : int(np.sum(num_options[: i + 1]))
+        ]
+        for i in range(len(labels_index))
+    ]
+    loss_per_example = [
+        -torch.log_softmax(-option_losses, dim=0)[labels_index[i]]
+        for i, option_losses in enumerate(loss_per_example)
+    ]
+    return torch.stack(loss_per_example).mean()
 
 
 def dcd_loss(
@@ -157,28 +202,53 @@ def lm_loss(model, inputs, prefix=""):
     return outputs.loss
 
 
-def do_evaluation(datamodule, model, loss_function, evaluator, **kwargs) -> bool:
-    val_loss = []
-    for batch in tqdm(datamodule.val_dataloader(), disable=not is_main_process()):
+def do_evaluation(
+    datamodule,
+    model,
+    loss_function,
+    evaluator=None,
+    evaluator_split="dev",
+    split="dev",
+    **kwargs,
+) -> bool:
+
+    if split == "dev":
+        eval_dataloader = datamodule.val_dataloader()
+    else:
+        eval_dataloader = datamodule.test_dataloader()
+
+    eval_loss = []
+    for batch in tqdm(eval_dataloader, disable=not is_main_process()):
         with torch.no_grad():
             batch = transfer_batch_to_device(batch, model.device)
-            val_loss.append(loss_function(model, batch).item())
+            eval_loss.append(loss_function(model, batch).item())
+            del batch
+    torch.cuda.empty_cache()
 
-    val_loss = distributed_mean(val_loss, model.device)
+    eval_loss = distributed_mean(eval_loss, model.device)
+
     if evaluator is not None:
-        eval_score = evaluator.evaluate(model, "dev", **kwargs)
+        eval_score = evaluator.evaluate(model, split=evaluator_split, **kwargs)
     else:
         eval_score = None
-    return val_loss, eval_score
+
+    torch.cuda.empty_cache()
+    return eval_loss, eval_score
 
 
 class SimpleLogger:
-    def __init__(self, output_dir):
-        self.output_file = os.path.join(output_dir, "metrics.json")
-        os.makedirs(output_dir, exist_ok=True)
+    def __init__(self, output_dir, file="metrics.json"):
+        self.output_file = os.path.join(output_dir, file)
 
-        if os.path.exists(self.output_file):
-            os.remove(self.output_file)
+        if is_main_process():
+            os.makedirs(output_dir, exist_ok=True)
+
+            try:
+                if os.path.exists(self.output_file):
+                    with open(self.output_file, "w") as f:
+                        pass
+            except:
+                pass
 
     def get_metric(self, metric_name):
         try:
@@ -190,8 +260,6 @@ class SimpleLogger:
             return None
 
     def log_metrics(self, metrics, step=None):
-        from mttl.dist_utils import is_main_process
-
         if not is_main_process():
             return
 

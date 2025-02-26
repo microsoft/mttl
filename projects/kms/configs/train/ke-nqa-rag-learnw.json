@@ -1,0 +1,16 @@
+{
+    "router_selector": "ke_selector",
+    "dataset": "az://mttldata/nqa-rag-256",
+    "topk_context": 5,
+    "include_context": true,
+    "callback_during_training": false,
+    "eval_before_training": false,
+    "dataset_type": "narrativeqa",
+    "patience": 5,
+    "max_train_tasks": 250,
+    "learning_rate": 1e-4,
+    "micro_batch_size": 1,
+    "predict_batch_size": 1,
+    "learn_w": true,
+    "router_granularity": "finegrained"
+}

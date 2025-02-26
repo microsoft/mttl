@@ -15,8 +15,11 @@ from projects.kms.utils.quality_datamodule import (
 
 class QualityEvaluator(LogLikeEvaluator):
     def __init__(self, dataset_args: "DataArgs", generation_kwargs: Dict = {}):
+        import copy
+
         from mttl.datamodule.base import get_datamodule
 
+        dataset_args = copy.deepcopy(dataset_args)
         dataset_args.dataset_type = "quality"
         dataset_args.add_eos_to_targets = False
 

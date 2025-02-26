@@ -13,10 +13,6 @@ from mttl.models.containers.selectors.base import (
     TaskNameSelector,
     TaskNameSelectorConfig,
 )
-from mttl.models.containers.selectors.km_selector import (
-    KnowledgeExtractorSelector,
-    KnowledgeExtractorSelectorConfig,
-)
 from mttl.models.containers.selectors.moe_selector import (
     MOERKHSSelector,
     MOERKHSSelectorConfig,
@@ -43,4 +39,8 @@ from mttl.models.containers.selectors.selector_output import (
     ExpertsAndWeightsSelectorOutput,
     ExpertsSplitsAndWeightsSelectorOutput,
     SelectorOutput,
+)
+from projects.kms.utils.km_selector import (
+    KnowledgeExtractorSelector,
+    KnowledgeExtractorSelectorConfig,
 )

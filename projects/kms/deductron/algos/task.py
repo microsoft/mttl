@@ -32,6 +32,8 @@ def get_task(task_name: str):
         task = SummaryAutoencoderTask()
     elif task_name == "s_ncp":
         task = SummaryNextChunkPredictionTask()
+    elif task_name == "think_ncp":
+        task = ThinkNextChunkPredictionTask()
     else:
         raise ValueError("Task not known!")
     return task
@@ -195,6 +197,37 @@ class SummaryNextChunkPredictionTask:
                     "role": "user",
                     "content": f"Summarize the following text in around {int(len(prompt) / 4)} words without omitting any important details.\n"
                     + "The summary should be grammatically correct and summarize all the different sections in the text.\n"
+                    + "********** Text **********\n"
+                    + prompt
+                    + "\n********************",
+                }
+            ]
+            for prompt in prompts
+        ]
+
+
+class ThinkNextChunkPredictionTask(SummaryNextChunkPredictionTask):
+    def decode_template(self, problem, response):
+        return [
+            {
+                "role": "user",
+                "content": "You are provided with some notes created from a hidden paragraph of text, and the last few sentences of the paragraph to give you a rough idea."
+                + " Your task is to write a continuation of the hidden paragraph from the information contained in the notes.\n"
+                + "These are the notes of the paragraph\n\n:"
+                + response
+                + "\n\nThese are the last few sentences of the paragraph:"
+                + "\n".join(problem.split("\n")[-10:])
+                + "\n\nNow, utilize your best judgment and try to write the continuation of the hidden paragraph:",
+            }
+        ]
+
+    def encode_template(self, prompts) -> List[Dict[str, str]]:
+        return [
+            [
+                {
+                    "role": "user",
+                    "content": f"Think about the events and the meaning of the following text.\n"
+                    + "Your thought will be used to predict other important developments in the story.\n"
                     + "********** Text **********\n"
                     + prompt
                     + "\n********************",

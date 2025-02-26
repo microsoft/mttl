@@ -94,6 +94,10 @@ def get_optimizer(model, args, no_decay=None):
         from torch.optim import AdamW
 
         optimizer = AdamW(param_groups, eps=args.adam_epsilon)
+    elif optim_name.lower() == "adamw8bit":
+        import bitsandbytes as bnb
+
+        optimizer = bnb.optim.Adam8bit(param_groups, eps=args.adam_epsilon)
     elif optim_name.lower() == "adafactor":
         optimizer = Adafactor(
             param_groups,

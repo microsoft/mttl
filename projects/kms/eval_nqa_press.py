@@ -79,7 +79,7 @@ def evaluate(
     num_procs = get_world_size()
     total_len = len(dataset)
     shard_size = math.ceil(total_len / num_procs)
-        
+
     start = shard_size * get_local_rank()
     end = min(start + shard_size, total_len)
 

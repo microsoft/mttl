@@ -29,13 +29,13 @@ class PriRequest(Request):
     prior_reward: float = None
 
 
-class RFT(Algo):
+class DPO(Algo):
     @classmethod
     def add_parser_args(self, parser):
         parser.add_argument(
-            "--kl_ctl",
+            "--beta",
             type=float,
-            default=0.0,
+            default=0.1,
             help="Target KL divergence between policy and reference policy.",
         )
         return parser
@@ -46,7 +46,7 @@ class RFT(Algo):
         k=5,
         temperature=DEFAULT_TEMP,
         max_tokens=DEFAULT_MAX_TOKENS,
-        task="s_ae",
+        task="summary_autoencoder",
         device="cuda",
         **algo_kwargs,
     ):
@@ -62,7 +62,6 @@ class RFT(Algo):
             torch_dtype=torch.bfloat16,
             device_map=device,
         )
-        self.kl_ctl = algo_kwargs["kl_ctl"]
         self.ref_model = AutoModelForCausalLM.from_pretrained(
             model_name, torch_dtype=torch.bfloat16, device_map="cpu"
         )
@@ -122,46 +121,30 @@ class RFT(Algo):
             requests=evaluation_requests,
             temperature=self.temperature,
         )
-
-        if self.kl_ctl > 0.0:
-            qr, qrm, rm = create_joint_tensors(
-                self.tokenizer,
-                [r.messages for r in evaluation_requests],
-                [r.response for r in evaluation_requests],
-                [r.finished for r in evaluation_requests],
-                max_length=4096,
-                pad_to_length=4096,
+        qr, qrm, rm = create_joint_tensors(
+            self.tokenizer,
+            [r.messages for r in evaluation_requests],
+            [r.response for r in evaluation_requests],
+            [r.finished for r in evaluation_requests],
+            max_length=4096,
+            pad_to_length=4096,
+        )
+        r_log_probs = (
+            get_logprobs(
+                self.ref_model,
+                qr,
+                qrm,
+                rm,
+                batch_size=2,
+                temperature=self.temperature,
             )
-            r_log_probs = (
-                get_logprobs(
-                    self.ref_model,
-                    qr,
-                    qrm,
-                    rm,
-                    batch_size=2,
-                    temperature=self.temperature,
-                )
-                .cpu()
-                .tolist()
-            )
-            m_log_probs = (
-                get_logprobs(
-                    self.model,
-                    qr,
-                    qrm,
-                    rm,
-                    batch_size=2,
-                    temperature=self.temperature,
-                )
-                .cpu()
-                .tolist()
-            )
-            kl_rewards = [-(m - r) for m, r in zip(m_log_probs, r_log_probs)]
-            del qr, qrm, rm
-            torch.cuda.empty_cache()
-            RequestUtils.populate(evaluation_requests, kl_rewards, "prior_reward")
-
+            .cpu()
+            .tolist()
+        )
         self.ref_model.to("cpu")
+        del qr, qrm, rm
+        torch.cuda.empty_cache()
+
         RequestUtils.populate(evaluation_requests, rewards, "reward")
         return evaluation_requests
 
