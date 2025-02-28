@@ -9,7 +9,9 @@ from lightning_fabric import seed_everything
 
 # register this datamodule!
 from projects.kms.utils.km_datamodule import KMDatasetModule
+from projects.kms.utils.longhealth_datamodule import LonghealthDatamodule
 from projects.kms.utils.nqa_datamodule import NQADatamodule
+from projects.kms.utils.quality_datamodule import QualityDatamodule
 
 # isort: split
 from mttl.arguments import ExpertConfig, MultiExpertConfig

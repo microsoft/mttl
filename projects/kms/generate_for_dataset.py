@@ -14,6 +14,7 @@ from tqdm import tqdm as ttqdm
 from tqdm.asyncio import tqdm as tqdm_async
 
 from mttl.arguments import Args
+from mttl.models.library.dataset_library import DatasetLibrary
 from projects.kms.utils.dataset_augmenter import DatasetAugmenter
 
 
@@ -98,6 +99,7 @@ def main(args):
         # disable caching
         disable_caching()
         dataset = load_dataset(f"sordonia/{args.dataset_type}_sanitized", split="train")
+        dataset = DatasetLibrary.pull_dataset(args.dataset)["train"]
 
         if args.dataset_task is not None:
             if type(args.dataset_task) == tuple:

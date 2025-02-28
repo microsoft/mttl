@@ -506,7 +506,12 @@ class DatasetAugmenter:
                 "top_p": self.generation_top_p,
                 "max_tokens": self.max_continuation_length,
             }
-            results = task.process(
+
+            # NOTE: let's change to something VLLM can understand
+            # TODO: check with AS why `generation_params` was rebuilt here
+            generation_params = self.sampling_params
+
+            results = task.process_task(
                 chunks,
                 rests,
                 self.tokenizer,
