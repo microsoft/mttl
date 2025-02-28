@@ -381,7 +381,7 @@ def train_ke(training_args):
 
     with cpu_offload(model, eval_task_names, training_args.cpu_offload):
         if is_main_process():
-            os.makedirs(training_args.output_dir + '/eval_output/', exist_ok=True)
+            os.makedirs(training_args.output_dir + "/eval_output/", exist_ok=True)
 
         val_loss, eval_score = do_evaluation(
             datamodule,
@@ -390,7 +390,7 @@ def train_ke(training_args):
             evaluator,
             evaluator_split=split,
             split=split,
-            output_path=training_args.output_dir + '/eval_output/',
+            output_path=training_args.output_dir + "/eval_output/",
         )
 
     logger.info(f"Final Validation Loss: {val_loss}, {eval_metric}: {eval_score}")
