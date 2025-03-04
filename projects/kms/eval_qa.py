@@ -119,11 +119,4 @@ def eval_qa(training_args):
 if __name__ == "__main__":
     args = QAEvalArguments.parse()
 
-    # check if `metrics.json` exists. If true, we skip the evaluation
-    if os.path.exists(os.path.join(args.output_dir, "metrics.json")):
-        logger.info(
-            f"Skipping evaluation as metrics.json already exists in {args.output_dir}"
-        )
-        exit(0)
-
     eval_qa(args)
