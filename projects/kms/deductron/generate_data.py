@@ -19,7 +19,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model-dir", type=str, required=True, help="Directory with args.json and (optionally) saved model")
     parser.add_argument("--output-file", type=str, default="generation_output.jsonl", help="File to store outputs")
-    parser.add_argument("--num-samples", type=int, default=10, help="Number of validation samples to generate")
+    parser.add_argument("--num-samples", type=int, default=100, help="Number of validation samples to generate")
     parser.add_argument("--load-mode", type=str, choices=["base", "saved"], default="saved", help="Load base model or saved model")
     args = parser.parse_args()
 
@@ -28,7 +28,7 @@ def main():
     if not os.path.exists(args_path):
         raise FileNotFoundError(f"{args_path} not found")
     train_args = load_args(args_path)
-    
+
     load_mode = args.load_mode
     if load_mode == "saved":
         model_identifier = os.path.join(args.model_dir, "model")
@@ -37,8 +37,8 @@ def main():
         model_identifier = models[train_args.get("m")]
 
     tokenizer = AutoTokenizer.from_pretrained(model_identifier)
-    
-   # Start SGL server with the chosen model identifier and seed from training args
+
+    # Start SGL server with the chosen model identifier and seed from training args
     seed = train_args.get("s", 42)
     SGLGenerator(model_identifier, seed)
     generator = SGLGeneratorClient(model_identifier)
@@ -58,24 +58,25 @@ def main():
     results = []
     messages = task.encode_template([sample["source"] for sample in samples])
     # Use temperature, top_p, and max_tokens from training args if available
-    temperature = train_args.get("t", 1.0)
+    temperature = train_args["t"]
     max_tokens = train_args.get("maxtok", 128)
-    top_p = 1.0
+    top_p = 0.9
 
     # Query SGL server using its chat method (returns a list of responses)
     outputs = generator.chat(messages, temperature=temperature, top_p=top_p, max_tokens=max_tokens)
-    
+
     for i, output in enumerate(outputs):
         results.append({
             "prompt": messages[i],
-            "response": output[0] if output else ""
+            "response": output[0] if output else "",
+            "label": samples[i]["label"]
         })
 
     # Save all responses in a JSON-lines file
     with open(args.output_file, "w") as f:
         for r in results:
             f.write(json.dumps(r) + "\n")
-    
+
     print(f"Data generation completed. Results saved to {args.output_file}")
 
     # Shutdown SGL server
