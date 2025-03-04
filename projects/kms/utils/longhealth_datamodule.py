@@ -8,13 +8,10 @@ from mttl.datamodule.utils import (
     split_on_split_column,
 )
 
+# Taken from https://github.com/TIO-IKIM/CLUE/blob/main/eval/eval_LongHealth.py
+# Notable diffs : no NEW DOCUMENT separator in the text
 
-@dataclass
-class LonghealthDatasetConfig(DatasetConfig):
-    task_name_field: str = "document_id"
-    task_source_field: str = "document_id"
-    prompt: str = (
-        """
+sys_prompt = """
 You are a highly skilled and detail-oriented assistant, specifically trained to assist medical professionals in interpreting and extracting key information from medical documents. Your primary responsibility will be to analyze discharge letters from hospitals. When you receive one or more of these letters, you will be expected to carefully review the contents and accurately answer multiple-choice questions related to these documents. 
 
 Your answers should be:
@@ -24,14 +21,55 @@ Your answers should be:
 
 Remember, your job is to streamline the physician's decision-making process by providing them with accurate and relevant information from discharge summaries. Efficiency and reliability are key.
 """
-    )
+
+prompt_template_w_docs = """
+--------------BEGIN DOCUMENTS--------------
+
+{documents}
+
+--------------END DOCUMENTS--------------
+
+{question_text}
+{options}
+
+Please answer using the following format:
+0. Begin your answer with the phrase "The correct answer is".
+1. State the letter of the correct option (e.g., A, B, C, D, E).
+2. Follow the letter with a colon and the exact text of the option you chose.
+3. Make sure your answer is a single, concise sentence.
+
+For example, if the correct answer to a question is option C, and the text for C is 'Acute Bronchitis', your answer should be: 
+'The correct answer is C: Acute bronchitis.'
+"""
+
+prompt_template_no_docs = """
+{question_text}
+{options}
+
+Please answer using the following format:
+1. Begin your answer with the phrase "The correct answer is".
+2. State the letter of the correct option (e.g., A, B, C, D, E).
+3. Follow the letter with a colon and the exact text of the option you chose.
+4. Make sure your answer is a single, concise sentence.
+
+For example, if the correct answer to a question is option C, and the text for C is 'Acute Bronchitis', your answer should be: 
+'The correct answer is C: Acute bronchitis.'
+"""
+
+max_new_tokens = 50
+
+
+@dataclass
+class LonghealthDatasetConfig(DatasetConfig):
+    task_name_field: str = "document_id"
+    task_source_field: str = "document_id"
+    prompt: str = sys_prompt
     include_context: bool = False
-    topk_context: int = 3
-    include_all_answers: bool = True
+    topk_context: int = 100
 
 
 @DataModule.register("longhealth", config_cls=LonghealthDatasetConfig)
-class LonghealthDatamodule(MultiChoiceDataModule):
+class LonghealthDatamodule(DataModule):
     def setup_dataset(self):
         from mttl.models.library.dataset_library import DatasetLibrary
 
@@ -51,11 +89,15 @@ class LonghealthDatamodule(MultiChoiceDataModule):
             dataset, self.config.task_name_field, self.config.finetune_task_name
         )
 
-        def expand_questions(examples, tokenizer):
+        # Let's make sure that the full prompt is always in context
+        len_template = len(self.tokenizer.encode(prompt_template_w_docs)) + len(
+            self.tokenizer.encode(sys_prompt)
+        )
+
+        def expand_questions(examples, tokenizer, len_template):
             batch = {
                 "source": [],
                 "target": [],
-                "label_index": [],
                 "document_id": [],
             }
 
@@ -70,74 +112,74 @@ class LonghealthDatamodule(MultiChoiceDataModule):
                     else:
                         label_index = gold_label - 1
 
+                    """ NEW """
+                    letters = ["A", "B", "C", "D", "E"]
+                    option_str = "\n".join(
+                        [f"{letters[i]}: {option}" for i, option in enumerate(options)]
+                    )
+                    len_question = len(tokenizer.encode(question))
+                    len_options = len(tokenizer.encode(option_str))
+
+                    total_len = len_question + len_options + len_template
+
                     if self.config.include_context:
                         context = examples["text"][i]
-                        if isinstance(context, list):
-                            # If the context is a list of strings per question, we get the question-specific context
-                            context = context[j]
+                        assert (
+                            type(context) == str
+                        ), f"Context should be a string, but got {type(context)}"
 
-                        if isinstance(context, list):
-                            # following Alan's approach
-                            context = " ".join(
-                                [
-                                    f"Document {k+1}: {context[k]}\n\n"
-                                    for k in range(
-                                        min(self.config.topk_context, len(context))
-                                    )[::-1]
-                                ]
-                            )
-                            context = (
-                                "--------------BEGIN DOCUMENTS--------------\n\n"
-                                + context
-                                + "--------------END DOCUMENTS--------------\n\n"
-                            )
-                            source = [
-                                {
-                                    "role": "user",
-                                    "content": f"{self.config.prompt}{context} Question: {question}",
-                                }
-                            ]
-                        else:
-                            context = (
-                                "--------------BEGIN DOCUMENTS--------------\n\n"
-                                + context
-                                + "--------------END DOCUMENTS--------------\n\n"
-                            )
-                            source = [
-                                {
-                                    "role": "user",
-                                    "content": f"{self.config.prompt}{context} Question: {question}",
-                                }
-                            ]
-                    else:
-                        source = [
-                            {
-                                "role": "user",
-                                "content": f"{self.config.prompt} Question: {question}",
-                            }
-                        ]
+                        # Let's do some rough trucation if needed
+                        context_ids = tokenizer.encode(context)
+                        len_context = len(context_ids)
+                        space_left = self.config.max_input_length - total_len
 
-                    if self.config.include_all_answers:
-                        batch["source"].append(
-                            tokenizer.apply_chat_template(
-                                source, add_generation_prompt=True, tokenize=False
+                        if space_left < len_context:
+                            context_ids = context_ids[: max(0, space_left - 10)]
+                            context = tokenizer.decode(
+                                context_ids, skip_special_tokens=True
                             )
+
+                        prompt = prompt_template_w_docs.format(
+                            documents=context,
+                            question_text=question,
+                            options=option_str,
                         )
-                        batch["target"].append(options)
-                        batch["label_index"].append(label_index)
                     else:
-                        batch["source"].append(
-                            tokenizer.apply_chat_template(
-                                source, add_generation_prompt=True, tokenize=False
-                            )
+                        prompt = prompt_template_no_docs.format(
+                            question_text=question,
+                            options=option_str,
                         )
-                        if label_index is None:
-                            batch["target"].append(None)
-                            batch["label_index"].append(-1)
-                        else:
-                            batch["target"].append([options[label_index]])
-                            batch["label_index"].append(0)
+
+                    # '''
+                    source = [
+                        {
+                            "role": "system",
+                            "content": sys_prompt,
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt,
+                        },
+                    ]
+                    """
+                    source = [
+                        {
+                            "role": "user",
+                            "content": f"{sys_prompt}{prompt}",
+                        }
+                    ]
+                    """
+
+                    batch["source"].append(
+                        tokenizer.apply_chat_template(
+                            source, add_generation_prompt=True, tokenize=False
+                        )
+                    )
+                    batch["target"].append(
+                        letters[label_index]
+                    )  # [options[label_index]])
                     batch["document_id"].append(examples["document_id"][i])
+
             return batch
 
         if self.tokenizer.chat_template is None:
@@ -148,14 +190,18 @@ class LonghealthDatamodule(MultiChoiceDataModule):
                 split_on_split_column(train_dataset)
             )
             self.train_dataset = self.train_dataset.map(
-                lambda examples: expand_questions(examples, self.tokenizer),
+                lambda examples: expand_questions(
+                    examples, self.tokenizer, len_template
+                ),
                 batched=True,
                 batch_size=1000,
                 num_proc=1,
                 remove_columns=train_dataset.column_names,
             )
             self.dev_dataset = self.dev_dataset.map(
-                lambda examples: expand_questions(examples, self.tokenizer),
+                lambda examples: expand_questions(
+                    examples, self.tokenizer, len_template
+                ),
                 batched=True,
                 batch_size=1000,
                 num_proc=1,
@@ -164,7 +210,9 @@ class LonghealthDatamodule(MultiChoiceDataModule):
             self.test_dataset = self.dev_dataset
         else:
             train_dataset = train_dataset.map(
-                lambda examples: expand_questions(examples, self.tokenizer),
+                lambda examples: expand_questions(
+                    examples, self.tokenizer, len_template
+                ),
                 batched=True,
                 batch_size=1000,
                 num_proc=1,
