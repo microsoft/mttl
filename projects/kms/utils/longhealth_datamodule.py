@@ -174,6 +174,7 @@ class LonghealthDatamodule(DataModule):
                         tokenizer.apply_chat_template(
                             source, add_generation_prompt=True, tokenize=False
                         )
+                        + "The correct answer is"
                     )
                     batch["target"].append(
                         letters[label_index]

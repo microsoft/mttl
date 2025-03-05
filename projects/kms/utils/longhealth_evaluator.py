@@ -24,13 +24,6 @@ from projects.kms.utils.nqa_datamodule import NQADatamodule, NQADatasetConfig
 from projects.kms.utils.quality_evaluator import QualityEvaluator
 
 
-def parse_model_choice(pred):
-    pred = re.findall(r"The correct answer is (\w):", pred)
-    if pred:
-        return pred[0]
-    return ""
-
-
 class LonghealthEvaluator(GenerativeEvaluator):
     def __init__(self, dataset_args: "DataArgs", generation_kwargs: Dict = {}):
         import copy
@@ -40,6 +33,9 @@ class LonghealthEvaluator(GenerativeEvaluator):
         dataset_args = copy.deepcopy(dataset_args)
         dataset_args.dataset_type = "longhealth"
         dataset_args.add_eos_to_targets = False
+
+        generation_kwargs["max_new_tokens"] = 8
+        generation_kwargs["do_sample"] = False
 
         datamodule = get_datamodule(dataset_args, for_generation=True)
         super().__init__(
@@ -82,10 +78,7 @@ class LonghealthEvaluator(GenerativeEvaluator):
             labels_text = batch.pop("labels_texts", None)
 
             raw_predictions = self.generate_for_batch(model, batch)
-            # predictions = [pred.strip()[0] for pred in raw_predictions.generated_texts]
-            predictions = [
-                parse_model_choice(pred) for pred in raw_predictions.generated_texts
-            ]
+            predictions = [pred.strip()[0] for pred in raw_predictions.generated_texts]
 
             invalid = [
                 i
