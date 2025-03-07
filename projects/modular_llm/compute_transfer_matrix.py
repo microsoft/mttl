@@ -16,7 +16,9 @@ from mttl.evaluators.evaluators import (
     ExtendedMMLUEvaluator,
     ExtendedRougeEvaluator,
 )
-from mttl.logging import TableLogger, init_wandb_logger, logger
+from mttl.logging import TableLogger, logger
+from mttl.models.lightning.loggers import init_wandb_logger
+from mttl.logging import TableLogger, logger # init_wandb_logger
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 from mttl.models.lightning.expert_module import ExpertModule

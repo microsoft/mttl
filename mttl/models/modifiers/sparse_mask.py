@@ -14,12 +14,9 @@ import bitsandbytes as bnb
 import types
 import copy
 from mttl.utils import logger
-from mttl.models.modifiers import register_modifier
 from mttl.models.modifiers.base import (
-    MergeableAdapter,
-    ModifyMixin,
+    Modifier,
     ModifierConfig,
-    Adapter,
 )
 import random
 import numpy as np
@@ -199,7 +196,7 @@ def make_sparse_model_during_training(module, batch, print_statement=False, para
     # (2) collect grads
     from mttl.models.utils import transfer_batch_to_device
     #batch = transfer_batch_to_device(batch, module.device)
-    loss = module.forward(batch)
+    loss = module.forward(**batch).loss
     loss.backward()
 
 
@@ -262,18 +259,18 @@ def mod_noisy_forward(self, x):
 
 @dataclass
 class SparseMaskConfig(ModifierConfig):
-    keep_ratio: float = 1.0
-    noise_add_ratio: float = 1.0
+    keep_ratio: float = 0.05
+    noise_add_ratio: float = 0.25
     noise_space_ratio: float = 1.0
-    activate_noise: bool = True
+    activate_noise: bool = False
     mask_cat: str = 'scatter'
     noise_cat: str = 'targeted_noise' # 'targeted_noise' or 'random_noise'
     training_mode: bool = True
     BLOCK_SIZE: int= 16             # 16x 
     sparse_cat: str="block_sparse"  # ['block_sparse','regular_sparse']
 
-@register_modifier("sparse_mask_adapter", config_cls=SparseMaskConfig)
-class SparseMaskAdapter(ModifyMixin):
+@Modifier.register("sparse_mask_adapter", config_cls=SparseMaskConfig)
+class SparseMaskAdapter(Modifier):
     def __init__(
         self,
         config: SparseMaskConfig,
@@ -529,7 +526,7 @@ class SparseMaskAdapter(ModifyMixin):
 
 
 # @register_modifier("scatter_sparse_mask_adapter", config_cls=SparseMaskConfig)
-# class ScatterSparseMaskAdapter(ModifyMixin):
+# class ScatterSparseMaskAdapter(Modifier):
 #     def __init__(
 #         self,
 #         config: SparseMaskConfig,

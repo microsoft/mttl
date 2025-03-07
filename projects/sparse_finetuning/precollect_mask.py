@@ -8,28 +8,33 @@ from tempfile import TemporaryDirectory
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.models.expert_model import ExpertModel, MoEModel
-from mttl.models.expert_config import ExpertConfig
-from mttl.models.modifiers.expert_containers.expert_library import (
+from mttl.arguments import ExpertConfig
+from mttl.models.library.expert_library import (
     ExpertLibrary,
     LocalExpertLibrary,
 )
-from mttl.callbacks import LiveCheckpointCallback
+from mttl.models.lightning.callbacks import LiveCheckpointCallback
 from mttl.models.monitors import get_monitors
 from mttl.datamodule.base import get_datamodule
-from mttl.callbacks import NanoMMLUCallback, RougeCallback
+from mttl.models.lightning.callbacks import NanoMMLUCallback, RougeCallback, DownstreamEvalCallback
+from mttl.models.lightning.loggers import get_pl_loggers
+from mttl.logging import setup_logging, logger
 from mttl.utils import (
-    get_pl_loggers,
+    # get_pl_loggers,
     remote_login,
-    setup_logging,
-    logger,
+    # setup_logging,
+    # logger,
 )
 
-from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
-from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
-from projects.wiki_experts.src.transfer_matrix import (
+from mttl.models.library.expert import Expert, load_expert
+from projects.modular_llm.compute_transfer_matrix import (
     TransferMatrixConfig,
     run_eval as produce_transfer_matrix,
 )
+# from projects.wiki_experts.src.transfer_matrix import (
+#     TransferMatrixConfig,
+#     run_eval as produce_transfer_matrix,
+# )
 
 
 def create_transfer_matrix(args, checkpoint):

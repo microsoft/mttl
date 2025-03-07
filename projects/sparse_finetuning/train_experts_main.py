@@ -1,3 +1,4 @@
+import inspect
 import os
 import sys
 import torch
@@ -8,29 +9,27 @@ from tempfile import TemporaryDirectory
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from mttl.models.expert_model import ExpertModel, MoEModel
-from mttl.models.expert_config import ExpertConfig
-from mttl.models.modifiers.expert_containers.expert_library import (
+from mttl.arguments import ExpertConfig
+from mttl.models.library.expert_library import (
     ExpertLibrary,
     LocalExpertLibrary,
 )
-from mttl.callbacks import LiveCheckpointCallback
+from mttl.models.lightning.callbacks import LiveCheckpointCallback
 from mttl.models.monitors import get_monitors
 from mttl.datamodule.base import get_datamodule
-from mttl.callbacks import NanoMMLUCallback, RougeCallback
+from mttl.models.lightning.callbacks import NanoMMLUCallback, RougeCallback, DownstreamEvalCallback
+from mttl.models.lightning.loggers import get_pl_loggers
+from mttl.models.lightning.expert_module import ExpertModule
+from mttl.logging import setup_logging, logger
 from mttl.utils import (
-    get_pl_loggers,
     remote_login,
-    setup_logging,
-    logger,
 )
 
-from mttl.models.modifiers.expert_containers.expert import Expert, load_expert
-from projects.wiki_experts.src.callbacks import DownstreamEvalCallback
-from projects.wiki_experts.src.transfer_matrix import (
+from mttl.models.library.expert import Expert, load_expert
+from projects.modular_llm.compute_transfer_matrix import (
     TransferMatrixConfig,
     run_eval as produce_transfer_matrix,
 )
-
 
 def create_transfer_matrix(args, checkpoint):
     ########################
@@ -79,17 +78,20 @@ def run_multitask(args: ExpertConfig):
 
     loggers = get_pl_loggers(args)
     # select dataloader
-    if args.model_modifier == "poly":
-        args.init_from_scratch = True
-        model_class = MoEModel
-    else:
-        model_class = ExpertModel
+    # if args.model_modifier == "poly":
+    #     args.init_from_scratch = True
+    #     model_class = MoEModel
+    # else:
+
+    # model_class = ExpertModel
+    model_class = ExpertModule
 
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
     args.task_names = dm._task_names
 
-    module = model_class(**vars(args), tokenizer=dm.tokenizer)
+    args.tokenizer = dm.tokenizer
+    module = model_class(**vars(args))
     
     # get metric monitors for models
     callbacks = get_monitors(args)
@@ -211,20 +213,22 @@ def run_multitask(args: ExpertConfig):
         checkpoint = (
             checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
         )
-        module.load_state_dict(torch.load(checkpoint)["state_dict"])
+
+        module.load_state_dict(torch.load(checkpoint, weights_only=False)["state_dict"])
         trainer.test(module, dm)
 
         if expert_library is not None:
             # refresh expert library: so we dont overwrite the readme if the remote has changed.
             expert_library.refresh_from_remote()
 
-            if isinstance(module, MoEModel):
-                for expert_name in module.experts_names:
-                    expert = module.get_expert_instance(expert_name)
-                    expert_library.add_expert(expert, expert_name)
-            elif isinstance(module, ExpertModel):
+            # if isinstance(module, MoEModel):
+            #     for expert_name in module.experts_names:
+            #         expert = module.get_expert_instance(expert_name)
+            #         expert_library.add_expert(expert, expert_name)
+            # elif isinstance(module, ExpertModel):
+            if isinstance(module, ExpertModule):
                 expert_name = args.expert_name or args.finetune_task_name
-                expert_library.add_expert_from_ckpt(checkpoint, expert_name)
+                expert_library.add_expert_from_ckpt(checkpoint, expert_name, force=True)
             else:
                 raise ValueError("Model class not recognized")
 

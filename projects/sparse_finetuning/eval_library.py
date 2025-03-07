@@ -11,7 +11,7 @@ import json
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.models.modifiers.expert_containers.expert_library import ExpertLibrary
+from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.modifiers.expert_containers.selectors import (
     PerTokenSelector,
     Selector,
@@ -19,9 +19,10 @@ from mttl.models.modifiers.expert_containers.selectors import (
 )
 from mttl.models.modifiers.lora import LoRAConfig
 
-from mttl.utils import logger, remote_login, setup_logging
+from mttl.logging import setup_logging, logger
+from mttl.utils import remote_login  #logger, setup_logging
 from mttl.models.expert_model import MultiExpertModel, ExpertModel
-from mttl.models.expert_config import ExpertConfig
+from mttl.arguments import ExpertConfig
 
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.models.modifiers.expert_containers.library_transforms import (
@@ -41,7 +42,7 @@ from mttl.models.modifiers.expert_containers.library_transforms import (
     SparseWeightLinearMergeConfig, 
 )
 
-from mttl.callbacks import LossCallback
+from mttl.models.lightning.callbacks import LossCallback
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 from projects.wiki_experts.src.utils.utils import TableLogger
