@@ -1,6 +1,6 @@
 {
-    "num_train_epochs": 5,
-    "subsample_dev": 1000,
+    "num_train_epochs": 1,
+    "subsample_dev": 100,
     "model": "Qwen/Qwen2-0.5B",
     "learning_rate": 3e-5,
     "micro_batch_size": 1,
