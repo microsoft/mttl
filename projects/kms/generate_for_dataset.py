@@ -26,7 +26,7 @@ class AugmentArgs(Args):
     dataset_task: str = None
     block_size: int = 2048
     max_continuation_length: int = 768
-    num_generations: int = 6
+    num_generations: int = 16
     generation_top_p: float = 0.8
     top_docs_per_subject: int = 50
     use_prompts: str = "summary,qa"
