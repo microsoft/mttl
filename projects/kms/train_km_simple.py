@@ -12,6 +12,7 @@ from tqdm import tqdm
 from projects.kms.utils.km_datamodule import KMDatasetModule
 from projects.kms.utils.nqa_datamodule import NQADatamodule
 from projects.kms.utils.pit_datamodule import PITDatasetModule
+from projects.kms.utils.wiki_mmlu_datamodule import WikiMMLUDataModule
 
 # isort: split
 from mttl.arguments import ExpertConfig
