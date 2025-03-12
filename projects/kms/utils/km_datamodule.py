@@ -404,14 +404,14 @@ class LMDataModule(DataModule):
 
 
 @dataclass
-class CSDatasetConfig(KMDatasetConfig):
-    n_summaries: int = 2
+class ConcatDatasetConfig(KMDatasetConfig):
+    n_concat: int = 2
     use_only_type: str = "summary"
 
 
 # Chunked Summary Dataset
-@DataModule.register("cs_km", config_cls=CSDatasetConfig)
-class CSDatasetModule(KMDatasetModule):
+@DataModule.register("concat_km", config_cls=ConcatDatasetConfig)
+class ConcatDatasetModule(KMDatasetModule):
 
     def setup_dataset(self):
         dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
@@ -446,43 +446,56 @@ class CSDatasetModule(KMDatasetModule):
 
         def expand_targets_and_chat_cs(example):
             return_dict = defaultdict(list)
-            # only keep 'summary' outputs; gather at most self.config.n_summaries for nc_source
-            allowed_types = ["summary"]
+            # only keep 'summary' outputs; gather at most self.config.n_concat for nc_source
+            allowed_types = self.config.use_only_type.split(",")
+
             for i in range(len(example["input"])):
                 if example["type"][i] not in allowed_types:
                     continue
+
                 input = example["input"][i]
                 outputs = example["outputs"][i]
+                synthetic_data = []
                 for s_idx in range(len(outputs)):
-                    # summary at index i will appear first. Now, sample `n_summaries - 1` other indices
+                    # summary at index i will appear first. Now, sample `n_concat - 1` other indices
                     other_idx = np.random.choice(
                         [j for j in range(len(outputs)) if j != s_idx],
-                        self.config.n_summaries - 1,
+                        self.config.n_concat - 1,
                         replace=False,
                     )
-                    summary_idx = [s_idx] + other_idx.tolist()
-                    summary_list = []
-                    for idx in summary_idx:
-                        summary_list.append(
-                            outputs[idx]["summary"]
-                            if isinstance(outputs[idx], dict)
-                            else outputs[idx]
-                        )
-                    concatenated_summaries = "\n\n----- New Summary -----\n\n".join(
-                        summary_list
-                    )
-                    prompt_str = "Summarize the preceding passage."
+                    # We will use the indices in `synthetic_idx` to create the synthetic data
+                    synthetic_idx = [s_idx] + other_idx.tolist()
+                    for idx in synthetic_idx:
+                        if example["type"][i] == "summary":
+                            prompt_str = "Summarize the preceding passage."
+                            synthetic_data.append(
+                                outputs[idx]["summary"]
+                                if isinstance(outputs[idx], dict)
+                                else outputs[idx]
+                            )
+                            join_str = "\n\n----- New Summary -----\n\n"
+                        elif example["type"][i] == "qa":
+                            assert isinstance(outputs[idx], dict)
+                            output_str = f"\nQuestion: {outputs[idx]['question']}\nAnswer: {outputs[idx]['answer']}"
+                            prompt_str = "Generate a question-answer pair given the preceding passage."
+                            synthetic_data.append(output_str)
+                            join_str = "\n\n"
+                        else:
+                            raise ValueError(f"Unknown type {example['type'][i]}")
+
+                    concat_data = join_str.join(synthetic_data)
                     context_source, no_context_source = create_dcd_pairs(
-                        self.tokenizer, input, concatenated_summaries, prompt_str
+                        self.tokenizer, input, concat_data, prompt_str
                     )
                     return_dict["source"].append(context_source)
                     return_dict["nc_source"].append(no_context_source)
-                    return_dict["target"].append(concatenated_summaries)
+                    return_dict["target"].append(concat_data)
                     return_dict[self.config.task_name_field].append(
                         example[self.config.task_name_field][i]
                     )
             return return_dict
 
+        old = train_dataset
         train_dataset = train_dataset.map(
             expand_targets_and_chat_cs,
             batched=True,
