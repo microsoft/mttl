@@ -1,5 +1,6 @@
 import math
 import os
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from functools import partial
@@ -51,8 +52,6 @@ class KMDatasetConfig(DatasetConfig):
     task_source_field: str = "document_id"
     # for train / dev split, split by document chunk, or split the list of summary / q/a's ?
     split_train_dev_on: str = "document_chunk"
-    # flip inputs and outputs
-    flip_inputs_outputs: bool = False
 
 
 class KMDataCollator(DefaultCollator):
@@ -120,45 +119,52 @@ class KMDatasetModule(DataModule):
 
                 for i, output in enumerate(outputs):
                     # for QA, we want to show the question as well as the prompt
+                    if not isinstance(output, dict):
+                        # NOTE: some old dataformats have the output as a string
+                        # this is a hack to convert it to a dict for `summary` and `qa`
+                        assert isinstance(output, str)
+                        if type_ == "summary":
+                            output = {"summary": output}
+                        elif type_ == "qa":
+                            output = output.replace("**", "")
+                            # regex to match on on the string 'Question:' or the string 'Answer:"
+                            pattern = r"(?:Question:\s*(.*?)\s*Answer:\s*(.*))"
+                            match = re.search(
+                                pattern, output, re.DOTALL | re.IGNORECASE
+                            )
+                            try:
+                                output = {
+                                    "question": match.group(1).strip(),
+                                    "answer": match.group(2).strip(),
+                                }
+                            except Exception as e:
+                                logger.warning(f"Failed to parse QA pair: {output}")
+                                continue
+                        else:
+                            raise ValueError(
+                                f"Unknown type {type_} for output {output}"
+                            )
                     if type(output) == dict:
                         if type_ == "qa":
-                            if self.config.flip_inputs_outputs:
-                                prompt_str = "Generate a passage containing the preceding question-answer pair."
-                            else:
-                                prompt_str = "Generate a question-answer pair given the preceding passage."
+                            prompt_str = "Generate a question-answer pair given the preceding passage."
                             output_str = f"\nQuestion: {output['question']}\nAnswer: {output['answer']}"
                         elif type_ == "q":
-                            if self.config.flip_inputs_outputs:
-                                prompt_str = "Generate a passage containing the preceding question."
-                            else:
-                                prompt_str = (
-                                    "Generate a question given the preceding passage."
-                                )
+                            prompt_str = (
+                                "Generate a question given the preceding passage."
+                            )
                             output_str = f"{output['question']}"
                         elif type_ == "a":
-                            if self.config.flip_inputs_outputs:
-                                prompt_str = "Generate a passage containing the preceding answer."
-                            else:
-                                prompt_str = f"Answer the following question given the preceding passage.\nQuestion: {output['question']}"
+                            prompt_str = f"Answer the following question given the preceding passage.\nQuestion: {output['question']}"
                             output_str = f"{output['answer']}"
                         elif type_ == "summary":
-                            if self.config.flip_inputs_outputs:
-                                prompt_str = "Generate a passage which can be summarized by the previous summary."
-                            else:
-                                prompt_str = "Summarize the preceding passage."
-                            output_str = output["summary"]
-                    else:
-                        # fallback to default prompt
-                        if self.config.flip_inputs_outputs:
-                            prompt_str = (
-                                "Generate a passage which can be summarized as follows."
-                            )
-                        else:
                             prompt_str = "Summarize the preceding passage."
+                            output_str = output["summary"]
+                        elif type_ == "entigraph":
+                            prompt_str = "Given the preceding passage, discuss the relation between a pair of entities"
+                            output_str = f"{output['entigraph']}"
+                    else:
+                        prompt_str = "Summarize the preceding passage."
                         output_str = output
-
-                    if self.config.flip_inputs_outputs:
-                        input, output_str = output_str, input
 
                     context_source, no_context_source = create_dcd_pairs(
                         self.tokenizer, input, output_str, prompt_str
@@ -259,7 +265,10 @@ class ChunkDataset(torch.utils.data.Dataset):
         input_ids = all_tokens[:]
         label_ids = all_tokens[:]
 
-        label_start = max(0, int(len(input_ids) * (1 - self.config.label_frac)))
+        if self.config.label_frac:
+            label_start = max(1, int(len(input_ids) * (1 - self.config.label_frac)))
+        else:
+            label_start = max(1, len(input_ids) - self.config.label_n_tokens)
         warmup_start = max(0, label_start - self.config.prefix_length)
 
         # ensure that nothing before `label_start` has loss computed
@@ -292,9 +301,12 @@ class ChunkDataset(torch.utils.data.Dataset):
 class LMDatasetConfig(KMDatasetConfig):
     # Given a passage, what proportion to use as a label ?
     label_frac: float = 0.23  # to match summary proportion
+    label_n_tokens: int = None
     # Once we have a label / target within a passage, how
     # many tokens to use as "warmup" ?
     prefix_length: int = 0
+    # field in the dataset that contains the task source
+    text_field: str = "text"
 
 
 class LMDataCollator(DefaultCollator):
@@ -310,6 +322,14 @@ class LMDataModule(DataModule):
     collate_class = LMDataCollator
     # for this dataset, we will always pre-tokenize the inputs
     # so that we can split prefix / labels in tokens vs words
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        assert self.config.label_frac is None or self.config.label_n_tokens is None
+        assert (
+            self.config.label_frac is not None or self.config.label_n_tokens is not None
+        )
 
     def setup_dataset(self):
         dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
@@ -335,7 +355,7 @@ class LMDataModule(DataModule):
         def tokenize_datapoint(data):
             out = {}
             for key in data.keys():
-                if key == "text":
+                if key == self.config.text_field:
                     toked = self.tokenizer(
                         data[key],
                         max_length=self.config.max_input_length,
@@ -381,3 +401,98 @@ class LMDataModule(DataModule):
         )
         self.dev_dataset = ChunkDataset(dev_dataset, self.config, deterministic=True)
         self.test_dataset = None
+
+
+@dataclass
+class CSDatasetConfig(KMDatasetConfig):
+    n_summaries: int = 2
+    use_only_type: str = "summary"
+
+
+# Chunked Summary Dataset
+@DataModule.register("cs_km", config_cls=CSDatasetConfig)
+class CSDatasetModule(KMDatasetModule):
+
+    def setup_dataset(self):
+        dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
+        n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
+
+        assert "train" in dataset
+
+        def filter_targets(example, n):
+            return {"outputs": example["outputs"][:n]}
+
+        if self.config.num_outputs_per_chunk > 0:
+            logger.info(
+                f"Keeping only {self.config.num_outputs_per_chunk} outputs per document."
+            )
+            dataset = dataset.map(
+                partial(filter_targets, n=self.config.num_outputs_per_chunk),
+                num_proc=20,
+            )
+
+        (
+            self._task_names,
+            self._task_to_id,
+            train_dataset,
+            _,
+            _,
+        ) = maybe_filter_hf_dataset_by_task(
+            dataset,
+            self.config.task_name_field,
+            self.config.finetune_task_name,
+            n_proc=n_proc,
+        )
+
+        def expand_targets_and_chat_cs(example):
+            return_dict = defaultdict(list)
+            # only keep 'summary' outputs; gather at most self.config.n_summaries for nc_source
+            allowed_types = ["summary"]
+            for i in range(len(example["input"])):
+                if example["type"][i] not in allowed_types:
+                    continue
+                input = example["input"][i]
+                outputs = example["outputs"][i]
+                for s_idx in range(len(outputs)):
+                    # summary at index i will appear first. Now, sample `n_summaries - 1` other indices
+                    other_idx = np.random.choice(
+                        [j for j in range(len(outputs)) if j != s_idx],
+                        self.config.n_summaries - 1,
+                        replace=False,
+                    )
+                    summary_idx = [s_idx] + other_idx.tolist()
+                    summary_list = []
+                    for idx in summary_idx:
+                        summary_list.append(
+                            outputs[idx]["summary"]
+                            if isinstance(outputs[idx], dict)
+                            else outputs[idx]
+                        )
+                    concatenated_summaries = "\n\n----- New Summary -----\n\n".join(
+                        summary_list
+                    )
+                    prompt_str = "Summarize the preceding passage."
+                    context_source, no_context_source = create_dcd_pairs(
+                        self.tokenizer, input, concatenated_summaries, prompt_str
+                    )
+                    return_dict["source"].append(context_source)
+                    return_dict["nc_source"].append(no_context_source)
+                    return_dict["target"].append(concatenated_summaries)
+                    return_dict[self.config.task_name_field].append(
+                        example[self.config.task_name_field][i]
+                    )
+            return return_dict
+
+        train_dataset = train_dataset.map(
+            expand_targets_and_chat_cs,
+            batched=True,
+            batch_size=1000,
+            desc="Applying concatenated summaries...",
+            remove_columns=train_dataset.column_names,
+        )
+
+        self.train_dataset, self.dev_dataset = self.create_train_valid_split(
+            train_dataset
+        )
+
+        self.test_dataset = self.dev_dataset
