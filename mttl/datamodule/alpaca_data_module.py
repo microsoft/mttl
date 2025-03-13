@@ -33,8 +33,7 @@ class AlpacaCodeDataModule(DataModule):
 
     def setup_dataset(self):
         dataset = AlpacaCodeDataset()
-
-        self.train_dataset, self.dev_dataset = self.create_train_valid_split(dataset)
+        self.train_dataset, self.dev_dataset = self.create_train_valid_split(dataset, validation_portion=0.01)
         self.test_dataset = self.dev_dataset
 
 
@@ -42,7 +41,7 @@ class AlpacaCodeDataModule(DataModule):
 class MathQaAlpacaCodeDataModule(AlpacaDataModule):
     def setup_dataset(self):
         dataset = MathQaAlpacaCodeDataset()
-        self.train_dataset, self.dev_dataset = self.create_train_valid_split(dataset)
+        self.train_dataset, self.dev_dataset = self.create_train_valid_split(dataset, validation_portion=0.01)
         self.test_dataset = self.dev_dataset
 
 
