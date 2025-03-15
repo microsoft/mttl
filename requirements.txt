@@ -14,6 +14,7 @@ sentence-transformers
 fsspec[adl]
 prettytable
 rich
+bitsandbytes
 matplotlib
 openai
 ray
@@ -26,6 +27,3 @@ einops
 triton
 nltk
 # spops @ git+https://github.com/IST-DASLab/spops.git@main
-prettytable
-wandb
-tenacity
