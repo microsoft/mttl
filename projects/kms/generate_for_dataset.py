@@ -14,6 +14,7 @@ from tqdm import tqdm as ttqdm
 from tqdm.asyncio import tqdm as tqdm_async
 
 from mttl.arguments import Args
+from mttl.models.library.dataset_library import DatasetLibrary
 from projects.kms.utils.dataset_augmenter import DatasetAugmenter
 
 
@@ -25,7 +26,7 @@ class AugmentArgs(Args):
     dataset_task: str = None
     block_size: int = 2048
     max_continuation_length: int = 768
-    num_generations: int = 6
+    num_generations: int = 16
     generation_top_p: float = 0.8
     top_docs_per_subject: int = 50
     use_prompts: str = "summary,qa"
@@ -98,6 +99,7 @@ def main(args):
         # disable caching
         disable_caching()
         dataset = load_dataset(f"sordonia/{args.dataset_type}_sanitized", split="train")
+        dataset = DatasetLibrary.pull_dataset(args.dataset)["train"]
 
         if args.dataset_task is not None:
             if type(args.dataset_task) == tuple:

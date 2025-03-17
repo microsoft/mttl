@@ -12,6 +12,7 @@ from tqdm import tqdm
 from projects.kms.utils.km_datamodule import KMDatasetModule
 from projects.kms.utils.nqa_datamodule import NQADatamodule
 from projects.kms.utils.pit_datamodule import PITDatasetModule
+from projects.kms.utils.wiki_mmlu_datamodule import WikiMMLUDataModule
 
 # isort: split
 from mttl.arguments import ExpertConfig
@@ -28,6 +29,7 @@ from mttl.models.expert_model import ExpertModel, ExpertModelConfig
 from mttl.models.get_optimizer import get_optimizer_and_scheduler
 from mttl.models.utils import transfer_batch_to_device
 from mttl.utils import remote_login, seed_everything
+from projects.kms.utils.longhealth_evaluator import LonghealthEvaluator
 from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator, SharedNQAEvaluator
 from projects.kms.utils.quality_evaluator import QualityEvaluator
 from projects.kms.utils.simple_utils import (
@@ -73,6 +75,7 @@ evaluate_datasets = {
     "quality-rag-1024": "az://mttldata/ql-rag-1024",
     "quality-rag-2048": "az://mttldata/ql-rag-2048",
     "quality-rag-4096": "az://mttldata/ql-rag-4096",
+    "longhealth": "az://mttldata/longhealth-sanitized",
 }
 
 evaluate_class = {
@@ -96,6 +99,7 @@ evaluate_class = {
     "quality-rag-1024": QualityEvaluator,
     "quality-rag-2048": QualityEvaluator,
     "quality-rag-4096": QualityEvaluator,
+    "longhealth": LonghealthEvaluator,
 }
 
 evaluate_metrics = {
@@ -119,6 +123,7 @@ evaluate_metrics = {
     "quality-rag-1024": "accuracy",
     "quality-rag-2048": "accuracy",
     "quality-rag-4096": "accuracy",
+    "longhealth": "accuracy",
 }
 
 

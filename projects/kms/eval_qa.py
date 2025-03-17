@@ -9,7 +9,9 @@ from lightning_fabric import seed_everything
 
 # register this datamodule!
 from projects.kms.utils.km_datamodule import KMDatasetModule
+from projects.kms.utils.longhealth_datamodule import LonghealthDatamodule
 from projects.kms.utils.nqa_datamodule import NQADatamodule
+from projects.kms.utils.quality_datamodule import QualityDatamodule
 
 # isort: split
 from mttl.arguments import ExpertConfig, MultiExpertConfig
@@ -116,12 +118,5 @@ def eval_qa(training_args):
 
 if __name__ == "__main__":
     args = QAEvalArguments.parse()
-
-    # check if `metrics.json` exists. If true, we skip the evaluation
-    if os.path.exists(os.path.join(args.output_dir, "metrics.json")):
-        logger.info(
-            f"Skipping evaluation as metrics.json already exists in {args.output_dir}"
-        )
-        exit(0)
 
     eval_qa(args)

@@ -1,26 +1,40 @@
 import json
 from dataclasses import dataclass
 
-from mttl.datamodule.base import DataModule, DatasetConfig
+from mttl.datamodule.base import DataModule, DatasetConfig, MultiChoiceDataModule
 from mttl.datamodule.utils import (
     apply_custom_split_file,
     maybe_filter_hf_dataset_by_task,
     split_on_split_column,
 )
 
+# Taken from https://github.com/TIO-IKIM/CLUE/blob/main/eval/eval_LongHealth.py
+# Notable diffs : no NEW DOCUMENT separator in the text
+
+sys_prompt = """
+You are a highly skilled and detail-oriented assistant, specifically trained to assist medical professionals in interpreting and extracting key information from medical documents. Your primary responsibility will be to analyze discharge letters from hospitals. When you receive one or more of these letters, you will be expected to carefully review the contents and accurately answer multiple-choice questions related to these documents. 
+
+Your answers should be:
+1. Accurate: Make sure your answers are based on the information provided in the letters.
+2. Concise: Provide brief and direct answers without unnecessary elaboration.
+3. Contextual: Consider the context and specifics of each question to provide the most relevant information.
+
+Remember, your job is to streamline the physician's decision-making process by providing them with accurate and relevant information from discharge summaries. Efficiency and reliability are key.
+"""
+
 prompt_template_w_docs = """
---------------BEGIN CONTEXT--------------
+--------------BEGIN DOCUMENTS--------------
 
 {documents}
 
---------------END CONTEXT--------------
+--------------END DOCUMENTS--------------
 
 {question_text}
 {options}
 
 Please answer using the following format:
 0. Begin your answer with the phrase "The correct answer is".
-1. State the letter of the correct option (e.g., A, B, C, D).
+1. State the letter of the correct option (e.g., A, B, C, D, E).
 2. Follow the letter with a colon and the exact text of the option you chose.
 3. Make sure your answer is a single, concise sentence.
 
@@ -34,7 +48,7 @@ prompt_template_no_docs = """
 
 Please answer using the following format:
 1. Begin your answer with the phrase "The correct answer is".
-2. State the letter of the correct option (e.g., A, B, C, D).
+2. State the letter of the correct option (e.g., A, B, C, D, E).
 3. Follow the letter with a colon and the exact text of the option you chose.
 4. Make sure your answer is a single, concise sentence.
 
@@ -46,18 +60,16 @@ max_new_tokens = 50
 
 
 @dataclass
-class WikiMMLUDatasetConfig(DatasetConfig):
+class LonghealthDatasetConfig(DatasetConfig):
     task_name_field: str = "document_id"
     task_source_field: str = "document_id"
-    prompt: str = (
-        "Answer the following question. Give only the answer, and no extra commentary, formatting, or chattiness. Question: "
-    )
+    prompt: str = sys_prompt
     include_context: bool = False
-    topk_context: int = 10
+    topk_context: int = 100
 
 
-@DataModule.register("wiki_mmlu", config_cls=WikiMMLUDatasetConfig)
-class WikiMMLUDataModule(DataModule):
+@DataModule.register("longhealth", config_cls=LonghealthDatasetConfig)
+class LonghealthDatamodule(DataModule):
     def setup_dataset(self):
         from mttl.models.library.dataset_library import DatasetLibrary
 
@@ -78,7 +90,9 @@ class WikiMMLUDataModule(DataModule):
         )
 
         # Let's make sure that the full prompt is always in context
-        len_template = len(self.tokenizer.encode(prompt_template_w_docs))
+        len_template = len(self.tokenizer.encode(prompt_template_w_docs)) + len(
+            self.tokenizer.encode(sys_prompt)
+        )
 
         def expand_questions(examples, tokenizer, len_template):
             batch = {
@@ -105,9 +119,8 @@ class WikiMMLUDataModule(DataModule):
                     )
                     len_question = len(tokenizer.encode(question))
                     len_options = len(tokenizer.encode(option_str))
-                    len_suffix = len(tokenizer.encode("The correct answer is: "))
 
-                    total_len = len_question + len_options + len_template + len_suffix
+                    total_len = len_question + len_options + len_template
 
                     if self.config.include_context:
                         context = examples["text"][i]
@@ -121,7 +134,7 @@ class WikiMMLUDataModule(DataModule):
                         space_left = self.config.max_input_length - total_len
 
                         if space_left < len_context:
-                            context_ids = context_ids[: max(0, space_left - 20)]
+                            context_ids = context_ids[: max(0, space_left - 10)]
                             context = tokenizer.decode(
                                 context_ids, skip_special_tokens=True
                             )
@@ -137,7 +150,7 @@ class WikiMMLUDataModule(DataModule):
                             options=option_str,
                         )
 
-                    """
+                    # '''
                     source = [
                         {
                             "role": "system",
@@ -152,9 +165,10 @@ class WikiMMLUDataModule(DataModule):
                     source = [
                         {
                             "role": "user",
-                            "content": prompt,
+                            "content": f"{sys_prompt}{prompt}",
                         }
                     ]
+                    """
 
                     batch["source"].append(
                         tokenizer.apply_chat_template(

@@ -1,7 +1,7 @@
-from contextlib import contextmanager
 import copy
 import os
 import random
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 import torch
@@ -21,10 +21,10 @@ from mttl.datamodule.base import get_datamodule
 from mttl.dist_utils import (
     get_device,
     get_local_rank,
+    get_world_size,
     is_dist_avail_and_initialized,
     is_main_process,
     seed_everything,
-    get_world_size,
 )
 from mttl.logging import logger, setup_logging
 from mttl.models.get_optimizer import get_optimizer_and_scheduler
