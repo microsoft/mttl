@@ -35,6 +35,8 @@ from projects.kms.train_km_simple import (
     evaluate_datasets,
     evaluate_metrics,
 )
+from projects.kms.utils.longhealth_datamodule import LonghealthDatamodule
+from projects.kms.utils.longhealth_evaluator import LonghealthEvaluator
 from projects.kms.utils.quality_datamodule import QualityDatamodule
 from projects.kms.utils.quality_evaluator import QualityEvaluator
 from projects.kms.utils.simple_utils import (
@@ -121,6 +123,10 @@ def train_ke(training_args):
     elif training_args.dataset_type == "narrativeqa":
         eval_metric = "rougeL"
         evaluator = NQAZeroShotEvaluator(training_args)
+        split = "test"
+    elif training_args.dataset_type == "longhealth":
+        eval_metric = "accuracy"
+        evaluator = LonghealthEvaluator(training_args)
         split = "test"
 
     datamodule = get_datamodule(training_args)
@@ -225,14 +231,15 @@ def train_ke(training_args):
             early_stopper = EarlyStopper(patience=training_args.patience, mode="min")
 
         if training_args.eval_before_training:
-            val_loss, eval_score = do_evaluation(
-                datamodule,
-                model,
-                loss_function,
-                evaluator=evaluator,
-                evaluator_split=split,
-                split=split,
-            )
+            with cpu_offload(model, eval_task_names, training_args.cpu_offload):
+                val_loss, eval_score = do_evaluation(
+                    datamodule,
+                    model,
+                    loss_function,
+                    evaluator=evaluator,
+                    evaluator_split=split,
+                    split=split,
+                )
             met_logger.log_metrics(
                 {"val_loss": val_loss, eval_metric: eval_score}, step=global_step
             )
