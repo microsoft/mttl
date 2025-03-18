@@ -455,7 +455,6 @@ class ConcatDatasetModule(KMDatasetModule):
 
                 input = example["input"][i]
                 outputs = example["outputs"][i]
-                synthetic_data = []
                 for s_idx in range(len(outputs)):
                     # summary at index i will appear first. Now, sample `n_concat - 1` other indices
                     other_idx = np.random.choice(
@@ -464,6 +463,7 @@ class ConcatDatasetModule(KMDatasetModule):
                         replace=False,
                     )
                     # We will use the indices in `synthetic_idx` to create the synthetic data
+                    synthetic_data = []
                     synthetic_idx = [s_idx] + other_idx.tolist()
                     for idx in synthetic_idx:
                         if example["type"][i] == "summary":
