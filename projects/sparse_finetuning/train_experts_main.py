@@ -1,35 +1,35 @@
 import inspect
 import os
-import sys
-import torch
 import shutil
-from pytorch_lightning import Trainer, seed_everything
+import sys
 from tempfile import TemporaryDirectory
+
+import torch
+from pytorch_lightning import Trainer, seed_everything
 
 sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from mttl.models.expert_model import ExpertModel, MoEModel
 from mttl.arguments import ExpertConfig
-from mttl.models.library.expert_library import (
-    ExpertLibrary,
-    LocalExpertLibrary,
-)
-from mttl.models.lightning.callbacks import LiveCheckpointCallback
-from mttl.models.monitors import get_monitors
 from mttl.datamodule.base import get_datamodule
-from mttl.models.lightning.callbacks import NanoMMLUCallback, RougeCallback, DownstreamEvalCallback
-from mttl.models.lightning.loggers import get_pl_loggers
-from mttl.models.lightning.expert_module import ExpertModule
-from mttl.logging import setup_logging, logger
-from mttl.utils import (
-    remote_login,
-)
-
+from mttl.logging import logger, setup_logging
+from mttl.models.expert_model import ExpertModel, MoEModel
 from mttl.models.library.expert import Expert, load_expert
+from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
+from mttl.models.lightning.callbacks import (
+    DownstreamEvalCallback,
+    LiveCheckpointCallback,
+    NanoMMLUCallback,
+    RougeCallback,
+)
+from mttl.models.lightning.expert_module import ExpertModule
+from mttl.models.lightning.loggers import get_pl_loggers
+from mttl.models.monitors import get_monitors
+from mttl.utils import remote_login
+from projects.modular_llm.compute_transfer_matrix import TransferMatrixConfig
 from projects.modular_llm.compute_transfer_matrix import (
-    TransferMatrixConfig,
     run_eval as produce_transfer_matrix,
 )
+
 
 def create_transfer_matrix(args, checkpoint):
     ########################
@@ -63,7 +63,7 @@ def run_multitask(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
-    args.num_train_epochs=int(args.num_train_epochs) # make sure to convert to int
+    args.num_train_epochs = int(args.num_train_epochs)  # make sure to convert to int
     setup_logging(args.output_dir)
     logger.info("Args: {}".format(args.to_json()))
 
@@ -77,22 +77,14 @@ def run_multitask(args: ExpertConfig):
         )
 
     loggers = get_pl_loggers(args)
-    # select dataloader
-    # if args.model_modifier == "poly":
-    #     args.init_from_scratch = True
-    #     model_class = MoEModel
-    # else:
-
-    # model_class = ExpertModel
     model_class = ExpertModule
 
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
     args.task_names = dm._task_names
 
-    args.tokenizer = dm.tokenizer
     module = model_class(**vars(args))
-    
+
     # get metric monitors for models
     callbacks = get_monitors(args)
     if "mbpp" in args.dataset:
@@ -104,23 +96,35 @@ def run_multitask(args: ExpertConfig):
 
     # -=============== Iterative masking using Callback ====================
     # NOTE: Don't move this block, it's important we call maskCallBack before others
-    if args.use_sparse_model and args.activate_scatter_training==False:
-        if args.activate_noise:       
-            from mttl.models.modifiers.sparse_mask import apply_fixed_noise_to_sprase_module
-            apply_fixed_noise_to_sprase_module(module, exp=f'phi-3_{args.sparse_cat}_kr_{args.keep_ratio}')
-            from mttl.models.modifiers.sparse_mask import SparseMaskAdapter as SparseMaskModule
+    if args.use_sparse_model and args.activate_scatter_training == False:
+        if args.activate_noise:
+            from mttl.models.modifiers.sparse_mask import (
+                apply_fixed_noise_to_sprase_module,
+            )
+
+            apply_fixed_noise_to_sprase_module(
+                module, exp=f"phi-3_{args.sparse_cat}_kr_{args.keep_ratio}"
+            )
+            from mttl.models.modifiers.sparse_mask import (
+                SparseMaskAdapter as SparseMaskModule,
+            )
+
             for m_name, m in dict(module.named_modules()).items():
                 if isinstance(m, SparseMaskModule):
                     print(m.noise_mean, m.noise_std)
 
         from mttl.models.lightning.callbacks import UpdateSparseMask
-        assert len(args.task_names) == 1, print('sparse mask does not support more than 1 task')
-        maskCallback = UpdateSparseMask(update_interval=100, 
-                                        save_mask_dir=args.library_id,
-                                        task_name=args.task_names[0], 
-                                        parameter_selection_procedure="per_layer")  # "per_layer"/"model" use "per_layer" for default
-        callbacks.append(maskCallback)
 
+        assert len(args.task_names) == 1, print(
+            "sparse mask does not support more than 1 task"
+        )
+        maskCallback = UpdateSparseMask(
+            update_interval=100,
+            save_mask_dir="temp/saved_masks_dir",
+            task_name=args.task_names[0],
+            parameter_selection_procedure="per_layer",
+        )  # "per_layer"/"model" use "per_layer" for default
+        callbacks.append(maskCallback)
 
     checkpoint_callback = LiveCheckpointCallback(
         dirpath=args.output_dir,
@@ -177,6 +181,7 @@ def run_multitask(args: ExpertConfig):
     # load pretrained scatter weight and mask
     if args.activate_scatter_training:
         from mttl.models.modifiers.sparse_mask import load_scatter_pretrain_model
+
         load_scatter_pretrain_model(module, args)
 
     trainer = Trainer(
@@ -200,7 +205,7 @@ def run_multitask(args: ExpertConfig):
     )
 
     # initial validation only for a bunch of datasets... ?
-    if args.compute_strategy != "deepspeed" and args.activate_scatter_training==False:
+    if args.compute_strategy != "deepspeed" and args.activate_scatter_training == False:
         # validating before training fails with deepspeed
         trainer.validate(module, dm)
 
@@ -221,11 +226,6 @@ def run_multitask(args: ExpertConfig):
             # refresh expert library: so we dont overwrite the readme if the remote has changed.
             expert_library.refresh_from_remote()
 
-            # if isinstance(module, MoEModel):
-            #     for expert_name in module.experts_names:
-            #         expert = module.get_expert_instance(expert_name)
-            #         expert_library.add_expert(expert, expert_name)
-            # elif isinstance(module, ExpertModel):
             if isinstance(module, ExpertModule):
                 expert_name = args.expert_name or args.finetune_task_name
                 expert_library.add_expert_from_ckpt(checkpoint, expert_name, force=True)
@@ -234,7 +234,6 @@ def run_multitask(args: ExpertConfig):
 
         if args.create_transfer_matrix:
             create_transfer_matrix(args, checkpoint)
-
 
 
 if __name__ == "__main__":

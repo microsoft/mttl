@@ -12,7 +12,7 @@ for task_name in "${task_name_list[@]}"; do
     export JOB_NAME="qwen_${EXP_NAME}/${task_name}"
     
     CUDA_VISIBLE_DEVICES=0 python3 projects/sparse_finetuning/train_experts_main.py \
-    -c "projects/sparse_finetuning/configs/qwen_test2.json" \
+    -c "projects/sparse_finetuning/configs/qwen_test_sparse.json" \
     -k \
     seed=42 \
     finetune_task_name=${task_name} \
