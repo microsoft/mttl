@@ -96,23 +96,7 @@ def run_multitask(args: ExpertConfig):
 
     # -=============== Iterative masking using Callback ====================
     # NOTE: Don't move this block, it's important we call maskCallBack before others
-    if args.use_sparse_model and args.activate_scatter_training == False:
-        if args.activate_noise:
-            from mttl.models.modifiers.sparse_mask import (
-                apply_fixed_noise_to_sprase_module,
-            )
-
-            apply_fixed_noise_to_sprase_module(
-                module, exp=f"phi-3_{args.sparse_cat}_kr_{args.keep_ratio}"
-            )
-            from mttl.models.modifiers.sparse_mask import (
-                SparseMaskAdapter as SparseMaskModule,
-            )
-
-            for m_name, m in dict(module.named_modules()).items():
-                if isinstance(m, SparseMaskModule):
-                    print(m.noise_mean, m.noise_std)
-
+    if args.use_sparse_model:
         from mttl.models.lightning.callbacks import UpdateSparseMask
 
         assert len(args.task_names) == 1, print(
@@ -178,12 +162,6 @@ def run_multitask(args: ExpertConfig):
         elif val_check_interval > args.total_steps and args.total_steps != -1:
             val_check_interval = args.total_steps
 
-    # load pretrained scatter weight and mask
-    if args.activate_scatter_training:
-        from mttl.models.modifiers.sparse_mask import load_scatter_pretrain_model
-
-        load_scatter_pretrain_model(module, args)
-
     trainer = Trainer(
         devices=-1,
         accelerator="gpu",
@@ -205,7 +183,7 @@ def run_multitask(args: ExpertConfig):
     )
 
     # initial validation only for a bunch of datasets... ?
-    if args.compute_strategy != "deepspeed" and args.activate_scatter_training == False:
+    if args.compute_strategy != "deepspeed":
         # validating before training fails with deepspeed
         trainer.validate(module, dm)
 

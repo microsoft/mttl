@@ -27,9 +27,7 @@
     "modify_layers": ".*q_proj|.*v_proj|.*k_proj",
     "trainable_param_names": ".*sparse_layer.*",
     "keep_ratio": 0.05,
-    "sparse_cat": "block_sparse"
-    
-
+    "sparse_cat": "regular_sparse"
 }
 
 

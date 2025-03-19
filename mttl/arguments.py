@@ -344,17 +344,10 @@ class TrainingArgs(DataArgs):
     exp_name: str = None
     expert_name: str = None
 
-    K: int = None # Samin: using this to activate K number experts out of 256, if None uses all experts available
-    use_sparse_model: bool = False # Samin: `True` if want to activate sparse model
-    # keep_ratio: float = 0.05
-    # noise_add_ratio: float = 1  # FV: float?
-    # noise_space_ratio: float = 0.25  # xtimes the trainable parameters
-    # activate_noise: bool = False
-    # noise_cat: str = 'targeted_noise'
-    # sparse_cat: str = 'regular_sparse'
-    activate_scatter_training: bool = False  # none or scatter
-    # BLOCK_SIZE: int = 16 # used for block-sparsity, decides the size of the block
-
+    K: int = (
+        None  # Samin: using this to activate K number experts out of 256, if None uses all experts available
+    )
+    use_sparse_model: bool = False  # `True` if want to activate sparse model
 
     # Training config
     micro_batch_size: str = None

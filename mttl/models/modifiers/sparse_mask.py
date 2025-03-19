@@ -73,33 +73,6 @@ def save_mask(module, f_name):
         np.savez_compressed(f"./{f_name}.npz", arr=mask_dict)
 
 
-def update_noise_space(module, grad_score, accepted_score, noise_params_to_keep):
-    """
-    m.nextk_idx is updated, which identifies the noise space used to sample noise in forward step
-    """
-    assert (
-        len(grad_score.shape) == 1
-    ), "grad_score has to be 1D array to get accurate noise-index, 2D grad matrix need to be flatten() for proper noise-mask calculation"
-    if module.noise_cat == "targeted_noise":
-        lower_bound, _ = torch.topk(grad_score, noise_params_to_keep, sorted=True)
-        lower_bound = lower_bound[-1]
-        noise_mask = (grad_score < accepted_score).float() * (
-            grad_score >= lower_bound
-        ).float()
-    elif module.noise_cat == "random_noise":
-        noise_mask = (grad_score < accepted_score).float()
-
-    if noise_mask.sum() == 0:
-        raise ValueError(
-            "noise mask is all 0, no noise is added. Set `activate_noise=False` if no noise is expected during training"
-        )
-    assert (
-        len(noise_mask.shape) == 1
-    ), "noise-mask has to be 1D array to get accurate noise-index, check the inputs and noise_mask calculation"
-
-    module.nextK_idx = torch.where(noise_mask == 1)[0]
-
-
 class MatrixBlockIndexer:
     """
     Example use case:
@@ -181,21 +154,6 @@ def get_block_mask(m):
             keep_masks_idx.shape, dtype=torch.float32, device=m.layer.weight.device
         ),
     )
-    if m.activate_noise:
-        # update the noise space
-        noise_params_to_keep = int(
-            torch.numel(m.sparse_layer.weight_mask)
-            * (m.keep_ratio + m.noise_space_ratio)
-        )
-        noise_blocks_to_keep = int(
-            noise_params_to_keep / (m.BlockwiseConvolution.BLOCK_SIZE**2)
-        )
-        update_noise_space(
-            module=m,
-            grad_score=block_score,
-            accepted_score=accepted_score,
-            noise_params_to_keep=noise_blocks_to_keep,
-        )
 
     return keep_masks
 
@@ -211,17 +169,6 @@ def get_regular_sparse_mask(m):
     accepted_score = threshold[-1]
     keep_masks = (m.sparse_layer.weight_mask.grad >= accepted_score).float()
 
-    if m.activate_noise:
-        noise_params_to_keep = int(
-            torch.numel(m.sparse_layer.weight_mask)
-            * (m.keep_ratio + m.noise_space_ratio)
-        )
-        update_noise_space(
-            module=m,
-            grad_score=m.sparse_layer.weight_mask.grad.flatten(),
-            accepted_score=accepted_score,
-            noise_params_to_keep=noise_params_to_keep,
-        )
     return keep_masks
 
 
@@ -298,23 +245,10 @@ def mod_forward(self, x):
     return torch.nn.functional.linear(x, self.weight * self.weight_mask, self.bias)
 
 
-"""consider adding random noise"""
-
-
-def mod_noisy_forward(self, x):
-    return torch.nn.functional.linear(
-        x, self.weight * self.weight_mask + self.noise, self.bias
-    )
-
-
 @dataclass
 class SparseMaskConfig(ModifierConfig):
     keep_ratio: float = 0.05
-    noise_add_ratio: float = 0.25
-    noise_space_ratio: float = 1.0
-    activate_noise: bool = False
     mask_cat: str = "scatter"
-    noise_cat: str = "targeted_noise"  # 'targeted_noise' or 'random_noise'
     training_mode: bool = True
     BLOCK_SIZE: int = 16  # 16x
     sparse_cat: str = "block_sparse"  # ['block_sparse','regular_sparse']
@@ -365,61 +299,11 @@ class SparseMaskAdapter(Modifier):
         self.keed_mask_idx = None  # will be initialized during training
 
         self.training_mode = config.training_mode
-        # noise initialization
-        self.activate_noise = (
-            config.activate_noise
-        )  # if True, uses a noisy parameter training
-        assert type(self.activate_noise) == bool
 
-        # update forward step
-        if self.training_mode == False:
-            # forward function
-            self.patch_forward()
-        else:
-            # forward function
-            if self.activate_noise:
-                # 'nextK_idx' will be initialized during training, used in adding noise
-                # (a) if noise_cat=='targeted_noise': stores the idx of most % important weights after the trainable params
-                # (b) if noise_cat=='random_noise': a larger-matrix keeps idx of everything except the trainable params
-                self.nextK_idx = None
-                self.noise_cat = config.noise_cat
-                assert self.noise_cat in ["targeted_noise", "random_noise"]
+        self.patch_forward()
 
-                self.noise_space_ratio = (
-                    config.noise_space_ratio
-                )  # % of parameter space that we sample noise idx from
-                self.noise_add_ratio = (
-                    config.noise_add_ratio
-                )  # % of parameter where noise will be added
-
-                assert (
-                    self.noise_space_ratio > self.keep_ratio
-                    and self.noise_space_ratio > self.noise_add_ratio
-                ), "since noise indx is sampled from `noise_space_ratio`, it's value must be greater than `keep_ratio` and `noise_space_ratio` "
-
-                self.sparse_layer.noise = torch.zeros(
-                    self.param_shape, device=self.layer.weight.device
-                )
-                self.noise_mean = None
-                self.noise_std = None
-                self.turn_off_require_grad()
-
-                self.patch_noisy_forward()
-            else:
-                self.patch_forward()
-        # used for noise calculcation
-        self.sampled_indices = None
-        self.noise = None
-
-    # forward without noise
     def patch_forward(self):
         self.sparse_layer.forward = types.MethodType(mod_forward, self.sparse_layer)
-
-    # forward with noise
-    def patch_noisy_forward(self):
-        self.sparse_layer.forward = types.MethodType(
-            mod_noisy_forward, self.sparse_layer
-        )
 
     def turn_off_require_grad(self):
         self.sparse_layer.noise.requires_grad = False
@@ -432,97 +316,6 @@ class SparseMaskAdapter(Modifier):
         self.sparse_layer.weight = nn.Parameter(
             self.sparse_layer.weight.flatten()[self.keep_mask_idx].data
         ).to(self.layer.weight.device)
-
-    def calculate_noise(self, sampled_indices):
-        if self.noise_mean == None:
-            masked_w = self.sparse_layer.weight.flatten()[self.keep_mask_idx]
-            noise_mean = masked_w.mean()
-            noise_std = masked_w.std()
-            noise = torch.normal(
-                mean=noise_mean,
-                std=noise_std,
-                size=sampled_indices.shape,
-                dtype=torch.float32,
-                device=self.layer.weight.device,
-            )
-        else:
-            noise = torch.normal(
-                mean=self.noise_mean,
-                std=self.noise_std,
-                size=sampled_indices.shape,
-                dtype=torch.float32,
-                device=self.layer.weight.device,
-            )
-        return noise
-
-    def sample_noise_idx(self):
-
-        if self.sparse_cat == "regular_sparse":
-            # For both `random_noise` and `targeted_noise` we sample indices
-            # Determine the number of elements to sample (20%)
-            num_samples = int(
-                self.param_num * self.noise_add_ratio
-            )  # number of sampled-parameters
-            # number of max-parameters
-            num_elements = len(self.nextK_idx)
-            # Randomly sample indices
-            sampled_indices = self.nextK_idx[
-                torch.randint(0, num_elements, (num_samples,))
-            ]
-
-        elif self.sparse_cat == "block_sparse":
-            # For both `random_noise` and `targeted_noise` we sample indices
-            # Determine the number of elements to sample (20%)
-            total_num_blocks = self.param_num / (self.BLOCK_SIZE**2)
-            num_samples = int(
-                total_num_blocks * self.noise_add_ratio
-            )  # number of sampled-parameters
-            # number of max-parameters
-            num_elements = len(self.nextK_idx)
-            # Randomly sample indices
-            sampled_indices = self.nextK_idx[
-                torch.randint(0, num_elements, (num_samples,))
-            ]
-
-            # For block-sparse the indices and block-indices, that we need to convert to parameter positions
-            sampled_indices = [
-                self.BlockwiseConvolution.get_block_indices(i) for i in sampled_indices
-            ]
-            sampled_indices = (
-                torch.stack(sampled_indices).flatten().to(self.layer.weight.device)
-            )
-
-        return sampled_indices
-
-    @torch.no_grad()
-    def generate_noise(self):
-        if self.nextK_idx != None:
-            """STEP 1: Generate a random one-hot noise matrix that consitutes 20% of the nextK_idx important weights"""
-
-            if self.sampled_indices == None or self.noise == None:
-                self.sampled_indices = self.sample_noise_idx()
-                self.noise = self.calculate_noise(self.sampled_indices)
-            else:
-                if random.randint(0, 1) == 0:
-                    self.sampled_indices = self.sample_noise_idx()
-                else:
-                    self.noise = self.calculate_noise(self.sampled_indices)
-
-            # need to create torch matrix in GPU in every gradient step
-            self.sparse_layer.noise = torch.zeros(
-                self.param_shape, device=self.layer.weight.device
-            )
-            self.sparse_layer.noise.flatten().scatter_add_(
-                0, self.sampled_indices, self.noise
-            )
-
-        else:
-            # Ones matrix, non_trainable as default. sync the device
-            if self.sparse_layer.noise.device != self.sparse_layer.weight.device:
-                self.sparse_layer.noise = self.sparse_layer.noise.clone().to(
-                    self.sparse_layer.weight.device
-                )
-        self.turn_off_require_grad()
 
     def data_preprocess(self, x):
         sparse_model_dtype = self.sparse_layer.weight.dtype
@@ -550,11 +343,6 @@ class SparseMaskAdapter(Modifier):
         # `weight_mask` requires to sync with `weight` device, as default only looks module
         self.confirm_sync_device()  # TODO, need to remove this, it should only require once before training
         output = self.layer(input)
-
-        # TODO
-        # with generate noise will make self.noise no-zero matrix
-        if self.training_mode and self.activate_noise:
-            self.generate_noise()
 
         if self.sparse_layer.weight.device != self.sparse_layer.weight_mask.device:
             print(self.sparse_layer.weight.device, self.sparse_layer.weight_mask.device)
@@ -616,48 +404,3 @@ class SparseMaskAdapter(Modifier):
             self.sparse_layer.weight_mask = torch.ones(
                 self.sparse_layer.weight_mask.shape
             ).to(self.sparse_layer.weight.device)
-
-
-def convert_2D_idx_1D(weight_idx, cols):
-    row_idx, col_idx = weight_idx[:, 0], weight_idx[:, 1]
-    index_1d = row_idx * cols + col_idx
-    return torch.tensor(index_1d)
-
-
-def compute_noise_mean_std(exp="phi-3_regular_sparse_kr_0.1"):
-    """
-    based on sparse-trained model, we compute the mean-std weights over different layers
-    """
-
-    with open(f"Weight_Stats/{exp}/weight_stats.json") as f:
-        d = json.load(f)
-        tasks = list(d.keys())
-        layers = list(d[tasks[0]].keys())
-
-        noise_mean = {}
-        noise_std = {}
-        for l in layers:
-            noise = []
-            for t in tasks:
-                noise.append(d[t][l][0])
-            noise_mean[l] = np.mean(noise)
-            noise_std[l] = np.std(noise)
-    noise_mean = np.array(list(noise_mean.values()))
-    noise_std = np.array(list(noise_std.values()))
-
-    layers = [".".join(l.split(".")[:-1]) for l in layers]
-    m = dict(zip(layers, noise_mean))
-    s = dict(zip(layers, noise_std))
-    return m, s
-
-
-def apply_fixed_noise_to_sprase_module(module, exp="phi-3_regular_sparse_kr_0.1"):
-    from mttl.models.modifiers.sparse_mask import SparseMaskAdapter as SparseMaskModule
-
-    noise_mean, noise_std = compute_noise_mean_std(exp)
-    for m_name, m in dict(module.named_modules()).items():
-        if isinstance(m, SparseMaskModule):
-            m_name = ".".join((m_name.split("."))[1:])
-            m.noise_mean = noise_mean[m_name]
-            m.noise_std = noise_std[m_name]
-    print("added fixed noise")
