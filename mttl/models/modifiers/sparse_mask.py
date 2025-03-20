@@ -305,9 +305,6 @@ class SparseMaskAdapter(Modifier):
     def patch_forward(self):
         self.sparse_layer.forward = types.MethodType(mod_forward, self.sparse_layer)
 
-    def turn_off_require_grad(self):
-        self.sparse_layer.noise.requires_grad = False
-
     @torch.no_grad()
     def convert_sparse_weight_to_1D(self):
         assert len(self.sparse_layer.weight.shape) == 2, print(

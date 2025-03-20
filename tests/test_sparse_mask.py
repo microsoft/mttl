@@ -8,7 +8,13 @@ import torch.nn as nn
 from pytorch_lightning import seed_everything
 
 from mttl.models.modifiers import modify_transformer
-from mttl.models.modifiers.sparse_mask import SparseMaskAdapter, SparseMaskConfig
+from mttl.models.modifiers.sparse_mask import (
+    SparseMaskAdapter,
+    SparseMaskConfig,
+    make_sparse_model_during_training,
+)
+
+# sys.path.append(os.path.join(os.path.dirname(__file__), "..")) # uncomment if running locally
 
 
 def test_sm_adapter():
@@ -41,8 +47,6 @@ def test_sm_adapter():
     for n, p in model.named_parameters():
         if p.requires_grad:
             sparse_module_count += 1
-            print("in")
-            print(n)
             assert n.endswith(".sparse_layer.weight") or n.endswith(
                 ".sparse_layer.bias"
             )
@@ -50,3 +54,13 @@ def test_sm_adapter():
             parent_module = modules[parent_name]
 
     assert sparse_module_count == 30
+
+    bs, max_seq_len = 10, 100
+    batch = {
+        "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
+        "labels": torch.randint(10, 400, (bs, max_seq_len)),
+        "attention_mask": torch.ones(bs, max_seq_len, dtype=torch.int32),
+    }
+
+    # calculates loss. calcs gradients for weight_mask and updates mask.
+    make_sparse_model_during_training(model, batch)
