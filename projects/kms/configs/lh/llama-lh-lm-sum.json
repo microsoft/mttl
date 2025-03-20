@@ -1,5 +1,5 @@
 {
-    "loss_function": "summary",
+    "loss_function": "summary_lm",
     "dataset_type": "dcd_km",
     "dataset": "az://mttldata/longhealth-summaries-qa-llama-8b-instruct-sanitized-2",
     "padding_side": "right",
