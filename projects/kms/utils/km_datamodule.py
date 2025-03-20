@@ -406,6 +406,7 @@ class LMDataModule(DataModule):
 @dataclass
 class ConcatDatasetConfig(KMDatasetConfig):
     n_concat: int = 2
+    max_concat_tokens: int = None
     use_only_type: str = "summary"
 
 
@@ -455,17 +456,24 @@ class ConcatDatasetModule(KMDatasetModule):
 
                 input = example["input"][i]
                 outputs = example["outputs"][i]
+                concat_outputs = [
+                    "".join(list(["" if v is None else v for v in o.values()]))
+                    for o in outputs
+                ]
+                len_in_tokens = [len(self.tokenizer.encode(o)) for o in concat_outputs]
                 for s_idx in range(len(outputs)):
                     # summary at index i will appear first. Now, sample `n_concat - 1` other indices
                     other_idx = np.random.choice(
                         [j for j in range(len(outputs)) if j != s_idx],
-                        self.config.n_concat - 1,
+                        max(self.config.n_concat, len(outputs)) - 1,
                         replace=False,
                     )
                     # We will use the indices in `synthetic_idx` to create the synthetic data
                     synthetic_data = []
                     synthetic_idx = [s_idx] + other_idx.tolist()
+                    total_tokens = 0
                     for idx in synthetic_idx:
+
                         if example["type"][i] == "summary":
                             prompt_str = "Summarize the preceding passage."
                             synthetic_data.append(
@@ -483,6 +491,11 @@ class ConcatDatasetModule(KMDatasetModule):
                         else:
                             raise ValueError(f"Unknown type {example['type'][i]}")
 
+                        # Let's exit here so that at least one summary is always present
+                        total_tokens += len_in_tokens[idx]
+                        if total_tokens > self.config.max_concat_tokens:
+                            break
+
                     concat_data = join_str.join(synthetic_data)
                     context_source, no_context_source = create_dcd_pairs(
                         self.tokenizer, input, concat_data, prompt_str
@@ -495,7 +508,6 @@ class ConcatDatasetModule(KMDatasetModule):
                     )
             return return_dict
 
-        old = train_dataset
         train_dataset = train_dataset.map(
             expand_targets_and_chat_cs,
             batched=True,
