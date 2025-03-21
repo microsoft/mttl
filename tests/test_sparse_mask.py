@@ -1,3 +1,4 @@
+import itertools
 import math
 import os
 import sys
@@ -14,7 +15,9 @@ from mttl.models.modifiers.sparse_mask import (
     make_sparse_model_during_training,
 )
 
-# sys.path.append(os.path.join(os.path.dirname(__file__), "..")) # uncomment if running locally
+# sys.path.append(
+#     os.path.join(os.path.dirname(__file__), "..")
+# )  # uncomment and move before mttl imports if running locally
 
 
 def test_sm_adapter():
@@ -23,44 +26,112 @@ def test_sm_adapter():
     seed_everything(0)
     from transformers.models.llama.configuration_llama import LlamaConfig
 
-    adapter_config = SparseMaskConfig(
-        modify_layers="gate_proj|down_proj|up_proj",
-        sparse_cat="regular_sparse",
-        keep_ratio=0.05,
-    )
+    keep_ratio_list = [0.05, 0.1]
+    sparse_cat_list = ["regular_sparse", "block_sparse"]
+    mask_cat_list = ["scatter", None]
+    parameter_selection_procedure_list = ["per_layer", "model"]
 
-    small_config = LlamaConfig(
-        vocab_size=400,
-        hidden_size=512,
-        intermediate_size=1024,
-        num_hidden_layers=5,
-        num_attention_heads=8,
-        max_position_embeddings=512,
-    )
-    from transformers.models.llama.modeling_llama import LlamaForCausalLM
+    for (
+        sparse_cat,
+        mask_cat,
+        keep_ratio,
+        parameter_selection_procedure,
+    ) in itertools.product(
+        sparse_cat_list,
+        mask_cat_list,
+        keep_ratio_list,
+        parameter_selection_procedure_list,
+    ):
 
-    model = LlamaForCausalLM(small_config)
-    modify_transformer(model, adapter_config)
+        if parameter_selection_procedure == "model" and sparse_cat == "block_sparse":
+            continue  # skip this combination
 
-    sparse_module_count = 0
-    modules = dict(model.named_modules())
-    for n, p in model.named_parameters():
-        if p.requires_grad:
-            sparse_module_count += 1
-            assert n.endswith(".sparse_layer.weight") or n.endswith(
-                ".sparse_layer.bias"
-            )
-            parent_name = ".".join(n.split(".")[:-1])
-            parent_module = modules[parent_name]
+        adapter_config = SparseMaskConfig(
+            modify_layers="gate_proj|down_proj|up_proj",
+            sparse_cat=sparse_cat,
+            keep_ratio=keep_ratio,
+            mask_cat=mask_cat,
+        )
+        print(
+            f"Testing with sparse_cat={sparse_cat}, mask_cat={mask_cat},"
+            f"keep_ratio={keep_ratio}, parameter_selection_procedure={parameter_selection_procedure}"
+        )
 
-    assert sparse_module_count == 30
+        adapter_config = SparseMaskConfig(
+            modify_layers="gate_proj|down_proj|up_proj",
+            sparse_cat=sparse_cat,
+            keep_ratio=keep_ratio,
+            mask_cat=mask_cat,
+        )
 
-    bs, max_seq_len = 10, 100
-    batch = {
-        "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
-        "labels": torch.randint(10, 400, (bs, max_seq_len)),
-        "attention_mask": torch.ones(bs, max_seq_len, dtype=torch.int32),
-    }
+        small_config = LlamaConfig(
+            vocab_size=400,
+            hidden_size=512,
+            intermediate_size=1024,
+            num_hidden_layers=5,
+            num_attention_heads=8,
+            max_position_embeddings=512,
+        )
+        from transformers.models.llama.modeling_llama import LlamaForCausalLM
 
-    # calculates loss. calcs gradients for weight_mask and updates mask.
-    make_sparse_model_during_training(model, batch)
+        model = LlamaForCausalLM(small_config)
+        modify_transformer(model, adapter_config)
+
+        # check that the correct modules have been modified
+        sparse_module_count = 0
+        modules = dict(model.named_modules())
+        for n, p in model.named_parameters():
+            if p.requires_grad:
+                sparse_module_count += 1
+                assert n.endswith(".sparse_layer.weight") or n.endswith(
+                    ".sparse_layer.bias"
+                )
+                parent_name = ".".join(n.split(".")[:-1])
+                parent_module = modules[parent_name]
+        assert sparse_module_count == 30
+
+        bs, max_seq_len = 10, 100
+        batch = {
+            "input_ids": torch.randint(10, 400, (bs, max_seq_len)),
+            "labels": torch.randint(10, 400, (bs, max_seq_len)),
+            "attention_mask": torch.ones(bs, max_seq_len, dtype=torch.int32),
+        }
+
+        # Perform a few optimizer steps, to initialize the sparse_layer weights
+        optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
+        for _ in range(3):
+            optimizer.zero_grad()
+            outputs = model(**batch)
+            loss = outputs.loss
+            loss.backward()
+            optimizer.step()
+
+        # calculates loss. calcs gradients for weight_mask and updates mask.
+        make_sparse_model_during_training(
+            model, batch, parameter_selection_procedure=parameter_selection_procedure
+        )
+
+        # assert sparsification works as intended
+        if parameter_selection_procedure == "per_layer":
+            # assert each layer is properly sparse
+            for m in model.modules():
+                if isinstance(m, SparseMaskAdapter):
+                    expected_non_zero_in_mask = int(m.param_num * keep_ratio)
+                    # if block sparse then need to slightly adjust expected non zero in mask
+                    if sparse_cat == "block_sparse":
+                        expected_blocks = int(
+                            expected_non_zero_in_mask / m.BLOCK_SIZE**2
+                        )
+                        expected_non_zero_in_mask = expected_blocks * m.BLOCK_SIZE**2
+                    assert m.sparse_layer.weight_mask.sum() == expected_non_zero_in_mask
+
+        elif parameter_selection_procedure == "model":
+            # assert model is approppriately sparse in aggregate
+            expected_non_zero_in_mask = 0
+            actual_non_zero_in_mask = 0
+            for m in model.modules():
+                if isinstance(m, SparseMaskAdapter):
+                    expected_non_zero_in_mask += int(m.param_num * keep_ratio)
+                    actual_non_zero_in_mask += m.sparse_layer.weight_mask.sum()
+
+            assert expected_non_zero_in_mask == actual_non_zero_in_mask

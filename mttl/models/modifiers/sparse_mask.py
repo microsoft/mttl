@@ -249,7 +249,6 @@ def mod_forward(self, x):
 class SparseMaskConfig(ModifierConfig):
     keep_ratio: float = 0.05
     mask_cat: str = "scatter"
-    training_mode: bool = True
     BLOCK_SIZE: int = 16  # 16x
     sparse_cat: str = "block_sparse"  # ['block_sparse','regular_sparse']
 
@@ -297,8 +296,6 @@ class SparseMaskAdapter(Modifier):
         self.mask_cat = config.mask_cat
         self.keep_ratio = config.keep_ratio
         self.keed_mask_idx = None  # will be initialized during training
-
-        self.training_mode = config.training_mode
 
         self.patch_forward()
 
