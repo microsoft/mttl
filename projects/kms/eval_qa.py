@@ -11,7 +11,10 @@ from lightning_fabric import seed_everything
 from projects.kms.utils.km_datamodule import KMDatasetModule
 from projects.kms.utils.longhealth_datamodule import LonghealthDatamodule
 from projects.kms.utils.nqa_datamodule import NQADatamodule
-from projects.kms.utils.quality_datamodule import QualityDatamodule
+from projects.kms.utils.quality_datamodule import (
+    GenQualityDataModule,
+    QualityDatamodule,
+)
 
 # isort: split
 from mttl.arguments import ExpertConfig, MultiExpertConfig
@@ -32,6 +35,7 @@ from projects.kms.train_km_simple import (
     evaluate_datasets,
     evaluate_metrics,
 )
+from projects.kms.train_qa import cpu_offload
 from projects.kms.utils.km_model import KEMoEModelConfig
 from projects.kms.utils.km_selector import KnowledgeExtractorSelectorConfig
 
