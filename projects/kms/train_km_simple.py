@@ -31,7 +31,7 @@ from mttl.models.utils import transfer_batch_to_device
 from mttl.utils import remote_login, seed_everything
 from projects.kms.utils.longhealth_evaluator import LonghealthEvaluator
 from projects.kms.utils.nqa_evaluator import NQAZeroShotEvaluator, SharedNQAEvaluator
-from projects.kms.utils.quality_evaluator import QualityEvaluator
+from projects.kms.utils.quality_evaluator import GenQualityEvaluator, QualityEvaluator
 from projects.kms.utils.simple_utils import (
     EarlyStopper,
     SimpleLogger,
@@ -76,6 +76,7 @@ evaluate_datasets = {
     "quality-rag-2048": "az://mttldata/ql-rag-2048",
     "quality-rag-4096": "az://mttldata/ql-rag-4096",
     "longhealth": "az://mttldata/longhealth-sanitized",
+    "gen_quality": "az://mttldata/quality-sanitized",
 }
 
 evaluate_class = {
@@ -100,6 +101,7 @@ evaluate_class = {
     "quality-rag-2048": QualityEvaluator,
     "quality-rag-4096": QualityEvaluator,
     "longhealth": LonghealthEvaluator,
+    "gen_quality": GenQualityEvaluator,
 }
 
 evaluate_metrics = {
@@ -124,6 +126,7 @@ evaluate_metrics = {
     "quality-rag-2048": "accuracy",
     "quality-rag-4096": "accuracy",
     "longhealth": "accuracy",
+    "gen_quality": "accuracy",
 }
 
 
