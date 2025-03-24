@@ -34,7 +34,7 @@ class LonghealthEvaluator(GenerativeEvaluator):
         dataset_args.dataset_type = "longhealth"
         dataset_args.add_eos_to_targets = False
 
-        generation_kwargs["max_new_tokens"] = 8
+        generation_kwargs["max_new_tokens"] = 4
         generation_kwargs["do_sample"] = False
 
         datamodule = get_datamodule(dataset_args, for_generation=True)
