@@ -980,6 +980,12 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         WinograndeMultiChoiceDataModule,
     )
 
+    from mttl.datamodule.ultrafeedback_data_module import (
+        UltrafeedbackSFTmodule,
+    )
+
+    from mttl.datamodule.orca_data_module import OrcaDataModule
+
     # if we have a DataArgs object, we can directly create the datamodule
     if isinstance(args, DataArgs) and args.dataset_type is not None:
         dataset_config = args.dataset_config
@@ -1075,6 +1081,16 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
             pack_sequences=args.pack_sequences,
         )
         dm = FlatMultiTaskModule(config, for_generation=for_generation)
+    elif "ultrachat" in dataset:
+        config = DatasetConfig(
+            **common_kwargs,
+        )
+        dm = UltrafeedbackSFTmodule(config, for_generation=for_generation)
+    elif "orca" in dataset:
+        config = DatasetConfig(
+            **common_kwargs,
+        )
+        dm = OrcaDataModule(config, for_generation=for_generation)
     elif "mmlu" in dataset:
         config = MMLUDataConfig(
             **common_kwargs,
