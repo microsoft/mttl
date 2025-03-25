@@ -20,14 +20,36 @@ class MathQADataModule(DataModule):
             "train"
         ]
 
+        def map_example(example):
+            # Use tokenizer.apply_chat_template() to format the conversation
+            messages = [
+                {"role": "system", "content": "You are a helpful AI assistant."},
+                {
+                    "role": "user",
+                    "content": example["source"],
+                },
+                {
+                    "role": "assistant",
+                    "content": example["target"],
+                },
+            ]
+            input = self.tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+            )
+
+            source = input.split("<|assistant|>")[0] + "<|assistant|>"
+            target = input.split("<|assistant|>")[1]
+            return {"source": source, "target": target}
+
         train_dataset = train_dataset.rename_column("query", "source")
         train_dataset = train_dataset.rename_column("response", "target")
-
         # filter out the rows where the source is empty
         train_dataset = train_dataset.filter(lambda x: x["source"] != "")
-
-        self.train_dataset, self.dev_dataset= self.create_train_valid_split(train_dataset, validation_portion=0.01)
-        self.test_dataset = self.dev_dataset
+        if self.config.model == "microsoft/Phi-3-mini-4k-instruct":
+            train_dataset = train_dataset.map(map_example, num_proc=1)
+        self.train_dataset = train_dataset
+        self.test_dataset = self.dev_dataset = train_dataset
 
         self.print_infos()
 
@@ -46,7 +68,6 @@ class MathQADataModule(DataModule):
 
 if __name__ == "__main__":
     config = MathQADataConfig(model="microsoft/Phi-3-mini-4k-instruct")
-
     datamodule = MathQADataModule(config)
     train_dataloader = datamodule.train_dataloader()
     val_dataloder = datamodule.val_dataloader()
