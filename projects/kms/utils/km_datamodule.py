@@ -457,7 +457,11 @@ class ConcatDatasetModule(KMDatasetModule):
                 input = example["input"][i]
                 outputs = example["outputs"][i]
                 concat_outputs = [
-                    "".join(list(["" if v is None else v for v in o.values()]))
+                    (
+                        "".join(list(["" if v is None else v for v in o.values()]))
+                        if isinstance(o, dict)
+                        else o
+                    )
                     for o in outputs
                 ]
                 len_in_tokens = [len(self.tokenizer.encode(o)) for o in concat_outputs]
@@ -472,7 +476,16 @@ class ConcatDatasetModule(KMDatasetModule):
                     synthetic_data = []
                     synthetic_idx = [s_idx] + other_idx.tolist()
                     total_tokens = 0
-                    for idx in synthetic_idx:
+
+                    # let's make sure the total number of concatenated tokens is less than `max_concat_tokens`, but
+                    # that it at least includes 1 summary
+                    upper_bound = max(
+                        1,
+                        (
+                            np.cumsum(len_in_tokens) < self.config.max_concat_tokens
+                        ).sum(),
+                    )
+                    for idx in synthetic_idx[:upper_bound]:
 
                         if example["type"][i] == "summary":
                             prompt_str = "Summarize the preceding passage."
@@ -483,8 +496,12 @@ class ConcatDatasetModule(KMDatasetModule):
                             )
                             join_str = "\n\n----- New Summary -----\n\n"
                         elif example["type"][i] == "qa":
-                            assert isinstance(outputs[idx], dict)
-                            output_str = f"\nQuestion: {outputs[idx]['question']}\nAnswer: {outputs[idx]['answer']}"
+                            if isinstance(outputs[idx], dict):
+                                output_str = f"\nQuestion: {outputs[idx]['question']}\nAnswer: {outputs[idx]['answer']}"
+                            elif isinstance(outputs[idx], str):
+                                output_str = outputs[idx]
+                            else:
+                                raise TypeError("invalid type for output")
                             prompt_str = "Generate a question-answer pair given the preceding passage."
                             synthetic_data.append(output_str)
                             join_str = "\n\n"
