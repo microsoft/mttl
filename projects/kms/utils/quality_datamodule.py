@@ -258,6 +258,17 @@ class GenQualityDataModule(DataModule):
 
                     if self.config.include_context:
                         context = examples["text"][i]
+
+                        if isinstance(context, list):
+                            # following Alan's approach
+                            context = " ".join(
+                                [
+                                    f"Passage {k+1}: {context[k]}\n\n"
+                                    for k in range(
+                                        min(self.config.topk_context, len(context))
+                                    )[::-1]
+                                ]
+                            )
                         assert (
                             type(context) == str
                         ), f"Context should be a string, but got {type(context)}"
