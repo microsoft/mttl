@@ -85,6 +85,10 @@ def eval_qa(training_args):
     )
     model = model.eval()
 
+    # deactivate use_cache for Phi
+    if "Phi" in args.model:
+        model.model.config.use_cache = False
+
     # build evaluator
     data_args = copy.deepcopy(training_args)
     data_args.dataset = evaluate_datasets[training_args.evaluate_on]
