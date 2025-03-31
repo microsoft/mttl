@@ -307,7 +307,8 @@ def train_km(training_args: KMArguments):
                 f" Loss: {loss_accum:.4f},"
                 f" Norm: {norm:.4f},"
                 f" Lr: {scheduler.get_last_lr()[0]:.4f},"
-                f" Val: {best_val:.4f} ({val_loss:.4f})"
+                f" Val: {best_val:.4f} ({val_loss:.4f}),"
+                f" Mem: {torch.cuda.memory_allocated() / (1024 ** 2)}"
             )
 
         global_step += 1
