@@ -24,6 +24,8 @@ class PITDatasetConfig(DatasetConfig):
     task_source_field: str = "document_id"
     # for train / dev split, split by document chunk, or split the list of summary / q/a's ?
     split_train_dev_on: str = "document_chunk"
+    # there might be multiple types, i.e. "qa", "summary", or maybe else in the future
+    use_only_type: str = "qa"
 
 
 class PITDataCollator(DefaultCollator):
@@ -58,27 +60,39 @@ class PITDatasetModule(DataModule):
         def expand_targets_and_chat(example):
             return_dict = defaultdict(list)
 
+            valid_types = set(self.config.use_only_type.split(","))
+            assert valid_types.issubset({"summary", "qa"})
+
             for i in range(len(example["input"])):
                 input = example["input"][i]
                 outputs = example["outputs"][i]
                 type_ = example["type"][i]
                 subject = example[self.config.task_name_field][i]
 
-                if type_ not in "summary":
+                # TODO : make compatible for Q/A as well!
+                if type_ not in valid_types:
                     continue
 
-                for i, output in enumerate(outputs):
+                for idx, output in enumerate(outputs):
                     # for QA, we want to show the question as well as the prompt
-                    prompt_str = (
-                        "Generate a summary and the corresponding full paragraph."
-                    )
+                    if type_ == "qa":
+                        if isinstance(output, dict):
+                            qa = f"\nQuestion: {output['question']}\nAnswer: {output['answer']}"
+                        elif isinstance(output, str):
+                            qa = output
+                        output_str = qa + "\nDocument:\n" + input
+                        prompt_str = "Generate questions and answers and the corresponding full paragraph."
 
-                    if type(output) == dict:
-                        summary = output["summary"]
-                    else:
-                        summary = output
+                    elif type_ == "summary":
+                        if type(output) == dict:
+                            summary = output["summary"]
+                        else:
+                            summary = output
 
-                    output_str = "Summary:\n" + summary + "\nDocument:\n" + input
+                        prompt_str = (
+                            "Generate a summary and the corresponding full paragraph."
+                        )
+                        output_str = "Summary:\n" + summary + "\nDocument:\n" + input
 
                     source_str = self.tokenizer.apply_chat_template(
                         [
@@ -96,7 +110,7 @@ class PITDatasetModule(DataModule):
 
                     if self.config.split_train_dev_on == "output":
                         # ensure that 95% or at least 1 point goes to dev
-                        if i < max(int(len(outputs) * 0.05), 1):
+                        if idx < max(int(len(outputs) * 0.05), 1):
                             return_dict["split"].append("dev")
                         else:
                             return_dict["split"].append("train")
