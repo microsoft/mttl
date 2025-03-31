@@ -469,7 +469,7 @@ class ConcatDatasetModule(KMDatasetModule):
                     # summary at index i will appear first. Now, sample `n_concat - 1` other indices
                     other_idx = np.random.choice(
                         [j for j in range(len(outputs)) if j != s_idx],
-                        max(self.config.n_concat, len(outputs)) - 1,
+                        min(self.config.n_concat, len(outputs)) - 1,
                         replace=False,
                     )
                     # We will use the indices in `synthetic_idx` to create the synthetic data
