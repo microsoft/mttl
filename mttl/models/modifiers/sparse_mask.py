@@ -17,62 +17,6 @@ from mttl.models.modifiers.base import Modifier, ModifierConfig
 from mttl.utils import logger
 
 
-def load_mask(f_name):
-    destination_type, _ = f_name.split("://")
-    if destination_type == "hf":
-        from huggingface_hub import hf_hub_download
-
-        destination_type, f_name = f_name.split("://")
-        repo_id = ("/").join(f_name.split("/")[:2])
-        task_name = f_name.split("/")[-1]
-        f_path = hf_hub_download(repo_id=repo_id, filename=task_name)
-        mask_dict = np.load(f_path, allow_pickle=True)["arr"]
-    elif destination_type == "local":
-        mask_dict = np.load(f"{f_name}.npz", allow_pickle=True)["arr"]
-    return mask_dict
-
-
-def save_mask(module, f_name):
-    """
-    to load the saved mask use the `load_mask` function
-    """
-    mask_dict = {}
-    import numpy as np
-
-    for m_name, m in dict(module.named_modules()).items():
-        if "sparse_layer" in m_name:
-            mask_dict[m_name] = torch.nonzero(m.weight_mask.data).cpu().numpy()
-    destination_type = f_name.split("://")[0]
-    # save in local dir
-    if destination_type == "local":
-        destination_type, f_name = f_name.split("://")
-        np.savez_compressed(f"./{f_name}.npz", arr=mask_dict)
-
-    # upload to hf
-    elif destination_type == "hf":
-        from huggingface_hub.hf_api import upload_file as hf_upload_file
-
-        destination_type, f_name = f_name.split("://")
-        repo_id = ("/").join(f_name.split("/")[:2])
-        task_name = f_name.split("/")[-1]
-        path_in_repo = f"{task_name}.npz"
-        os.makedirs("./temp/test_library/", exist_ok=True)
-        local_file_path = f"./temp/test_library/{path_in_repo}"
-        np.savez_compressed(local_file_path, arr=mask_dict)
-
-        hf_upload_file(
-            path_or_fileobj=local_file_path,  # path saved in local machine
-            path_in_repo=path_in_repo,  # path with in repo
-            repo_id=repo_id,
-        )
-    # exact local dir is provided
-    else:
-        # Ensure the directory exists or create it if not
-        filedir = os.path.dirname(f_name)
-        os.makedirs(filedir, exist_ok=True)
-        np.savez_compressed(f"./{f_name}.npz", arr=mask_dict)
-
-
 class MatrixBlockIndexer:
     """
     Example use case:
@@ -173,7 +117,7 @@ def get_regular_sparse_mask(m):
 
 
 def make_sparse_model_during_training(
-    module, batch, print_statement=False, parameter_selection_procedure="per_layer"
+    module, batch, parameter_selection_procedure="per_layer"
 ):
     from mttl.models.modifiers.sparse_mask import SparseMaskAdapter as SparseMaskModule
 
@@ -231,13 +175,6 @@ def make_sparse_model_during_training(
         for m in module.modules():
             if isinstance(m, SparseMaskModule):
                 keep_masks = (m.sparse_layer.weight_mask.grad >= accepted_score).float()
-                if print_statement:
-                    print(
-                        "sparsity",
-                        (keep_masks.sum() / m.sparse_layer.weight_mask.numel()) * 100,
-                        "expected",
-                        m.keep_ratio * 100,
-                    )
                 m.revert_weight_grad_and_update_mask(keep_masks)
 
 
@@ -251,6 +188,7 @@ class SparseMaskConfig(ModifierConfig):
     mask_cat: str = "scatter"
     BLOCK_SIZE: int = 16  # 16x
     sparse_cat: str = "block_sparse"  # ['block_sparse','regular_sparse']
+    non_trainable_param_patterns: str = "sparse_layer.weight_mask"
 
 
 @Modifier.register("sparse_mask_adapter", config_cls=SparseMaskConfig)
@@ -290,8 +228,9 @@ class SparseMaskAdapter(Modifier):
             )
 
         # mask initialization
-        self.sparse_layer.weight_mask = torch.ones(self.sparse_layer.weight.shape).to(
-            device=layer.weight.device
+        self.sparse_layer.weight_mask = nn.Parameter(
+            torch.ones(self.sparse_layer.weight.shape).to(device=layer.weight.device),
+            requires_grad=False,
         )
         self.mask_cat = config.mask_cat
         self.keep_ratio = config.keep_ratio
@@ -302,51 +241,24 @@ class SparseMaskAdapter(Modifier):
     def patch_forward(self):
         self.sparse_layer.forward = types.MethodType(mod_forward, self.sparse_layer)
 
-    @torch.no_grad()
-    def convert_sparse_weight_to_1D(self):
-        assert len(self.sparse_layer.weight.shape) == 2, print(
-            "sparse_layer.weight is already converted to 1D"
-        )
-        self.sparse_layer.weight = nn.Parameter(
-            self.sparse_layer.weight.flatten()[self.keep_mask_idx].data
-        ).to(self.layer.weight.device)
-
     def data_preprocess(self, x):
         sparse_model_dtype = self.sparse_layer.weight.dtype
         return x.to(sparse_model_dtype)
 
-    def confirm_sync_device(self):
-        with torch.no_grad():
-            # sync the device of the `weight_mask` with module layers
-            if self.sparse_layer.weight_mask.requires_grad:
-                # when gradient graph is true
-                if self.sparse_layer.weight.device != self.layer.weight.device:
-                    self.sparse_layer.weight_mask = self.sparse_layer.weight_mask.to(
-                        self.layer.weight.device
-                    )
-            else:
-                # otherwise
-                # required `.clone()` before device transfer, otherwise getting following error
-                # """RuntimeError: Inference tensors cannot be saved for backward.
-                #    To work around you can make a clone to get a normal tensor and use it in autograd."""
-                self.sparse_layer.weight_mask = (
-                    self.sparse_layer.weight_mask.clone().to(self.layer.weight.device)
-                )
-
     def forward(self, input):
-        # `weight_mask` requires to sync with `weight` device, as default only looks module
-        self.confirm_sync_device()  # TODO, need to remove this, it should only require once before training
         output = self.layer(input)
 
         if self.sparse_layer.weight.device != self.sparse_layer.weight_mask.device:
-            print(self.sparse_layer.weight.device, self.sparse_layer.weight_mask.device)
-        try:
-            sparse_output = self.sparse_layer(
-                self.data_preprocess(input)
-            )  # Bfloat16-->Float32
+            raise ValueError(
+                f"weight and weight_mask should be on the same device, "
+                f"but got weight on {self.sparse_layer.weight.device} and "
+                f"weight_mask on {self.sparse_layer.weight_mask.device}. "
+                "Please check the device."
+            )
+        sparse_output = self.sparse_layer(
+            self.data_preprocess(input)
+        )  # Bfloat16-->Float32
 
-        except:
-            print(self.sparse_layer.weight.device, self.sparse_layer.weight_mask.device)
         return output + sparse_output.to(input.dtype)  # Float32-->Bfloat16
 
     """
@@ -380,8 +292,8 @@ class SparseMaskAdapter(Modifier):
                 self.keep_mask_idx = torch.where(mask.flatten() == 1)[0].to(
                     self.sparse_layer.weight.device
                 )
-                self.sparse_layer.weight_mask = torch.zeros_like(
-                    self.sparse_layer.weight
+                self.sparse_layer.weight_mask = nn.Parameter(
+                    torch.zeros_like(self.sparse_layer.weight), requires_grad=False
                 )
                 self.sparse_layer.weight_mask.flatten().scatter_add_(
                     0,
@@ -391,10 +303,15 @@ class SparseMaskAdapter(Modifier):
                     ),
                 )
             else:
-                self.sparse_layer.weight_mask = mask.to(self.sparse_layer.weight.device)
+                self.sparse_layer.weight_mask = nn.Parameter(
+                    mask, requires_grad=False
+                ).to(self.sparse_layer.weight.device)
         else:
             print("Mask is not provided, initializing to default mask value=1")
             del self.sparse_layer.weight_mask
-            self.sparse_layer.weight_mask = torch.ones(
-                self.sparse_layer.weight_mask.shape
-            ).to(self.sparse_layer.weight.device)
+            self.sparse_layer.weight_mask = nn.Parameter(
+                torch.ones(self.sparse_layer.weight.shape).to(
+                    self.sparse_layer.weight.device
+                ),
+                requires_grad=False,
+            )

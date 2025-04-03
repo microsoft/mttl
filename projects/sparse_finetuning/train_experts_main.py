@@ -104,7 +104,6 @@ def run_multitask(args: ExpertConfig):
         )
         maskCallback = UpdateSparseMask(
             update_interval=100,
-            save_mask_dir="temp/saved_masks_dir",
             task_name=args.task_names[0],
             parameter_selection_procedure="per_layer",
         )  # "per_layer"/"model" use "per_layer" for default

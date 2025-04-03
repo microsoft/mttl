@@ -20,10 +20,7 @@ from mttl.evaluators import MMLUEvaluator
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.evaluators import Evaluator
 from mttl.logging import logger
-from mttl.models.modifiers.sparse_mask import (
-    make_sparse_model_during_training,
-    save_mask,
-)
+from mttl.models.modifiers.sparse_mask import make_sparse_model_during_training
 from mttl.models.utils import transfer_batch_to_device
 
 DEBUG = False
@@ -34,7 +31,6 @@ class UpdateSparseMask(pl.Callback):
         self,
         update_interval=5,
         dm=None,
-        save_mask_dir=None,
         task_name=None,
         parameter_selection_procedure="per_layer",
     ):
@@ -42,7 +38,6 @@ class UpdateSparseMask(pl.Callback):
         self.update_interval = update_interval
         self.update_counter = 0
         self.dm = dm
-        self.save_mask_dir = save_mask_dir
         self.task_name = task_name
         assert parameter_selection_procedure in [
             "model",
@@ -67,10 +62,6 @@ class UpdateSparseMask(pl.Callback):
                 # Update mask
                 self.update_mask(pl_module, batch)
                 self.update_counter = 0  # Reset counter for next interval
-
-    def on_train_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        f_name = f"{self.save_mask_dir}/{self.task_name}_mask"
-        save_mask(pl_module, f_name)
 
 
 class LiveCheckpointCallback(pl.Callback):
