@@ -17,26 +17,30 @@ from mttl.models.library.dataset_library import DatasetLibrary
 
 def create_dcd_pairs(tokenizer, source, target, prompt):
     """Create DCD pairs, teacher sees the source + prompt, student sees only the prompt."""
-    teacher_source = tokenizer.apply_chat_template(
-        [
-            {
-                "role": "user",
-                "content": source + "\n\n" + prompt,
-            }
-        ],
-        tokenize=False,
-        add_generation_prompt=True,
-    )
-    student_source = tokenizer.apply_chat_template(
-        [
-            {
-                "role": "user",
-                "content": prompt,
-            }
-        ],
-        tokenize=False,
-        add_generation_prompt=True,
-    )
+    teacher_source = source + "\n\n" + prompt
+    student_source = prompt
+
+    if tokenizer.chat_template is not None:
+        teacher_source = tokenizer.apply_chat_template(
+            [
+                {
+                    "role": "user",
+                    "content": teacher_source,
+                }
+            ],
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        student_source = tokenizer.apply_chat_template(
+            [
+                {
+                    "role": "user",
+                    "content": student_source,
+                }
+            ],
+            tokenize=False,
+            add_generation_prompt=True,
+        )
     return teacher_source, student_source
 
 
@@ -537,4 +541,72 @@ class ConcatDatasetModule(KMDatasetModule):
             train_dataset
         )
 
+        self.test_dataset = self.dev_dataset
+
+
+@dataclass
+class FullDocKMDatasetConfig(KMDatasetConfig):
+    pass
+
+
+@DataModule.register("full_doc_km", config_cls=FullDocKMDatasetConfig)
+class FullDocKMDatasetModule(DataModule):
+    collate_class = DefaultCollator
+
+    def setup_dataset(self):
+        dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
+        n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
+
+        assert "train" in dataset
+
+        def apply_doc_prompt(example):
+            return_dict = defaultdict(list)
+
+            # breakpoint()
+            for i in range(len(example["text"])):
+                doc = example["text"][i]
+                prompt = f"You are given a partial document. You must predict the next token in the document. Start predicting as soon as the document starts.\n\nDocument : {doc}"
+
+                # Apply chat template
+                formatted_text = self.tokenizer.apply_chat_template(
+                    [{"role": "user", "content": prompt}],
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+
+                return_dict["source"].append(formatted_text)
+                return_dict["target"].append(doc)  # The target is the document itself
+                return_dict[self.config.task_name_field].append(
+                    example[self.config.task_name_field][i]
+                )
+
+            return return_dict
+
+        # Filter dataset by task if needed
+        (
+            self._task_names,
+            self._task_to_id,
+            train_dataset,
+            _,
+            _,
+        ) = maybe_filter_hf_dataset_by_task(
+            dataset,
+            self.config.task_name_field,
+            self.config.finetune_task_name,
+            n_proc=n_proc,
+        )
+
+        # Apply chat template to each document
+        train_dataset = train_dataset.map(
+            apply_doc_prompt,
+            batched=True,
+            batch_size=1000,
+            desc="Applying document prompt template...",
+            remove_columns=train_dataset.column_names,
+        )
+
+        # Split into train/dev
+        self.train_dataset, self.dev_dataset = self.create_train_valid_split(
+            train_dataset
+        )
         self.test_dataset = self.dev_dataset
