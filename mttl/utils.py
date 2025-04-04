@@ -298,3 +298,22 @@ def upload_library(expert_library, module_or_path, expert_name=None):
             expert_library.add_expert_from_ckpt(module_or_path, expert_name)
         else:
             raise ValueError("Model class not recognized")
+
+
+def get_raw_model(model):
+    # Remove FSDP or DDP or DeepSpeed wrappers from the model
+    # and return the raw model
+    from deepspeed import DeepSpeedEngine
+    from torch.distributed.fsdp.fully_sharded_data_parallel import (
+        FullyShardedDataParallel as FSDP,
+    )
+    from torch.nn.parallel import DistributedDataParallel as DDP
+
+    if isinstance(model, FSDP):
+        return model.module
+    elif isinstance(model, DDP):
+        return model.module
+    elif isinstance(model, DeepSpeedEngine):
+        return model.module
+    else:
+        return model

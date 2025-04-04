@@ -8,6 +8,7 @@ from mttl.dist_utils import distributed_mean, is_main_process
 from mttl.evaluators.base import Evaluator, switch_to_eval_mode
 from mttl.logging import logger
 from mttl.models.utils import compute_loglike_loss
+from mttl.utils import get_raw_model
 
 
 class LogLikeEvaluator(Evaluator):
@@ -51,6 +52,8 @@ class LogLikeEvaluator(Evaluator):
         tokens_per_request = []
         device = next(model.parameters()).device
 
+        raw_model = get_raw_model(model)
+
         for num_batch, batch in pbar:
             if num_batches is not None and num_batch >= num_batches:
                 break
@@ -65,8 +68,8 @@ class LogLikeEvaluator(Evaluator):
 
             with torch.no_grad():
                 start = time.time()
-                if isinstance(model, LightningEfficientCheckpoint) or isinstance(
-                    model, BaseExpertModel
+                if isinstance(raw_model, LightningEfficientCheckpoint) or isinstance(
+                    raw_model, BaseExpertModel
                 ):
                     logits = model.forward(**batch).logits
                 else:
