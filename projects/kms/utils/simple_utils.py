@@ -1,5 +1,6 @@
 import json
 import os
+from contextlib import contextmanager
 
 import torch
 import torch.distributed as dist
@@ -312,3 +313,31 @@ class EarlyStopper:
             self.early_stop = True
 
         return self.early_stop
+
+
+@contextmanager
+def cpu_offload(model, names, enable=False):
+    """Swap the specified set of KMs from CPU to GPU."""
+    if enable:
+        names = set(names)
+        if hasattr(model, "experts_containers"):
+            for container in model.experts_containers:
+                for name in names:
+                    device = model.device
+                    requires_grad = container.lora_a[name].requires_grad
+                    container.lora_a[name] = container.lora_a[name].to(device)
+                    container.lora_b[name] = container.lora_b[name].to(device)
+                    container.lora_a[name].requires_grad = requires_grad
+                    container.lora_b[name].requires_grad = requires_grad
+        torch.cuda.empty_cache()
+    yield
+    if enable:
+        if hasattr(model, "experts_containers"):
+            for container in model.experts_containers:
+                for name in names:
+                    requires_grad = container.lora_a[name].requires_grad
+                    container.lora_a[name] = container.lora_a[name].to("cpu")
+                    container.lora_b[name] = container.lora_b[name].to("cpu")
+                    container.lora_a[name].requires_grad = requires_grad
+                    container.lora_b[name].requires_grad = requires_grad
+        torch.cuda.empty_cache()

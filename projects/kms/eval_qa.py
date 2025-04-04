@@ -26,7 +26,6 @@ from mttl.dist_utils import (
 )
 from mttl.logging import logger, setup_logging
 from mttl.models.containers.selectors import TaskNameSelectorConfig
-from mttl.models.expert_model import MoEModel, MultiExpertModel, MultiExpertModelConfig
 from mttl.models.library.expert import load_expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.utils import remote_login
@@ -36,7 +35,7 @@ from projects.kms.train_km_simple import (
     evaluate_metrics,
 )
 from projects.kms.train_qa import cpu_offload
-from projects.kms.utils.km_model import KEMoEModelConfig
+from projects.kms.utils.km_model import KMMoEModel, KMMoEModelConfig
 from projects.kms.utils.km_selector import KnowledgeExtractorSelectorConfig
 
 
@@ -50,6 +49,7 @@ class QAEvalArguments(MultiExpertConfig):
     verbose: bool = False
     # maybe load a trained KE
     ke_uri: str = None
+    cpu_offload: bool = False
 
 
 def eval_qa(training_args):
@@ -70,16 +70,16 @@ def eval_qa(training_args):
     else:
         selector_class = TaskNameSelectorConfig
 
-    device = get_device()
-    model_config = MultiExpertModelConfig(
+    model_config = KMMoEModelConfig(
         base_model=training_args.model,
         selector_config=selector_class.from_training_config(training_args),
+        cpu_offload=training_args.cpu_offload,
     )
-    model = MultiExpertModel(
+    model = KMMoEModel(
         model_config,
         precision=training_args.precision,
         attn_implementation=training_args.attn_implementation,
-        device_map=device,
+        device_map=get_device() if not training_args.cpu_offload else "cpu",
         load_in_8bit=training_args.load_in_8bit,
         load_in_4bit=training_args.load_in_4bit,
     )
@@ -112,6 +112,13 @@ def eval_qa(training_args):
         if training_args.library_id is None:
             # set the default expert to the KE
             model.set_default_expert("KE")
+
+    if training_args.cpu_offload:
+        for n, p in model.named_parameters():
+            if "lora" not in n or "KE" in n:
+                p.data = p.data.to(get_device())
+        for b in model.buffers():
+            b.data = b.data.to(get_device())
 
     result = evaluator.evaluate(
         model,

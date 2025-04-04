@@ -42,6 +42,7 @@ from projects.kms.utils.quality_evaluator import QualityEvaluator
 from projects.kms.utils.simple_utils import (
     EarlyStopper,
     SimpleLogger,
+    cpu_offload,
     do_evaluation,
     lm_loss,
     mc_loss,
@@ -72,34 +73,6 @@ class KEArguments(MultiExpertConfig, KMArguments):
     cpu_offload: bool = False
     #
     do_eval: bool = False
-
-
-@contextmanager
-def cpu_offload(model, names, enable=False):
-    """Swap the specified set of KMs from CPU to GPU."""
-    if enable:
-        names = set(names)
-        if isinstance(model, KEMoEModel):
-            for container in model.experts_containers:
-                for name in names:
-                    device = model.device
-                    requires_grad = container.lora_a[name].requires_grad
-                    container.lora_a[name] = container.lora_a[name].to(device)
-                    container.lora_b[name] = container.lora_b[name].to(device)
-                    container.lora_a[name].requires_grad = requires_grad
-                    container.lora_b[name].requires_grad = requires_grad
-        torch.cuda.empty_cache()
-    yield
-    if enable:
-        if isinstance(model, KEMoEModel):
-            for container in model.experts_containers:
-                for name in names:
-                    requires_grad = container.lora_a[name].requires_grad
-                    container.lora_a[name] = container.lora_a[name].to("cpu")
-                    container.lora_b[name] = container.lora_b[name].to("cpu")
-                    container.lora_a[name].requires_grad = requires_grad
-                    container.lora_b[name].requires_grad = requires_grad
-        torch.cuda.empty_cache()
 
 
 def train_ke(training_args):

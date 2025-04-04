@@ -18,10 +18,13 @@ from mttl.models.expert_model import (
     ExpertModelConfig,
     MoEModelConfig,
     MultiExpertMixin,
+    MultiExpertModel,
+    MultiExpertModelConfig,
 )
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.modifiers.base import AutoModifierConfig
 from projects.kms.utils.km_selector import KnowledgeExtractorSelectorConfig
+from projects.kms.utils.simple_utils import cpu_offload
 
 
 @dataclass
@@ -37,7 +40,7 @@ class KEMoEModelConfig(MoEModelConfig):
     # if modifier_config is not None, then we create moe_num_experts with this modifier
     modifier_config: AutoModifierConfig = None
     # if cpu_offload is True, then we offload the computation to the CPU
-    cpu_offload: bool = False
+    eval_cpu_offload: bool = False
 
 
 @BaseExpertModel.register("moe_ke", config_cls=KEMoEModelConfig)
@@ -52,9 +55,11 @@ class KEMoEModel(BaseExpertModel, MultiExpertMixin):
         labels=None,
         **kwargs,
     ):
-        outputs = self.model.forward(
-            input_ids, attention_mask=attention_mask, labels=labels, **kwargs
-        )
+        should_cpu_offload = not self.training and self.config.eval_cpu_offload
+        with cpu_offload(self, kwargs["task_names"], enable=should_cpu_offload):
+            outputs = self.model.forward(
+                input_ids, attention_mask=attention_mask, labels=labels, **kwargs
+            )
         return outputs
 
     def __init__(self, config, **kwargs):
@@ -147,19 +152,16 @@ class EMAExpertModel(BaseExpertModel, MultiExpertMixin):
 
 
 @dataclass
-class KMMoEModelConfig(ExpertModelConfig, MoEModelConfig):
-    moe_num_experts: int = 8
+class KMMoEModelConfig(MultiExpertModelConfig):
+    cpu_offload: bool = False
 
 
 # For training models in a multitask setup
 @BaseExpertModel.register("moe_km", config_cls=KMMoEModelConfig)
-class KMMoEModel(BaseExpertModel, MultiExpertMixin):
-    def __init__(self, config, **kwargs):
-
-        assert config.selector_config is not None
-        assert isinstance(config.selector_config, PolySelectorConfig)
-
-        super().__init__(config, **kwargs)
-
-        for e_i in range(self.config.moe_num_experts):
-            self.add_empty_expert(f"e{e_i}", expert_config=config.modifier_config)
+class KMMoEModel(MultiExpertModel):
+    def forward(self, *args, **kwargs):
+        if not self.training and self.config.cpu_offload:
+            with cpu_offload(self, kwargs["task_names"], enable=True):
+                return super().forward(*args, **kwargs)
+        else:
+            return super().forward(*args, **kwargs)
