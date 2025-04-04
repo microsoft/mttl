@@ -46,6 +46,7 @@ from projects.kms.utils.simple_utils import (
     do_evaluation,
     lm_loss,
     mc_loss,
+    mc_loss_iterative,
     print_metrics,
 )
 
@@ -172,7 +173,12 @@ def train_ke(training_args):
         model.model.config.use_cache = False
 
     is_quality = isinstance(datamodule, QualityDatamodule)
-    loss_function = mc_loss if is_quality else lm_loss
+    if is_quality and cpu_offload:
+        loss_function = mc_loss_iterative
+    elif is_quality:
+        loss_function = mc_loss
+    else:
+        loss_function = lm_loss
     device = get_device()
 
     if not training_args.do_eval:

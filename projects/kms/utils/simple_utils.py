@@ -51,8 +51,6 @@ def print_metrics(data):
 def mc_loss(
     model,
     inputs,
-    temp=1.0,
-    iterative=False,
 ):
     """
     Multiple choice training loss, we normalize the log-likelihood of each answer,
@@ -90,6 +88,95 @@ def mc_loss(
         -torch.log_softmax(-option_losses, dim=0)[labels_index[i]]
         for i, option_losses in enumerate(loss_per_example)
     ]
+    return torch.stack(loss_per_example).mean()
+
+
+def mc_loss_iterative(
+    model,
+    inputs,
+):
+    """
+    Multiple choice training loss, we normalize the log-likelihood of each answer,
+    and compute cross-entropy on the correct label.
+
+    Optimized to avoid redundant computation on shared prefixes in multiple choice questions.
+    """
+    import numpy as np
+    import torch
+
+    input_ids = inputs["input_ids"]
+    labels = inputs["labels"]
+    attention_mask = inputs["attention_mask"]
+    num_options = inputs["num_options"]
+    labels_index = inputs["labels_index"]
+
+    # Find the shared prefixes for each question
+    batch_size = len(num_options)
+    start_indices = np.cumsum([0] + num_options[:-1])
+
+    # Process each question group separately
+    loss_per_example = []
+
+    for i in range(batch_size):
+        options_start_idx = start_indices[i]
+        options_end_idx = options_start_idx + num_options[i]
+
+        # Get all options for this question
+        x_input_ids = input_ids[options_start_idx:options_end_idx]
+        x_attn_mask = attention_mask[options_start_idx:options_end_idx]
+        x_labels = labels[options_start_idx:options_end_idx]
+
+        # Find the shared prefix (assuming the first tokens are identical across options)
+        # This is a simplification - a real implementation would need to find the exact
+        # shared prefix length for each question
+        is_same = (x_input_ids[0] == x_input_ids[1:]).all(0)
+        prefix_length = torch.where(~is_same)[0].min()
+
+        prefix_outputs = model(
+            input_ids=x_input_ids[
+                [0], :prefix_length
+            ],  # Just use the first one since they're identical
+            attention_mask=x_attn_mask[[0], :prefix_length],
+            task_names=inputs.get("task_names")[
+                options_start_idx : options_start_idx + 1
+            ],
+            use_cache=True,
+            return_dict=True,
+        )
+
+        # Extract past key values
+        past_key_values = prefix_outputs.past_key_values
+
+        # Second pass: process the unique completion for each option
+        option_losses = []
+        for j in range(num_options[i]):
+            suffix_ids = x_input_ids[[j], prefix_length:]
+            suffix_labels = x_labels[[j], prefix_length:]
+
+            # Only process the unique part using the cached prefix
+            suffix_outputs = model(
+                input_ids=suffix_ids,
+                attention_mask=x_attn_mask[[j]],
+                past_key_values=past_key_values,
+                task_names=inputs.get("task_names")[
+                    options_start_idx : options_start_idx + 1
+                ],
+            )
+
+            # Compute loss for this option
+            suffix_loss = compute_loglike_loss(
+                suffix_outputs.logits,
+                suffix_labels.unsqueeze(0),
+                reduction="none",
+                normalize_length=True,
+            )
+            option_losses.append(suffix_loss)
+
+        option_losses = torch.cat(option_losses)
+        # build a distribution over all options
+        example_loss = -torch.log_softmax(-option_losses, dim=0)[labels_index[i]]
+        loss_per_example += [example_loss]
+
     return torch.stack(loss_per_example).mean()
 
 
