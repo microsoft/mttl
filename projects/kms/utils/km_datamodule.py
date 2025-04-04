@@ -17,26 +17,30 @@ from mttl.models.library.dataset_library import DatasetLibrary
 
 def create_dcd_pairs(tokenizer, source, target, prompt):
     """Create DCD pairs, teacher sees the source + prompt, student sees only the prompt."""
-    teacher_source = tokenizer.apply_chat_template(
-        [
-            {
-                "role": "user",
-                "content": source + "\n\n" + prompt,
-            }
-        ],
-        tokenize=False,
-        add_generation_prompt=True,
-    )
-    student_source = tokenizer.apply_chat_template(
-        [
-            {
-                "role": "user",
-                "content": prompt,
-            }
-        ],
-        tokenize=False,
-        add_generation_prompt=True,
-    )
+    teacher_source = source + "\n\n" + prompt
+    student_source = prompt
+
+    if tokenizer.chat_template is not None:
+        teacher_source = tokenizer.apply_chat_template(
+            [
+                {
+                    "role": "user",
+                    "content": teacher_source,
+                }
+            ],
+            tokenize=False,
+            add_generation_prompt=True,
+        )
+        student_source = tokenizer.apply_chat_template(
+            [
+                {
+                    "role": "user",
+                    "content": student_source,
+                }
+            ],
+            tokenize=False,
+            add_generation_prompt=True,
+        )
     return teacher_source, student_source
 
 
@@ -406,6 +410,7 @@ class LMDataModule(DataModule):
 @dataclass
 class ConcatDatasetConfig(KMDatasetConfig):
     n_concat: int = 2
+    max_concat_tokens: int = None
     use_only_type: str = "summary"
 
 
@@ -455,17 +460,37 @@ class ConcatDatasetModule(KMDatasetModule):
 
                 input = example["input"][i]
                 outputs = example["outputs"][i]
+                concat_outputs = [
+                    (
+                        "".join(list(["" if v is None else v for v in o.values()]))
+                        if isinstance(o, dict)
+                        else o
+                    )
+                    for o in outputs
+                ]
+                len_in_tokens = [len(self.tokenizer.encode(o)) for o in concat_outputs]
                 for s_idx in range(len(outputs)):
                     # summary at index i will appear first. Now, sample `n_concat - 1` other indices
                     other_idx = np.random.choice(
                         [j for j in range(len(outputs)) if j != s_idx],
-                        self.config.n_concat - 1,
+                        min(self.config.n_concat, len(outputs)) - 1,
                         replace=False,
                     )
                     # We will use the indices in `synthetic_idx` to create the synthetic data
                     synthetic_data = []
                     synthetic_idx = [s_idx] + other_idx.tolist()
-                    for idx in synthetic_idx:
+                    total_tokens = 0
+
+                    # let's make sure the total number of concatenated tokens is less than `max_concat_tokens`, but
+                    # that it at least includes 1 summary
+                    upper_bound = max(
+                        1,
+                        (
+                            np.cumsum(len_in_tokens) < self.config.max_concat_tokens
+                        ).sum(),
+                    )
+                    for idx in synthetic_idx[:upper_bound]:
+
                         if example["type"][i] == "summary":
                             prompt_str = "Summarize the preceding passage."
                             synthetic_data.append(
@@ -475,13 +500,22 @@ class ConcatDatasetModule(KMDatasetModule):
                             )
                             join_str = "\n\n----- New Summary -----\n\n"
                         elif example["type"][i] == "qa":
-                            assert isinstance(outputs[idx], dict)
-                            output_str = f"\nQuestion: {outputs[idx]['question']}\nAnswer: {outputs[idx]['answer']}"
+                            if isinstance(outputs[idx], dict):
+                                output_str = f"\nQuestion: {outputs[idx]['question']}\nAnswer: {outputs[idx]['answer']}"
+                            elif isinstance(outputs[idx], str):
+                                output_str = outputs[idx]
+                            else:
+                                raise TypeError("invalid type for output")
                             prompt_str = "Generate a question-answer pair given the preceding passage."
                             synthetic_data.append(output_str)
                             join_str = "\n\n"
                         else:
                             raise ValueError(f"Unknown type {example['type'][i]}")
+
+                        # Let's exit here so that at least one summary is always present
+                        total_tokens += len_in_tokens[idx]
+                        if total_tokens > self.config.max_concat_tokens:
+                            break
 
                     concat_data = join_str.join(synthetic_data)
                     context_source, no_context_source = create_dcd_pairs(
@@ -495,7 +529,6 @@ class ConcatDatasetModule(KMDatasetModule):
                     )
             return return_dict
 
-        old = train_dataset
         train_dataset = train_dataset.map(
             expand_targets_and_chat_cs,
             batched=True,
@@ -508,4 +541,72 @@ class ConcatDatasetModule(KMDatasetModule):
             train_dataset
         )
 
+        self.test_dataset = self.dev_dataset
+
+
+@dataclass
+class FullDocKMDatasetConfig(KMDatasetConfig):
+    pass
+
+
+@DataModule.register("full_doc_km", config_cls=FullDocKMDatasetConfig)
+class FullDocKMDatasetModule(DataModule):
+    collate_class = DefaultCollator
+
+    def setup_dataset(self):
+        dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
+        n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
+
+        assert "train" in dataset
+
+        def apply_doc_prompt(example):
+            return_dict = defaultdict(list)
+
+            # breakpoint()
+            for i in range(len(example["text"])):
+                doc = example["text"][i]
+                prompt = f"You are given a partial document. You must predict the next token in the document. Start predicting as soon as the document starts.\n\nDocument : {doc}"
+
+                # Apply chat template
+                formatted_text = self.tokenizer.apply_chat_template(
+                    [{"role": "user", "content": prompt}],
+                    tokenize=False,
+                    add_generation_prompt=True,
+                )
+
+                return_dict["source"].append(formatted_text)
+                return_dict["target"].append(doc)  # The target is the document itself
+                return_dict[self.config.task_name_field].append(
+                    example[self.config.task_name_field][i]
+                )
+
+            return return_dict
+
+        # Filter dataset by task if needed
+        (
+            self._task_names,
+            self._task_to_id,
+            train_dataset,
+            _,
+            _,
+        ) = maybe_filter_hf_dataset_by_task(
+            dataset,
+            self.config.task_name_field,
+            self.config.finetune_task_name,
+            n_proc=n_proc,
+        )
+
+        # Apply chat template to each document
+        train_dataset = train_dataset.map(
+            apply_doc_prompt,
+            batched=True,
+            batch_size=1000,
+            desc="Applying document prompt template...",
+            remove_columns=train_dataset.column_names,
+        )
+
+        # Split into train/dev
+        self.train_dataset, self.dev_dataset = self.create_train_valid_split(
+            train_dataset
+        )
         self.test_dataset = self.dev_dataset

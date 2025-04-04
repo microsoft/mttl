@@ -212,6 +212,11 @@ def do_evaluation(
     **kwargs,
 ) -> bool:
 
+    if evaluator is not None:
+        eval_score = evaluator.evaluate(model, split=evaluator_split, **kwargs)
+    else:
+        eval_score = None
+
     if split == "dev":
         eval_dataloader = datamodule.val_dataloader()
     else:
@@ -226,11 +231,6 @@ def do_evaluation(
     torch.cuda.empty_cache()
 
     eval_loss = distributed_mean(eval_loss, model.device)
-
-    if evaluator is not None:
-        eval_score = evaluator.evaluate(model, split=evaluator_split, **kwargs)
-    else:
-        eval_score = None
 
     torch.cuda.empty_cache()
     return eval_loss, eval_score
