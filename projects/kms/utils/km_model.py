@@ -56,7 +56,11 @@ class KEMoEModel(BaseExpertModel, MultiExpertMixin):
         **kwargs,
     ):
         should_cpu_offload = not self.training and self.config.eval_cpu_offload
-        with cpu_offload(self, kwargs["task_names"], enable=should_cpu_offload):
+        with cpu_offload(
+            self,
+            InfoContainer.get().routing_infos.task_names,
+            enable=should_cpu_offload,
+        ):
             outputs = self.model.forward(
                 input_ids, attention_mask=attention_mask, labels=labels, **kwargs
             )
