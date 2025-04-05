@@ -300,6 +300,8 @@ def do_evaluation(
     **kwargs,
 ) -> bool:
 
+    state = model.training
+    model.eval()
     if evaluator is not None:
         eval_score = evaluator.evaluate(model, split=evaluator_split, **kwargs)
     else:
@@ -321,6 +323,7 @@ def do_evaluation(
     eval_loss = distributed_mean(eval_loss, model.device)
 
     torch.cuda.empty_cache()
+    model.train(state)
     return eval_loss, eval_score
 
 
