@@ -949,6 +949,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
     from mttl.datamodule.alpaca_data_module import (
         AlpacaCodeDataModule,
         MathQaAlpacaCodeDataModule,
+        MathQallamaDataModule
     )
     from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
     from mttl.datamodule.mt_seq_to_seq_module import (
@@ -1074,6 +1075,11 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
             **common_kwargs,
         )
         dm = MathQADataModule(config, for_generation=for_generation)
+    elif dataset == "mathqa_llama":
+        config = DatasetConfig(
+            **common_kwargs,
+        )
+        dm = MathQallamaDataModule(config, for_generation=for_generation)
     elif dataset == "alpaca_code":
         config = DatasetConfig(
             **common_kwargs,

@@ -46,7 +46,7 @@ class MathQaAlpacaCodeDataModule(AlpacaDataModule):
         self.test_dataset = self.dev_dataset
 
 @DataModule.register("mathqa_llama", config_cls=DatasetConfig)
-class MathQaAllamaDataModule(AlpacaDataModule):
+class MathQallamaDataModule(AlpacaDataModule):
     def setup_dataset(self):
         dataset = MathQallamaDataset()
         self.train_dataset, self.dev_dataset = self.create_train_valid_split(dataset, validation_portion=0.01)
@@ -60,7 +60,7 @@ if __name__ == "__main__":
     # alpaca_data_module.setup_dataset()
     # print(alpaca_data_module.train_dataset)
 
-    alpaca_code_data_module = MathQaAllamaDataModule(
+    alpaca_code_data_module = MathQallamaDataModule(
         DatasetConfig(model="yahma/llama-7b-hf")
     )
     alpaca_code_data_module.setup_dataset()
