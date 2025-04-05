@@ -4,6 +4,7 @@ import hashlib
 import os
 import random
 import string
+from contextlib import contextmanager
 from datetime import time
 from functools import wraps
 from time import sleep
@@ -317,3 +318,14 @@ def get_raw_model(model):
         return model.module
     else:
         return model
+
+
+@contextmanager
+def disable_cache(model, apply=False):
+    """Swap the specified set of KMs from CPU to GPU."""
+    previous_cache = model.model.config.use_cache
+    if apply:
+        model.model.config.use_cache = False
+    yield
+    if apply:
+        model.model.config.use_cache = previous_cache
