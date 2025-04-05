@@ -175,9 +175,20 @@ def mc_loss_iterative(
         option_losses = torch.cat(option_losses)
         # build a distribution over all options
         example_loss = -torch.log_softmax(-option_losses, dim=0)[labels_index[i]]
-        loss_per_example += [example_loss]
 
-    return torch.stack(loss_per_example).mean()
+        # instead of averaging later over the batch_size, we divide the loss now
+        example_loss = example_loss / batch_size
+
+        if (i + 1) == batch_size:
+            # for the last example, we don't backward, leave it to the backward
+            # call in the main file
+            loss_per_example += [example_loss]
+        else:
+            # for the other examples, we need to backward
+            example_loss.backward()
+            loss_per_example += [example_loss.detach()]
+
+    return torch.stack(loss_per_example).sum()
 
 
 def dcd_loss(
