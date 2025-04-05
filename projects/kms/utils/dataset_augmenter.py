@@ -484,7 +484,10 @@ class DatasetAugmenter:
             text = dataset[doc_idx]["text"]
             chunks_iterator = chunk_text(text, self.tokenizer, self.block_size)
 
-            for chunk in chunks_iterator:
+            for cid, chunk in enumerate(chunks_iterator):
+                print(
+                    f"Chunking {doc_idx} chunk {cid + 1} with {len(self.tokenizer.encode(chunk))} tokens"
+                )
                 chunks.append(chunk)
                 # append the rest of the columns
                 rest = {}
@@ -494,6 +497,7 @@ class DatasetAugmenter:
                     ):
                         rest[column] = dataset[doc_idx][column]
                 rests.append(rest)
+            print(f"Chunking {doc_idx} done with {cid + 1} chunks")
 
         # Process each task separately
         output_dataset = []
