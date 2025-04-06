@@ -8,7 +8,7 @@ from mttl.dist_utils import distributed_mean, is_main_process
 from mttl.evaluators.base import Evaluator, switch_to_eval_mode
 from mttl.logging import logger
 from mttl.models.utils import compute_loglike_loss
-from mttl.utils import disable_cache, get_raw_model
+from mttl.utils import get_raw_model
 
 
 class LogLikeEvaluator(Evaluator):
@@ -67,70 +67,65 @@ class LogLikeEvaluator(Evaluator):
             batch = transfer_batch_to_device(batch, device)
 
             with torch.no_grad():
-                with disable_cache(model, apply="phi3" in str(type(model))):
-                    start = time.time()
-                    if isinstance(
-                        raw_model, LightningEfficientCheckpoint
-                    ) or isinstance(raw_model, BaseExpertModel):
-                        logits = model.forward(**batch).logits
-                    else:
-                        logits = model.forward(
-                            input_ids=batch["input_ids"],
-                            attention_mask=batch["attention_mask"],
-                        ).logits
-                    end = time.time()
-                    loss_per_option = compute_loglike_loss(
-                        logits,
-                        batch["labels"],
-                        reduction="none",
-                        normalize_length=self.length_normalization,
+                start = time.time()
+                if isinstance(raw_model, LightningEfficientCheckpoint) or isinstance(
+                    raw_model, BaseExpertModel
+                ):
+                    logits = model.forward(**batch).logits
+                else:
+                    logits = model.forward(
+                        input_ids=batch["input_ids"],
+                        attention_mask=batch["attention_mask"],
+                    ).logits
+                end = time.time()
+                loss_per_option = compute_loglike_loss(
+                    logits,
+                    batch["labels"],
+                    reduction="none",
+                    normalize_length=self.length_normalization,
+                )
+                if loss_per_option.dtype in [torch.bfloat16, torch.float16]:
+                    loss_per_option = loss_per_option.float()
+
+                loss_per_option = loss_per_option.cpu().numpy()
+                loss_per_example = [
+                    loss_per_option[
+                        int(np.sum(num_options[:i])) : int(np.sum(num_options[: i + 1]))
+                    ]
+                    for i in range(batch_size)
+                ]
+
+                predictions = [
+                    np.argmin(option_loss) for option_loss in loss_per_example
+                ]
+
+                # get number of tokens in prompt
+                label_pad_id = self.datamodule.collate_fn.label_pad_token_id
+                num_tokens_in_prompt = (
+                    (
+                        batch["attention_mask"].sum(1)
+                        - batch["labels"].ne(label_pad_id).sum(1)
                     )
-                    if loss_per_option.dtype in [torch.bfloat16, torch.float16]:
-                        loss_per_option = loss_per_option.float()
+                    .cpu()
+                    .tolist()
+                )
 
-                    loss_per_option = loss_per_option.cpu().numpy()
-                    loss_per_example = [
-                        loss_per_option[
-                            int(np.sum(num_options[:i])) : int(
-                                np.sum(num_options[: i + 1])
-                            )
-                        ]
-                        for i in range(batch_size)
-                    ]
+                num_tokens_in_prompt = [
+                    num_tokens_in_prompt[
+                        int(np.sum(num_options[:i])) : int(np.sum(num_options[: i + 1]))
+                    ][0]
+                    for i in range(batch_size)
+                ]
 
-                    predictions = [
-                        np.argmin(option_loss) for option_loss in loss_per_example
-                    ]
+                all_predictions.extend(predictions)
+                all_losses.extend(loss_per_option.tolist())
+                time_per_request.append((end - start) / batch_size)
+                tokens_per_request.extend(num_tokens_in_prompt)
 
-                    # get number of tokens in prompt
-                    label_pad_id = self.datamodule.collate_fn.label_pad_token_id
-                    num_tokens_in_prompt = (
-                        (
-                            batch["attention_mask"].sum(1)
-                            - batch["labels"].ne(label_pad_id).sum(1)
-                        )
-                        .cpu()
-                        .tolist()
+                if labels_index is not None:
+                    all_accuracies.extend(
+                        (np.array(predictions) == np.array(labels_index)).tolist()
                     )
-
-                    num_tokens_in_prompt = [
-                        num_tokens_in_prompt[
-                            int(np.sum(num_options[:i])) : int(
-                                np.sum(num_options[: i + 1])
-                            )
-                        ][0]
-                        for i in range(batch_size)
-                    ]
-
-                    all_predictions.extend(predictions)
-                    all_losses.extend(loss_per_option.tolist())
-                    time_per_request.append((end - start) / batch_size)
-                    tokens_per_request.extend(num_tokens_in_prompt)
-
-                    if labels_index is not None:
-                        all_accuracies.extend(
-                            (np.array(predictions) == np.array(labels_index)).tolist()
-                        )
 
             if verbose:
                 logger.info("Sources:\n%s", sources_texts[0])
