@@ -321,11 +321,9 @@ def get_raw_model(model):
 
 
 @contextmanager
-def disable_cache(model, apply=False):
+def toggle_cache(model, enable=True):
     """Swap the specified set of KMs from CPU to GPU."""
     previous_cache = model.model.config.use_cache
-    if apply:
-        model.model.config.use_cache = False
+    model.model.config.use_cache = enable
     yield
-    if apply:
-        model.model.config.use_cache = previous_cache
+    model.model.config.use_cache = previous_cache
