@@ -447,13 +447,10 @@ class SkilledLoRA(LoRA):
         # q = splits
         # e = experts
         if merge_after:
-            partial_out = torch.einsum(
-                "bld,beqdr->bleqr", (input_lora, skilled_loras_a)
-            )
+            partial_out = torch.einsum("bld,beqdr->bleqr", input_lora, skilled_loras_a)
             adapter_out = torch.einsum(
-                "bleqr,berqd->bleqd", (partial_out, skilled_loras_b)
+                "bleqr,berqd,blqe->blqd", partial_out, skilled_loras_b, weights
             )
-            adapter_out = torch.einsum("blqe,bleqd->blqd", (weights, adapter_out))
             adapter_out = adapter_out.flatten(2, 3)
         else:
             A = torch.einsum("blqe,beqdr->blqdr", (weights, skilled_loras_a))
