@@ -69,8 +69,7 @@ class LogLikeEvaluator(Evaluator):
                     logits, batch["labels"], reduction="none"
                 )
                 loss_per_option = loss_per_option.cpu()
-
-                if loss_per_option.dtype in [torch.bfloat16, torch.float16]:
+                if loss_per_option.dtype in [torch.bfloat16, torch.float16,torch.float32]:
                     loss_per_option = loss_per_option.float().numpy()
 
                 loss_per_example = [
