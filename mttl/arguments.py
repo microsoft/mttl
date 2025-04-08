@@ -344,11 +344,6 @@ class TrainingArgs(DataArgs):
     exp_name: str = None
     expert_name: str = None
 
-    K: int = (
-        None  # Samin: using this to activate K number experts out of 256, if None uses all experts available
-    )
-    use_sparse_model: bool = False  # `True` if want to activate sparse model
-
     # Training config
     micro_batch_size: str = None
     compute_strategy: str = None

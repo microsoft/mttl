@@ -1,5 +1,5 @@
 {   
-    "num_train_epochs": 1,
+    "num_train_epochs": 2,
     "subsample_dev": 100,
     "subsample_train": 100,
     "model": "Qwen/Qwen2-0.5B",
@@ -21,11 +21,11 @@
     "eval_before_training": true,
     "eval_rouge_flag": true,
     "pipeline_eval_tasks": false,
-    "use_sparse_model": true,
     "model_modifier": "sparse_mask_adapter",
     "modify_modules": ".*",
     "modify_layers": ".*q_proj|.*v_proj|.*k_proj",
     "trainable_param_names": ".*sparse_layer.*",
+    "non_trainable_param_names": ".*sparse_layer.weight_mask*",
     "keep_ratio": 0.05,
     "sparse_cat": "regular_sparse"
 }

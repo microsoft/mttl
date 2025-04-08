@@ -96,18 +96,17 @@ def run_multitask(args: ExpertConfig):
 
     # -=============== Iterative masking using Callback ====================
     # NOTE: Don't move this block, it's important we call maskCallBack before others
-    if args.use_sparse_model:
-        from mttl.models.lightning.callbacks import UpdateSparseMask
+    from mttl.models.lightning.callbacks import UpdateSparseMask
 
-        assert len(args.task_names) == 1, print(
-            "sparse mask does not support more than 1 task"
-        )
-        maskCallback = UpdateSparseMask(
-            update_interval=100,
-            task_name=args.task_names[0],
-            parameter_selection_procedure="per_layer",
-        )  # "per_layer"/"model" use "per_layer" for default
-        callbacks.append(maskCallback)
+    assert len(args.task_names) == 1, print(
+        "sparse mask does not support more than 1 task"
+    )
+    maskCallback = UpdateSparseMask(
+        update_interval=100,
+        task_name=args.task_names[0],
+        parameter_selection_procedure="per_layer",
+    )  # "per_layer"/"model" use "per_layer" for default
+    callbacks.append(maskCallback)
 
     checkpoint_callback = LiveCheckpointCallback(
         dirpath=args.output_dir,

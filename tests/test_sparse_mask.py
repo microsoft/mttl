@@ -15,10 +15,6 @@ from mttl.models.modifiers.sparse_mask import (
     make_sparse_model_during_training,
 )
 
-# sys.path.append(
-#     os.path.join(os.path.dirname(__file__), "..")
-# )  # uncomment and move before mttl imports if running locally
-
 
 def test_sm_adapter():
     os.environ["CONFIG_PATH"] = "./"
@@ -221,7 +217,7 @@ def test_load_expert_from_checkpoint():
     reloaded = ExpertModel.from_pretrained(destination)
 
     reloaded_output = reloaded(**batch)
-    # assert reloaded model is the same as original
+    # assert reloaded model is the same as original, even after sparse_mask update
     assert reloaded_output.loss.item() == new_outputs.loss.item() and torch.equal(
         reloaded_output.logits, new_outputs.logits
     )

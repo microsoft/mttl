@@ -20,11 +20,11 @@
     "eval_before_training": true,
     "eval_rouge_flag": true,
     "pipeline_eval_tasks": false,
-    "use_sparse_model": true,
     "model_modifier": "sparse_mask_adapter",
     "modify_modules": ".*",
     "modify_layers": ".*qkv_proj",
     "trainable_param_names": ".*sparse_layer.*",
+    "non_trainable_param_names": ".*sparse_layer.weight_mask*",
     "keep_ratio": 0.05,
     "sparse_cat": "regular_sparse"
     
