@@ -32,6 +32,9 @@ class QualityEvaluator(LogLikeEvaluator):
         dataset_args.dataset_type = "quality"
         dataset_args.add_eos_to_targets = False
 
+        # This is to stop phi3 from complaining (so that it doesn't think we are generating)
+        dataset_args.padding_side = "left"
+
         datamodule = get_datamodule(dataset_args, for_generation=False)
         super().__init__(
             datamodule, generation_kwargs=generation_kwargs, length_normalization=True
