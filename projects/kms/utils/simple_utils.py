@@ -1,3 +1,4 @@
+import gc
 import json
 import os
 from contextlib import contextmanager
@@ -15,7 +16,7 @@ from mttl.dist_utils import (
 from mttl.logging import logger
 from mttl.models.expert_model import disable_modifiers
 from mttl.models.utils import compute_loglike_loss, transfer_batch_to_device
-from mttl.utils import toggle_cache
+from mttl.utils import get_ram, get_vram, toggle_cache
 
 
 def print_metrics(data):
@@ -108,10 +109,6 @@ def mc_loss_iterative(model, inputs, pad_token_id):
     num_options = inputs["num_options"]
     labels_index = inputs["labels_index"]
 
-    # make sure that input_ids is right padded and not left padded
-    is_padding_right = attention_mask[:, -1].sum().item() != attention_mask.size(0)
-    assert is_padding_right, "Input IDs should be right padded"
-
     # Find the shared prefixes for each question
     batch_size = len(num_options)
     start_indices = np.cumsum([0] + num_options[:-1])
@@ -129,54 +126,27 @@ def mc_loss_iterative(model, inputs, pad_token_id):
             x_attn_mask = attention_mask[options_start_idx:options_end_idx]
             x_labels = labels[options_start_idx:options_end_idx]
 
-            # Find the shared prefix (assuming the first tokens are identical across options)
-            is_same = (x_input_ids[0] == x_input_ids[1:]).all(0)
-            prefix_length = torch.where(~is_same)[0].min()
-
-            # TODO: assert padding side is to the right
-
-            prefix_outputs = model(
-                input_ids=x_input_ids[
-                    [0], :prefix_length
-                ],  # Just use the first one since they're identical
-                attention_mask=x_attn_mask[[0], :prefix_length],
-                task_names=inputs.get("task_names")[
-                    options_start_idx : options_start_idx + 1
-                ],
-                use_cache=True,
-                return_dict=True,
-            )
-
-            # Extract past key values
-            past_key_values = prefix_outputs.past_key_values
-
-            # Second pass: process the unique completion for each option
             option_losses = []
-            for j in range(num_options[i]):
-                # end_idx is the last valid idx. So (end_idx + 1) is the first invalid idx
-                # the upper bound (which excludes the last idx) for valid idxs is end_idx + 2
-                end_idx = torch.where(x_input_ids[j] != pad_token_id)[0].max() + 2
-                suffix_ids = x_input_ids[[j], prefix_length:end_idx]
-                suffix_labels = x_labels[[j], prefix_length:end_idx]
+            for j in range(x_input_ids.size(0)):
 
-                # Only process the unique part using the cached prefix
-                suffix_outputs = model(
-                    input_ids=suffix_ids,
-                    attention_mask=x_attn_mask[[j], :end_idx],
-                    past_key_values=past_key_values,
+                # At this point, we don't need padding. Removing padding
+                # will remove error when right padded input
+                last_valid_idx = torch.where((x_input_ids[j] != pad_token_id))[0].max()
+                outputs = model(
+                    input_ids=x_input_ids[[j], : last_valid_idx + 1],
+                    attention_mask=x_attn_mask[[j], : last_valid_idx + 1],
                     task_names=inputs.get("task_names")[
                         options_start_idx : options_start_idx + 1
                     ],
                 )
-
-                # Compute loss for this option
-                suffix_loss = compute_loglike_loss(
-                    suffix_outputs.logits,
-                    suffix_labels.unsqueeze(0),
+                loss_per_option = compute_loglike_loss(
+                    outputs.logits,
+                    x_labels[[j], : last_valid_idx + 1],
                     reduction="none",
                     normalize_length=True,
                 )
-                option_losses.append(suffix_loss)
+
+                option_losses += [loss_per_option]
 
         option_losses = torch.cat(option_losses)
         # build a distribution over all options
@@ -319,28 +289,35 @@ def do_evaluation(
 
     state = model.training
     model.eval()
-    if evaluator is not None:
-        eval_score = evaluator.evaluate(model, split=evaluator_split, **kwargs)
-    else:
-        eval_score = None
 
     if split == "dev":
         eval_dataloader = datamodule.val_dataloader()
     else:
         eval_dataloader = datamodule.test_dataloader()
 
+    pbar = tqdm(eval_dataloader, disable=not is_main_process())
     eval_loss = []
-    for batch in tqdm(eval_dataloader, disable=not is_main_process()):
+    for batch in pbar:
         with torch.no_grad():
             batch = transfer_batch_to_device(batch, model.device)
             eval_loss.append(loss_function(model, batch).item())
             del batch
-    torch.cuda.empty_cache()
+            pbar.set_description(
+                f"Eval loss: {eval_loss[-1]:.4f}, {get_ram()}, {get_vram()}"
+            )
+
+        torch.cuda.empty_cache()
 
     eval_loss = distributed_mean(eval_loss, model.device)
 
+    if evaluator is not None:
+        eval_score = evaluator.evaluate(model, split=evaluator_split, **kwargs)
+    else:
+        eval_score = None
+
     torch.cuda.empty_cache()
     model.train(state)
+
     return eval_loss, eval_score
 
 
@@ -448,3 +425,4 @@ def cpu_offload(model, names, enable=False):
                     container.lora_a[name].requires_grad = requires_grad
                     container.lora_b[name].requires_grad = requires_grad
         torch.cuda.empty_cache()
+        gc.collect()
