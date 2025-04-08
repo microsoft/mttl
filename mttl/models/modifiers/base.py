@@ -93,10 +93,10 @@ class AutoModifierConfig(AutoSerializable):
 
     @classmethod
     def fromdict(cls, data: Dict) -> "ModifierConfig":
-        # try:
-        return AutoSerializable.fromdict(data)
-        # except ValueError:
-        #     return cls.fromdict_legacy(data)
+        try:
+            return AutoSerializable.fromdict(data)
+        except ValueError:
+            return cls.fromdict_legacy(data)
 
 
 def get_target_2_source_param_mapping(
