@@ -27,8 +27,4 @@
     "non_trainable_param_names": ".*sparse_layer.weight_mask*",
     "keep_ratio": 0.05,
     "sparse_cat": "regular_sparse"
-    
-
 }
-
-

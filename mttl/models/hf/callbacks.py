@@ -11,7 +11,6 @@ from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.logging import maybe_wandb_log
 
 
-
 class DownstreamEvalCallback(TrainerCallback):
     METRIC_KEY = "downstream"
 
