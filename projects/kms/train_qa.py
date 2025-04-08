@@ -1,11 +1,9 @@
-import copy
 import os
 import random
-from contextlib import contextmanager
 from dataclasses import dataclass
+from functools import partial
 
 import torch
-from torch.nn.parallel import DistributedDataParallel as DDP
 from tqdm import tqdm
 
 # register this datamodule!
@@ -28,17 +26,11 @@ from mttl.dist_utils import (
 )
 from mttl.logging import logger, setup_logging
 from mttl.models.get_optimizer import get_optimizer_and_scheduler
-from mttl.models.library.expert import load_expert
 from mttl.models.utils import transfer_batch_to_device
-from projects.kms.train_km_simple import (
-    evaluate_class,
-    evaluate_datasets,
-    evaluate_metrics,
-)
 from projects.kms.utils.longhealth_datamodule import LonghealthDatamodule
 from projects.kms.utils.longhealth_evaluator import LonghealthEvaluator
 from projects.kms.utils.quality_datamodule import QualityDatamodule
-from projects.kms.utils.quality_evaluator import QualityEvaluator
+from projects.kms.utils.quality_evaluator import GenQualityEvaluator, QualityEvaluator
 from projects.kms.utils.simple_utils import (
     EarlyStopper,
     SimpleLogger,
@@ -55,7 +47,7 @@ from projects.kms.utils.simple_utils import (
 # import Selector before args
 from mttl.models.expert_model import ExpertModel, ExpertModelConfig
 from mttl.models.library.expert_library import ExpertLibrary
-from mttl.utils import remote_login
+from mttl.utils import get_ram, get_vram, remote_login
 from projects.kms.train_km_simple import KMArguments
 from projects.kms.utils.km_model import KEMoEModel, KEMoEModelConfig
 
@@ -118,6 +110,8 @@ def train_ke(training_args):
         expert_selection += datamodule.test_task_names
         eval_task_names = datamodule.test_task_names
 
+    # TODO max eval tasks  ?
+
     if training_args.do_eval:
         expert_selection = eval_task_names
     else:
@@ -175,8 +169,10 @@ def train_ke(training_args):
         model.model.config.use_cache = False
 
     is_quality = isinstance(datamodule, QualityDatamodule)
-    if is_quality and cpu_offload:
-        loss_function = mc_loss_iterative
+    if is_quality and args.cpu_offload:
+        loss_function = partial(
+            mc_loss_iterative, pad_token_id=datamodule.tokenizer.pad_token_id
+        )
     elif is_quality:
         loss_function = mc_loss
     else:
@@ -304,8 +300,9 @@ def train_ke(training_args):
                     f" Loss: {loss_accum:.4f},"
                     f" Norm: {norm:.4f},"
                     f" Lr: {scheduler.get_last_lr()[0]:.4f},"
-                    f" Val: {best_val:.4f} ({val_loss:.4f})"
-                    f" Mem: {torch.cuda.memory_allocated() / (1024 ** 2)}"
+                    f" Val: {best_val:.4f} ({val_loss:.4f}),"
+                    f" {get_ram()},"
+                    f" {get_vram()}"
                 )
 
             global_step += 1

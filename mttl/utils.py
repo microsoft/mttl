@@ -11,6 +11,7 @@ from time import sleep
 from typing import Optional
 
 import numpy as np
+import psutil
 import torch
 import torch.nn as nn
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
@@ -327,3 +328,20 @@ def toggle_cache(model, enable=True):
     model.model.config.use_cache = enable
     yield
     model.model.config.use_cache = previous_cache
+
+
+def get_ram():
+    mem = psutil.virtual_memory()
+    free = mem.available / 1024**3
+    total = mem.total / 1024**3
+    total_cubes = 24
+    free_cubes = int(total_cubes * free / total)
+    return f"RAM: {total - free:.2f}/{total:.2f}GB\t"  # RAM:[' + (total_cubes - free_cubes) * '▮' + free_cubes * '▯' + ']'
+
+
+def get_vram():
+    free = torch.cuda.mem_get_info()[0] / 1024**3
+    total = torch.cuda.mem_get_info()[1] / 1024**3
+    total_cubes = 24
+    free_cubes = int(total_cubes * free / total)
+    return f"VRAM: {total - free:.2f}/{total:.2f}GB\t"  # VRAM:[' + (total_cubes - free_cubes) * '▮' + free_cubes * '▯' + ']'
