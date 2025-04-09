@@ -307,7 +307,6 @@ def do_evaluation(
             )
 
         torch.cuda.empty_cache()
-
     eval_loss = distributed_mean(eval_loss, model.device)
 
     if evaluator is not None:
@@ -404,25 +403,31 @@ def cpu_offload(model, names, enable=False):
     """Swap the specified set of KMs from CPU to GPU."""
     if enable:
         names = set(names)
+        tmp_storage = {}
         if hasattr(model, "experts_containers"):
-            for container in model.experts_containers:
+            for cid, container in enumerate(model.experts_containers):
                 for name in names:
                     device = model.device
-                    requires_grad = container.lora_a[name].requires_grad
-                    container.lora_a[name] = container.lora_a[name].to(device)
-                    container.lora_b[name] = container.lora_b[name].to(device)
-                    container.lora_a[name].requires_grad = requires_grad
-                    container.lora_b[name].requires_grad = requires_grad
-        torch.cuda.empty_cache()
+                    tmp_storage[f"{cid}_{name}_lora_a"] = container.lora_a[name].data
+                    tmp_storage[f"{cid}_{name}_lora_b"] = container.lora_b[name].data
+                    container.lora_a[name].data = container.lora_a[name].data.to(device)
+                    container.lora_b[name].data = container.lora_b[name].data.to(device)
     yield
     if enable:
         if hasattr(model, "experts_containers"):
-            for container in model.experts_containers:
+            for cid, container in enumerate(model.experts_containers):
+
+                assert (
+                    container.lora_a[name].grad is None
+                ), "should call loss.backward() under decorator"
+                assert (
+                    container.lora_b[name].grad is None
+                ), "should call loss.backward() under decorator"
+
                 for name in names:
-                    requires_grad = container.lora_a[name].requires_grad
-                    container.lora_a[name] = container.lora_a[name].to("cpu")
-                    container.lora_b[name] = container.lora_b[name].to("cpu")
-                    container.lora_a[name].requires_grad = requires_grad
-                    container.lora_b[name].requires_grad = requires_grad
-        torch.cuda.empty_cache()
+                    container.lora_a[name].data = tmp_storage[f"{cid}_{name}_lora_a"]
+                    container.lora_b[name].data = tmp_storage[f"{cid}_{name}_lora_b"]
+
+        del tmp_storage
         gc.collect()
+        torch.cuda.empty_cache()
