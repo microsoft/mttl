@@ -330,13 +330,14 @@ def toggle_cache(model, enable=True):
     model.model.config.use_cache = previous_cache
 
 
-def get_ram():
-    mem = psutil.virtual_memory()
-    free = mem.available / 1024**3
-    total = mem.total / 1024**3
-    total_cubes = 24
-    free_cubes = int(total_cubes * free / total)
-    return f"RAM: {total - free:.2f}/{total:.2f}GB\t"  # RAM:[' + (total_cubes - free_cubes) * '▮' + free_cubes * '▯' + ']'
+def get_ram(pid=None):
+    if pid is None:
+        pid = os.getpid()
+    process = psutil.Process(pid)
+    mem_info = process.memory_info()
+    used = mem_info.rss / 1024**3  # Convert bytes to GB
+    total = psutil.virtual_memory().total / 1024**3
+    return f"RAM: {used:.4f}/{total:.2f}GB"
 
 
 def get_vram():
