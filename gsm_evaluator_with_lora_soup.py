@@ -29,9 +29,6 @@ config = GsmDataConfig(
     data_dir=args.output_dir
 )
 
-config = GsmDataConfig(
-        model="microsoft/Phi-3-mini-4k-instruct", gsm_template="python"
-    )
 dm = Gsm8kHardDataModule(config, for_generation=True)
 
 evaluator = GsmEvaluator(dm)
