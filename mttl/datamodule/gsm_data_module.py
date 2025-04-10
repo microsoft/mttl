@@ -25,7 +25,7 @@ def generate_math_prompt_with_python(instruction, input=None, few_shot=8):
     for data in cot_data:
         prompt += f"### Instruction:\n{data['instruction']}\n\n### Response:\n{data['output']}\n\n"
     prompt += "Now write a function 'solution' encolsed in ``` in Python to solve this Instruction. Write only a code block. Write only valid Python code without using any units with the numerical values and any invalid symbols.\n\n"
-    prompt += f"### Instruction:\n{instruction}\n\n### Response:\n"
+    prompt += f"### Instruction:\n{instruction}\n\n### Response:"
     return prompt
 
 
@@ -274,8 +274,8 @@ if __name__ == "__main__":
         model="microsoft/Phi-3-mini-4k-instruct", gsm_template="python", few_shot=1
     )
 
-    datamodule = Gsm8kDataModule(config, for_generation=True)
-    train_dataloader = Gsm8kDataModule.train_dataloader()
+    datamodule = Gsm8kHardDataModule(config, for_generation=True)
+    train_dataloader = datamodule.train_dataloader()
     val_dataloder = datamodule.val_dataloader()
     for batch in val_dataloder:
         print(batch)
