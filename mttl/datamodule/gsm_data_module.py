@@ -7,19 +7,18 @@ from functools import partial
 import json
 
 
+with open("mttl/datamodule/math.json", "r") as f:
+    cot_data = json.load(f)
 @dataclass
 class GsmDataConfig(DatasetConfig):
     gsm_template: str = (
         "cot"  # the template we will use for the prompt, for code generation or chain of thought.
     )
-    few_shot: int = 8  # number of fewshot examples to include in the prompt
 
 
 # code refer to https://github.com/aksh555/LoRA-Soups/blob/main/evaluate.py#L208
-def generate_math_prompt_with_python(instruction, input=None, few_shot=8):
+def generate_math_prompt_with_python(instruction):
 
-    with open("mttl/datamodule/math.json", "r") as f:
-        cot_data = json.load(f)
     prompt = """Let's use Python to solve math problems step by step. Below are a few Instruction-Response pairs on how to do it."""
     prompt += "\n\n"
     for data in cot_data:
@@ -29,9 +28,9 @@ def generate_math_prompt_with_python(instruction, input=None, few_shot=8):
     return prompt
 
 
-def instruct_template_python(example, few_shot):
+def instruct_template_python(example):
     example["source"] = generate_math_prompt_with_python(
-        example["input"], few_shot=few_shot
+        example["input"]
     )
     example["target"] = str(example["answer"])
     return example
@@ -239,11 +238,8 @@ class Gsm8kDataModule(DataModule):
         if self.config.gsm_template == "cot":
             dataset = dataset.map(instruct_template_cot, num_proc=n_proc)
         elif self.config.gsm_template == "python":
-            partial_parse_function = partial(
-                instruct_template_python, few_shot=self.config.few_shot
-            )
             dataset = dataset.map(
-                partial_parse_function,
+                instruct_template_python,
                 num_proc=n_proc,
             )
         self.train_dataset = dataset["train"]
@@ -258,20 +254,14 @@ class Gsm8kHardDataModule(DataModule):
         if self.config.gsm_template == "cot":
             dataset = dataset.map(instruct_template_cot, num_proc=n_proc)
         elif self.config.gsm_template == "python":
-            partial_parse_function = partial(
-                instruct_template_python, few_shot=self.config.few_shot
-            )
-            dataset = dataset.map(
-                partial_parse_function,
-                num_proc=n_proc,
-            )
+            dataset = dataset.map(instruct_template_python,num_proc=n_proc)
         self.train_dataset = dataset["train"]
         self.dev_dataset = self.test_dataset = dataset["train"]
 
 
 if __name__ == "__main__":
     config = GsmDataConfig(
-        model="microsoft/Phi-3-mini-4k-instruct", gsm_template="python", few_shot=1
+        model="microsoft/Phi-3-mini-4k-instruct", gsm_template="python"
     )
 
     datamodule = Gsm8kHardDataModule(config, for_generation=True)

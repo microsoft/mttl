@@ -1,6 +1,5 @@
 # here, we train experts and we upload them to a local library (repository) of experts.
 
-from mttl.datamodule.base import get_datamodule
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.containers.selectors.base import UniformSelectorConfig
 from mttl.evaluators.gsm_evaluator import GsmEvaluator
@@ -27,9 +26,12 @@ config = GsmDataConfig(
     max_input_length=args.max_input_length,
     max_output_length=args.max_output_length,
     gsm_template=args.gsm_template,
-    data_dir=args.output_dir,
-    few_shot=args.few_shot,
+    data_dir=args.output_dir
 )
+
+config = GsmDataConfig(
+        model="microsoft/Phi-3-mini-4k-instruct", gsm_template="python"
+    )
 dm = Gsm8kHardDataModule(config, for_generation=True)
 
 evaluator = GsmEvaluator(dm)
