@@ -167,6 +167,8 @@ def run_eval(args: EvaluationConfig):
     )
     an_expert = library[next(iter(library.keys()))]
     base_model = an_expert.expert_info.expert_model
+    if base_model is None:
+        base_model = an_expert.expert_info.model
     train_cfg = ExpertConfig.from_dict(an_expert.training_config)
 
     loading_kwargs = {
@@ -200,7 +202,7 @@ def run_eval(args: EvaluationConfig):
         if args.merge_or_route == "uniform":
             expert = WeightedLinearMerge(WeightedLinearMergeConfig()).transform(library)
         elif args.merge_or_route == "ties":
-            cfg = TiesMergeConfig(top_k=args.transform_sparsity)
+            cfg = TiesMergeConfig(top_k=1)
             expert = TiesMerge(cfg).transform(library)
 
         model = MultiExpertModel(
