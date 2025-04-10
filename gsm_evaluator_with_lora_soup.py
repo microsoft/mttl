@@ -30,6 +30,7 @@ config = GsmDataConfig(
 )
 
 dm = Gsm8kHardDataModule(config, for_generation=True)
+breakpoint()
 
 evaluator = GsmEvaluator(dm)
 

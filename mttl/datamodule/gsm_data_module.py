@@ -248,7 +248,7 @@ class Gsm8kDataModule(DataModule):
 @DataModule.register("gsm-8k-hard", config_cls=GsmDataConfig)
 class Gsm8kHardDataModule(DataModule):
     def setup_dataset(self):
-        n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 4))
+        n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 1))
         dataset = DatasetLibrary.pull_dataset("reasoning-machines/gsm-hard")
         dataset = dataset.rename_column("target", "answer")
         if self.config.gsm_template == "cot":
