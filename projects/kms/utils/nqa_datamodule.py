@@ -117,7 +117,7 @@ class NQADatamodule(DataModule):
                             source, add_generation_prompt=True, tokenize=False
                         )
                         if tokenizer.chat_template is not None
-                        else source
+                        else source[0]["content"]
                     )
                     batch["target"].append(answer)
                     batch["answers"].append(examples["answers"][i][j])
