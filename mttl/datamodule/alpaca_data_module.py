@@ -54,10 +54,11 @@ class MathQallamaDataModule(AlpacaDataModule):
 
 
 if __name__ == "__main__":
-    # alpaca_data_module = AlpacaDataModule(
+    # alpaca_code_module = AlpacaCodeDataModule(
     #     DatasetConfig(model="meta-llama/Llama-2-7b-hf")
     # )
-    # alpaca_data_module.setup_dataset()
+    # alpaca_code_module.setup_dataset()
+    # val_dataloder = alpaca_code_module.val_dataloader()
     # print(alpaca_data_module.train_dataset)
 
     alpaca_code_data_module = MathQallamaDataModule(
