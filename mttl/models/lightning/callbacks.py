@@ -20,37 +20,35 @@ from mttl.evaluators import MMLUEvaluator
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.evaluators import Evaluator
 from mttl.logging import logger
-from mttl.models.modifiers.sparse_mask import make_sparse_model_during_training
+from mttl.models.modifiers.sparse_mask import make_sparse_model_during_training, save_mask
 from mttl.models.utils import transfer_batch_to_device
 
 DEBUG = False
 
 
 class UpdateSparseMask(pl.Callback):
-    def __init__(
-        self,
-        update_interval=5,
-        dm=None,
-        task_name=None,
-        parameter_selection_procedure="per_layer",
-    ):
+    def __init__(self, update_interval=5, 
+                 num_train_steps=None, 
+                 dm=None, 
+                 save_mask_dir=None, 
+                 task_name=None, 
+                 parameter_selection_procedure='per_layer'):
         super().__init__()
         self.update_interval = update_interval
         self.update_counter = 0
         self.dm = dm
+        self.save_mask_dir = save_mask_dir 
         self.task_name = task_name
-        assert parameter_selection_procedure in [
-            "model",
-            "per_layer",
-        ], "choose the right `parameter_selection_procedure`"
-        self.parameter_selection_procedure = parameter_selection_procedure
+        self.num_train_steps=num_train_steps
+        assert parameter_selection_procedure in ['model','per_layer','layer_and_param', 'weight_magnitude', 'gradient_magnitude','grow_and_drop'], "choose the right `parameter_selection_procedure`"
+        self.parameter_selection_procedure=parameter_selection_procedure
 
-    def update_mask(self, pl_module, batch):
-        make_sparse_model_during_training(
-            pl_module,
-            batch,
-            parameter_selection_procedure=self.parameter_selection_procedure,
-        )
+    def update_mask(self, pl_module, batch, num_train_steps, current_steps):
+        make_sparse_model_during_training(pl_module, 
+                                          batch, 
+                                          num_train_steps, 
+                                          current_steps, 
+                                          parameter_selection_procedure=self.parameter_selection_procedure)
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
         """
@@ -61,8 +59,13 @@ class UpdateSparseMask(pl.Callback):
             if self.update_counter % self.update_interval == 0:
                 # Update mask
                 self.update_mask(pl_module, batch)
-                self.update_counter = 0  # Reset counter for next interval
 
+    def on_train_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """
+        save mask end of training
+        """
+        f_name = f'{self.save_mask_dir}/{self.task_name}_mask'
+        save_mask(pl_module, f_name)
 
 class LiveCheckpointCallback(pl.Callback):
     """A better model checkpoint callback, that works in synchrony with LiveLogMixin."""
