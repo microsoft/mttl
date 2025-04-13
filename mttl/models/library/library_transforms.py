@@ -339,8 +339,10 @@ class TiesMerge(LibraryTransform):
                 used += keep_mask.sum().item()
             else:
                 # sign majority vote
-                sign_per_dim = expert_weights.sign().sum(0, keepdim=True).sign()
                 sign_per_dim = expert_weights.sum(0, keepdim=True).sign()
+                # resolve zero signs: https://github.com/rezazzr/breadcrumbs/blob/main/src/task_vectors.py#L334
+                majority_sign = torch.sign(sign_per_dim.sum())
+                sign_per_dim[sign_per_dim == 0] = majority_sign
 
                 # keep only weights whose sign agree with the majority
                 use_for_avg = expert_weights.sign() == sign_per_dim
@@ -1308,3 +1310,963 @@ class MBCWithCosSimTransform(LibraryTransform):
         for key, label in zip(expert_names, cluster_labels):
             clusters[f"cluster_{label}"].append(key)
         return clusters
+
+# --------------------------
+# LoRA AB linear merge LoRA
+# -------------------------
+
+@dataclass
+class LoRA_ab_LinearMergeConfig(LibraryTransformConfig):
+    weights: dict = None
+
+
+class LoRA_ab_LinearMerge(LibraryTransform):
+    """
+    Computes a uniform weight mixture across experts of a given library
+    """
+
+    def __init__(self, config: LoRA_ab_LinearMergeConfig = None):
+        super().__init__(config or LoRA_ab_LinearMergeConfig())
+
+    @torch.no_grad()
+    def transform(self, library) -> Expert:
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+        # get expert config
+        from copy import deepcopy
+        an_expert = library[next(iter(library.keys()))]
+        training_config = deepcopy(an_expert.training_config)
+        # create a ExpertModel
+        from mttl.models.expert_model import ExpertModel
+        model = ExpertModel(**vars(training_config))
+        # filter the weight names
+        weight_names = [n for n in model.state_dict().keys() if ('Wqkv.weight' in n or 'out_proj.weight' in n)]
+
+        # iterate over the library
+        import collections
+        store_W = collections.defaultdict(dict)
+        for expert_name, expert in library.items():
+            # iterate over the expert weights           
+            for l in weight_names:
+                common_name = '.'.join(l.split('.')[1:-1])
+                A, B = expert.expert_weights[f'{common_name}.lora_a'], expert.expert_weights[f'{common_name}.lora_b']
+                W = A @ B
+                store_W[l][expert_name] = W
+
+        store_average_W = collections.defaultdict(dict)
+        # iterate over all the layers of W
+        for l in weight_names:
+            average_W = 0
+            for k, v in store_W[l].items():
+                average_W+=v
+            average_W /=len(store_W[l])
+            store_average_W[l] = average_W
+                # average the Ws for each layer
+
+        new_state_dict = {}
+        # add the averaged Ws to the model
+        for key, value in model.state_dict().items():
+            if key in weight_names:
+                print(f'added {key}')
+                new_state_dict[key] = value + store_average_W[key].T
+            else:
+                new_state_dict[key] = value
+ 
+        # load state_dict into model
+        model.load_state_dict(new_state_dict)
+        return model
+
+# --------------------------
+# Sparse merge
+# -------------------------
+@dataclass
+class SparseWeightLinearMergeConfig(LibraryTransformConfig):
+    weights: dict = None
+
+
+class SparseWeightLinearMerge(LibraryTransform):
+    """
+    Computes a uniform weight mixture across experts of a given library
+    """
+    def __init__(self, config: SparseWeightLinearMergeConfig = None):
+        super().__init__(config or SparseWeightLinearMergeConfig())
+    def load_mask(self, expert):
+        try:
+            print('trying to load mask from hf')
+            library_id = expert.training_config.library_id
+            from huggingface_hub import hf_hub_download
+            destination_type, f_name = library_id.split('://')
+            repo_id=('/').join(f_name.split('/')[:2])
+            filename = f'{expert.expert_info.expert_name}_mask.npz'
+            f_path=hf_hub_download(repo_id=repo_id, filename=filename)
+            Mask = np.load(f_path, allow_pickle=True)['arr'].item()
+        except:
+            print('trying to load mask from local dir')
+            m_loc = f'experiment/{expert.training_config.exp_name}/mask.npz'
+            Mask = np.load(m_loc, allow_pickle=True)['arr'].item()
+        return Mask
+
+    def convert_idx_2_mask(self, weight_idx, mat_dim):
+        m = np.zeros(mat_dim)
+        m[tuple(zip(*weight_idx))] = 1
+        return torch.FloatTensor(m)
+    
+
+    def update_module_mask(self, module, expert):
+        Mask = self.load_mask(expert)
+        for m_name, m in dict(module.named_modules()).items():
+            if 'sparse_layer' in m_name:
+                keep_mask = self.convert_idx_2_mask(weight_idx=Mask[m_name],
+                                            mat_dim=m.weight_mask.shape)
+            
+                m.weight_mask=keep_mask.data.clone()
+
+    @torch.no_grad()
+    def transform(self, library) -> Expert:
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+        # get expert config
+        from copy import deepcopy
+        an_expert = library[next(iter(library.keys()))]
+        training_config = deepcopy(an_expert.training_config)
+        # create a ExpertModel
+        from mttl.models.expert_model import ExpertModel
+        print('Trying to load base model from:', training_config.model)
+        model = ExpertModel(**vars(training_config))
+        sparse_layer_names = [n for n in model.state_dict().keys() if ('sparse_layer' in n)] # allow to add weights and bias
+        assert sparse_layer_names!=[], print('could not find sparse-layer modules')
+
+        # iterate over the library
+        import collections
+        store_W = collections.defaultdict(dict)
+        store_m = collections.defaultdict(dict)
+        expert_weight_hist = collections.defaultdict(dict)    # weight stats
+
+        for expert_name, expert in library.items():
+            print(f'Merging sparse weight for task: {expert_name}')
+            Mask = self.load_mask(expert)
+            expert_weight_hist[expert_name] = collections.defaultdict(dict) # weight stats
+            # for each layer compute the "average of the overlapped weight" 
+            for l in sparse_layer_names:
+                common_name = '.'.join(l.split('.')[1:-1])
+                param_type = l.split('.')[-1]
+
+                if param_type == 'weight':
+                    # get mask-m for layer-l: convert the weight_indx to convert sparse-mask
+                    m = self.convert_idx_2_mask(weight_idx=Mask[f'model.{common_name}'], 
+                                       mat_dim=expert.expert_weights[f'{common_name}.weight'].shape)
+                else:
+                    m = 1.0
+                # Check if entry exists
+                if l in store_W:
+                    # store weight
+                    store_W[l]+=expert.expert_weights[f'{common_name}.{param_type}'] * m
+                    # store mask
+                    store_m[l]+=m
+                # new entry for expert 1
+                else:
+                    store_W[l]=expert.expert_weights[f'{common_name}.{param_type}'] * m
+                    store_m[l]=m
+                expert_weight_hist[expert_name][common_name]=(float(expert.expert_weights[f'{common_name}.weight'].mean().data.numpy()), float(expert.expert_weights[f'{common_name}.weight'].std().data.numpy())) # weight stats
+        
+        # we sum the total per-layer weight overlap and devide the count as an alternate to calculate accurate weight average
+        for l in sparse_layer_names:
+            param_type = l.split('.')[-1]
+            if param_type =='weight':
+                store_m[l][store_m[l]==0]=1 # assigning 1 to the zero-masked weights positions to avoid numerical error in the next step
+                store_W[l] /= store_m[l]
+            else:
+                store_W[l] /= len(library)
+        new_state_dict = {}
+        # add the averaged Ws to the model
+        for key, value in model.state_dict().items():
+            if key in sparse_layer_names:
+                print(f'added {key}')
+                new_state_dict[key] = value + store_W[key]
+            else:
+                new_state_dict[key] = value
+ 
+        # load state_dict into model
+        model.load_state_dict(new_state_dict)
+        # save weights stats
+        import os
+        import json
+        exp_temp = training_config.library_id.split('/')[-1]
+        file_loc = f'Weight_Stats/{exp_temp}'
+        os.makedirs(file_loc, exist_ok=True)
+        with open(f'{file_loc}/weight_stats.json','w') as json_file:
+            json.dump(expert_weight_hist, json_file)
+
+        return model
+    
+  
+    @torch.no_grad()
+    def transform_dummy(self, library, get_expert) -> Expert:
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+        # =============================
+        # get expert config
+        from copy import deepcopy
+        an_expert = library[next(iter(library.keys()))]
+        training_config = deepcopy(an_expert.training_config)
+        # create a ExpertModel
+        from mttl.models.expert_model import ExpertModel
+        model = ExpertModel(**vars(training_config))
+        # filter the weight names
+        # weight_names = [n for n in model.state_dict().keys() if ('Wqkv.weight' in n or 'out_proj.weight' in n)]
+        weight_names = [n for n in model.state_dict().keys() if ('Wqkv.sparse_layer.weight' in n or 'out_proj.sparse_layer.weight' in n)]
+
+        # iterate over the library
+        import collections
+        store_W = collections.defaultdict(dict)
+        store_m = collections.defaultdict(dict)
+        for expert_name, expert in library.items():
+            # TODO: only consider the weights that matches the given `get_expert` input
+            if expert_name == get_expert:
+                print(f'Merging sparse weight for task: {expert_name}')
+                Mask = self.load_mask(expert)
+                # for each layer compute the "average of the overlapped weight" 
+                for l in weight_names:
+                    common_name = '.'.join(l.split('.')[1:-1])
+                    # get mask-m for layer-l: convert the weight_indx to convert sparse-mask
+                    m = self.convert_idx_2_mask(weight_idx=Mask[f'model.{common_name}'], 
+                                       mat_dim=expert.expert_weights[f'{common_name}.weight'].shape)
+                    if l in store_W.keys():
+                        # store weight
+                        store_W[l]+=expert.expert_weights[f'{common_name}.weight'] * m
+                        # store mask
+                        store_m[l]+=m
+                    else:
+                        store_W[l]=expert.expert_weights[f'{common_name}.weight'] * m
+                        store_m[l]=m
+        # we sum the total per-layer weight overlap and devide the count as an alternate to calculate accurate weight average
+        for l in weight_names:
+            store_m[l][store_m[l]==0]=1 # assigning 1 to the zero-masked weights positions to avoid numerical error in the next step
+            store_W[l] /= store_m[l]
+
+        new_state_dict = {}
+        # add the averaged Ws to the model
+        for key, value in model.state_dict().items():
+            if key in weight_names:
+                print(f'added {key}')
+                new_state_dict[key] = value + store_W[key]
+            else:
+                new_state_dict[key] = value
+ 
+        # load state_dict into model
+        model.load_state_dict(new_state_dict)
+        return model
+
+
+
+
+# -----------------------------------
+# SLERP and LERP implementation
+# -----------------------------------
+def lerp(t, v0, v1, origin_data_type=None):
+    v2 = (1 - t) * v0 + t * v1
+    return torch.from_numpy(v2).to(origin_data_type)
+# SLERP
+def slerp(t, v0, v1, DOT_THRESHOLD=0.9995):
+    '''
+    Spherical linear interpolation
+    Args:
+        t (float/np.ndarray): Float value between 0.0 and 1.0
+        v0 (np.ndarray): Starting vector
+        v1 (np.ndarray): Final vector
+        DOT_THRESHOLD (float): Threshold for considering the two vectors as
+                               colineal. Not recommended to alter this.
+    Returns:
+        v2 (np.ndarray): Interpolation vector between v0 and v1
+    '''
+    origin_data_type = v0.dtype
+    v0 = v0.detach().cpu().float().numpy()
+    v1 = v1.detach().cpu().float().numpy()
+    
+    # Copy the vectors to reuse them later
+    v0_copy = np.copy(v0)
+    v1_copy = np.copy(v1)
+    # Normalize the vectors to get the directions and angles
+    v0 = v0 / np.linalg.norm(v0)
+    v1 = v1 / np.linalg.norm(v1)
+    # Dot product with the normalized vectors (can't use np.dot in W)
+    dot = np.sum(v0 * v1)
+    # If absolute value of dot product is almost 1, vectors are ~colineal, so use lerp
+    if np.abs(dot) > DOT_THRESHOLD:
+        return lerp(t, v0_copy, v1_copy, origin_data_type=origin_data_type)
+    # Calculate initial angle between v0 and v1
+    theta_0 = np.arccos(dot)
+    sin_theta_0 = np.sin(theta_0)
+    # Angle at timestep t
+    theta_t = theta_0 * t
+    sin_theta_t = np.sin(theta_t)
+    # Finish the slerp algorithm
+    s0 = np.sin(theta_0 - theta_t) / sin_theta_0
+    s1 = sin_theta_t / sin_theta_0
+    v2 = s0 * v0_copy + s1 * v1_copy
+
+    return torch.from_numpy(v2).to(origin_data_type)
+
+@dataclass
+class SLERPMergeConfig(LibraryTransformConfig):
+    weights: dict = None
+
+
+class SLERPMerge(LibraryTransform):
+    """
+    Computes a uniform weight mixture across experts of a given library
+    """
+
+    def __init__(self, config: SLERPMergeConfig = None):
+        super().__init__(config or SLERPMergeConfig())
+
+
+    def load_mask(self, expert):
+        try:
+            print('trying to load mask from hf')
+            library_id = expert.training_config.library_id
+            from huggingface_hub import hf_hub_download
+            destination_type, f_name = library_id.split('://')
+            repo_id=('/').join(f_name.split('/')[:2])
+            filename = f'{expert.expert_info.expert_name}_mask.npz'
+            f_path=hf_hub_download(repo_id=repo_id, filename=filename)
+            Mask = np.load(f_path, allow_pickle=True)['arr'].item()
+        except:
+            print('trying to load mask from local dir')
+            m_loc = f'experiment/{expert.training_config.exp_name}/mask.npz'
+            Mask = np.load(m_loc, allow_pickle=True)['arr'].item()
+        return Mask
+
+    def convert_idx_2_mask(self, weight_idx, mat_dim):
+        m = np.zeros(mat_dim)
+        m[tuple(zip(*weight_idx))] = 1
+        return torch.FloatTensor(m)
+
+    def sparse_SLERP(self, model, experts, base_expert):
+        base_expert_mask = self.load_mask(base_expert)
+        for layer, _ in  base_expert_mask.items():
+            mod_layer = '.'.join(layer.split('.')[1:])
+            base_expert_mask[layer] = self.convert_idx_2_mask(weight_idx=base_expert_mask[layer], 
+                                    mat_dim=base_expert.expert_weights[f'{mod_layer}.weight'].shape)
+        weight_names = [n for n in model.state_dict().keys() if 'sparse_layer' in n]
+
+        for expert in experts:
+            mask = self.load_mask(expert)
+            # for expert_name, expert in library.items():
+            for layer, weight in model.state_dict().items():
+                if layer in weight_names:
+                    common_name = '.'.join(layer.split('.')[1:-1])
+                    param_type = layer.split('.')[-1]
+
+                    if param_type == 'weight':
+                        # get mask-m for layer-l: convert the weight_indx to convert sparse-mask
+                        m = self.convert_idx_2_mask(weight_idx=mask[f'model.{common_name}'], 
+                                        mat_dim=expert.expert_weights[f'{common_name}.weight'].shape)
+                        bm = base_expert_mask[f'model.{common_name}']
+                    else:
+                        m = 1.0
+                        bm = 1.0
+                    base_expert._expert_weights[f'{common_name}.{param_type}'] = slerp(float(1.0)-0.5, 
+                                                                                       v0=base_expert._expert_weights[f'{common_name}.{param_type}']*bm, 
+                                                                                       v1=expert._expert_weights[f'{common_name}.{param_type}']*m
+                                                                                       )
+                    if param_type == 'weight':
+                        base_expert_mask[f'model.{common_name}'] = torch.logical_or(m, bm).float()
+        
+        updated_state_dict = {}
+        for layer, weight in model.state_dict().items():
+            if layer in weight_names:
+                mod_layer = '.'.join(layer.split('.')[1:])
+                updated_state_dict[layer] = base_expert._expert_weights[mod_layer]
+            else:
+                updated_state_dict[layer] = weight
+        # load state_dict into model
+        model.load_state_dict(updated_state_dict)
+        return model
+    
+    def FFT_SLERP(self, model, experts, base_expert):
+        for expert in experts:
+            for layer, _ in model.state_dict().items():
+                common_name = '.'.join(layer.split('.')[1:-1])
+                param_type = layer.split('.')[-1]
+                base_expert._expert_weights[f'{common_name}.{param_type}'] = slerp(float(1.0)-0.5, 
+                                                                                    v0=base_expert._expert_weights[f'{common_name}.{param_type}'], 
+                                                                                    v1=expert._expert_weights[f'{common_name}.{param_type}']
+                                                                                    )
+        updated_state_dict = {}
+        for layer, _ in model.state_dict().items():
+            mod_layer = '.'.join(layer.split('.')[1:])
+            updated_state_dict[layer] = base_expert._expert_weights[mod_layer]
+        # load state_dict into model
+        model.load_state_dict(updated_state_dict)
+        return model
+
+    @torch.no_grad()
+    def transform(self, library) -> Expert:
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+
+        expert_names = list(library.keys())
+        experts = [library[name] for name in expert_names]
+        base_expert = copy.deepcopy(experts[0])
+        training_config = copy.deepcopy(base_expert.training_config)
+        from mttl.models.expert_model import ExpertModel
+        model = ExpertModel(**vars(training_config))
+        if training_config.model_modifier == None:
+            # skip the first expert as it's now acting as base_expert
+            model = self.FFT_SLERP(model, experts[1:], base_expert)
+        elif training_config.model_modifier == 'sparse_mask_adapter':
+            model = self.sparse_SLERP(model, experts[1:], base_expert)
+        return model
+    
+
+def topk_multiple_experts(expert_vectors, topk, TH_type=None):
+    assert TH_type!=None
+    n_tasks = expert_vectors.shape[0]
+    values = []
+    for t in range(n_tasks):
+        print('topk expert', t)
+        v, _ = torch.topk(expert_vectors[t,:], topk)
+        if TH_type == 'lower': values.append(v[-1])
+        elif TH_type == 'upper': values.append(v[0])
+        del v
+    values = torch.stack(values, dim=0)  # Shape will be (n_tasks,)
+    return values
+
+@dataclass
+class BaseMergeConfig(LibraryTransformConfig):
+    merging_method: str = 'BaseMerge'
+
+class BaseMerge(LibraryTransform):
+    """
+    Base class for TIES-Merge and Model-Breadcrumbs: Computes a merged weight across experts of a given library
+    """
+    def __init__(self, config: BaseMergeConfig = None):
+        super().__init__(config or BaseMergeConfig())
+
+    
+    @torch.no_grad()
+    def pre_configure(self, library):
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+        expert_names = list(library.keys())
+        experts = [library[name] for name in expert_names]
+        logger.info("Averaging {} experts".format(len(experts)))
+        expert_type = experts[0].training_config.model_modifier
+        if expert_type is None:
+            expert_type = 'FFT' 
+
+        # transform experts. NOTE: MUST
+        self.transform_experts(experts, expert_type)
+
+        # get base expert    
+        base_expert = copy.deepcopy(experts[0])
+        base_expert.name = self.config.merging_method
+        train_cfg = copy.deepcopy(base_expert.training_config)
+        train_cfg.device_map = "cpu"
+        trainable_params = list(base_expert.expert_weights.keys()) # 'model.layers.0.self_attn.o_proj.weight'
+
+        # get base model
+        from mttl.models.utils import model_loader_helper
+        base_model = model_loader_helper(
+                train_cfg.model,
+                load_in_8bit=train_cfg.load_in_8bit,
+                load_in_4bit=train_cfg.load_in_4bit,
+                device_map=getattr(train_cfg, "device_map", "cpu"),
+            )
+        
+        return experts, expert_type, base_expert, base_model, trainable_params
+
+    @torch.no_grad()
+    def extract_expert_vector(self,experts, expert_type, base_model_state_dict, trainable_params):
+        # Build n_tasks x D experts
+        expert_vectors = []
+        for expert in experts:
+            if expert_type == 'FFT':
+                # W_t = W_base - W'
+                expert_vectors += [
+                    torch.nn.utils.parameters_to_vector(
+                        list(expert.expert_weights[k] - base_model_state_dict[k] for k in trainable_params)
+                        )
+                    ]
+                # W_t = (lora_a*lora_b).T
+                # NOTE: it's already done when we call self.transform_experts()
+            elif expert_type == 'lora':
+                weights_list = [param.contiguous() for param in (expert.expert_weights[k] for k in trainable_params)]
+                expert_vectors +=[torch.nn.utils.parameters_to_vector(weights_list)]
+
+        return expert_vectors
+    
+    @torch.no_grad()
+    def extract_expert_weight(self, base_model_state_dict, experts, param_name, expert_type):
+        # for given "param_name", iterates over all expert and gets the trained expert-weights
+        if expert_type == 'FFT':
+            expert_weights = torch.stack(
+                    [expert.expert_weights[param_name]-base_model_state_dict[param_name] for expert in experts], dim=0
+                )
+        elif expert_type == 'lora':
+            expert_weights = torch.stack(
+                    [expert.expert_weights[param_name] for expert in experts], dim=0
+                )
+        elif expert_type == 'sparse_mask_adapter':
+            expert_weights = torch.stack(
+                    [expert.expert_weights[param_name] for expert in experts], dim=0
+                )
+        return expert_weights
+
+    
+    @torch.no_grad()
+    def transform_experts(self, experts, expert_type):
+        assert expert_type in ['FFT','lora', 'sparse_mask_adapter'], print(f'{expert_type} is not implemented')
+        if expert_type == 'FFT':
+            pass
+        elif expert_type == 'lora':
+            # Lora
+            base_expert = copy.deepcopy(experts[0])
+            trainable_layers = ['.'.join(l.split('.')[:-1]) for l in list(base_expert.expert_weights.keys()) if 'qkv_proj' in l] ## 'layers.0.self_attn.o_proj'
+            trainable_layers = list(dict.fromkeys(trainable_layers)) # removes duplicate layers (loraA,loraB), w/o changing layer order
+            for expert in experts:
+                    for l in trainable_layers:
+                        expert.expert_weights[f'{l}.weight'] = (expert.expert_weights[f'{l}.lora_a'] @ expert.expert_weights[f'{l}.lora_b']).T
+                        del expert.expert_weights[f'{l}.lora_a'], expert.expert_weights[f'{l}.lora_b']
+
+            # NOTE: sanity check, please don't remove this block
+            for expert in experts:
+                for l in list(expert.expert_weights.keys()):
+                    if ('lora_a' in l or 'lora_b' in l):
+                        del expert.expert_weights[l]
+
+        elif expert_type == 'sparse_mask_adapter':
+            base_expert = copy.deepcopy(experts[0])
+            trainable_layers = ['.'.join(l.split('.')[:-1]) for l in list(base_expert.expert_weights.keys()) if 'qkv_proj' in l] ## 'layers.0.self_attn.o_proj'
+            trainable_layers = list(dict.fromkeys(trainable_layers)) # removes duplicate layers (loraA,loraB), w/o changing layer order
+
+            for expert in experts:
+                Mask = self.load_mask(expert)
+                # for each layer compute the "average of the overlapped weight" 
+                for l in trainable_layers:
+                    # weight
+                    m = self.convert_idx_2_mask(weight_idx=Mask[f'model.{l}'], 
+                                        mat_dim=expert.expert_weights[f'{l}.weight'].shape)  
+                    expert.expert_weights[f'{l}.weight'] = expert.expert_weights[f'{l}.weight'] * m
+                    expert.expert_weights[f'{l}.bias'] = expert.expert_weights[f'{l}.bias']
+               
+    @torch.no_grad()
+    def compute_per_task_threhold(self, expert_vectors):
+        # Given expert vector, W_task compute TH score to prune parameters
+        # NOTE: W_task = W_base - W'
+        pass
+    
+    @torch.no_grad()
+    def merge_expert(self, experts, expert_vectors, trainable_params, base_expert, base_model_state_dict, expert_type):
+        pass
+
+    @torch.no_grad()
+    def transform(self, library):
+        experts, expert_type, base_expert, base_model, trainable_params = self.pre_configure(library)
+        base_model_state_dict = dict(base_model.state_dict())
+        # ----------------------------------------------------------------------
+        # Collect Expert-vector
+        # for FFT:    expert_vectors, delta_W = W-W'
+        # for LoRA:   expert_vectors, delta_W = A.B
+        # for sparse: expert_vectors, delta_W = delta_W*mask (NOTE: not implemented yet)
+        expert_vectors= self.extract_expert_vector(experts, expert_type, base_model_state_dict, trainable_params)
+        base_expert = self.merge_expert(experts, expert_vectors, trainable_params, base_expert, base_model_state_dict, expert_type)
+        # load to base model:
+        from mttl.models.expert_model import ExpertModel
+        config = base_expert.training_config
+        config.model_modifier = None  # load only the base model
+        config.device_map='cpu'
+        config.trainable_param_names='.*' # allows to train all linear layers
+        base_model = ExpertModel(**vars(config))
+        # load state_dict into model
+        assert set(base_model.model.state_dict().keys()) == set(base_expert.expert_weights.keys()), "Expert weights must have the same keys"
+        base_model.model.load_state_dict(base_expert._expert_weights)
+        return base_model
+
+
+@dataclass
+class UniformMergeConfig(BaseMergeConfig):
+    merging_method: str = 'uniform_merge_expert'
+    alpha: float = 1.0 
+
+class UniformMerge(BaseMerge):
+    """
+    Computes a uniform weight mixture across experts of a given library
+    """
+
+    def __init__(self, config: UniformMergeConfig = None):
+        super().__init__(config or UniformMergeConfig())
+
+    def merge_expert(self, experts, expert_vectors, trainable_params, base_expert, base_model_state_dict, expert_type):
+        used, total = 0, 0
+        for param_name in base_model_state_dict.keys():
+            if param_name in trainable_params:
+                # stack the expert weights
+                expert_weights = self.extract_expert_weight(base_model_state_dict, experts, param_name, expert_type)
+
+                # collect mask
+                keep_mask = torch.ones_like(expert_weights)
+                # keep weights over the threshold
+                expert_weights = expert_weights * keep_mask
+                # uniform
+                final_param = expert_weights.mean(0)
+
+                # -----------------------------------------------------
+                # base_weight + sum of the "filtered" task-vector
+                # W = W + delta_W
+                # source : (a) https://openreview.net/pdf?id=6t0Kwf8-jrj (b) https://arxiv.org/pdf/2306.01708
+                final_param = base_model_state_dict[param_name] + self.config.alpha * final_param
+
+                
+                used += keep_mask.sum().item()
+                total += expert_weights.numel()
+
+                base_expert.expert_weights[param_name].data.copy_(final_param)
+            else:
+                base_expert.expert_weights[param_name]=copy.deepcopy(base_model_state_dict[param_name])
+
+        logger.info(
+            "Params used to compute Ties mean: {:.10f}%".format(100.0 * used / total)
+        )
+        return base_expert
+    
+
+@dataclass
+class TaskArithmeticConfig(BaseMergeConfig):
+    merging_method: str = 'task_arithmetic_merge_expert'
+    alpha: float = 0.4 # scaling
+
+class TaskArithmetic(BaseMerge):
+    """
+    Computes a uniform weight mixture across experts of a given library
+    """
+    def __init__(self, config: TaskArithmeticConfig = None):
+        super().__init__(config or TaskArithmeticConfig())
+
+    def merge_expert(self, experts, expert_vectors, trainable_params, base_expert, base_model_state_dict, expert_type):
+        used, total = 0, 0
+        for param_name in base_model_state_dict.keys():
+            if param_name in trainable_params:
+                # stack the expert weights
+                expert_weights = self.extract_expert_weight(base_model_state_dict, experts, param_name, expert_type)
+
+                # collect mask
+                keep_mask = torch.ones_like(expert_weights)
+                # keep weights over the threshold
+                expert_weights = expert_weights * keep_mask
+                # NOTE: sum for Task-Arithmetic
+                final_param = expert_weights.sum(0)
+
+                # -----------------------------------------------------
+                # base_weight + sum of the "filtered" task-vector
+                # W = W + delta_W
+                # source : (a) https://openreview.net/pdf?id=6t0Kwf8-jrj (b) https://arxiv.org/pdf/2306.01708
+                final_param = base_model_state_dict[param_name] + self.config.alpha * final_param
+
+                
+                used += keep_mask.sum().item()
+                total += expert_weights.numel()
+
+                base_expert.expert_weights[param_name].data.copy_(final_param)
+            else:
+                base_expert.expert_weights[param_name]=copy.deepcopy(base_model_state_dict[param_name])
+
+        logger.info(
+            "Params used to compute Ties mean: {:.10f}%".format(100.0 * used / total)
+        )
+        return base_expert
+
+@dataclass
+class TiesMergeSimpleConfig(BaseMergeConfig):
+    top_k: float = 0.2
+    merging_method: str = 'ties_merge_expert'
+    alpha: float  = 0.4 # scaling factor # source : (a) https://openreview.net/pdf?id=6t0Kwf8-jrj (b) https://arxiv.org/pdf/2306.01708
+    beta: float = 0.8  # 80% beta=sparsity, keep-ratio=1-beta, fig 3 https://arxiv.org/pdf/2306.01708 suggest to keep top20% params
+
+class TiesMergeSimple(BaseMerge):
+    """
+    Computes a uniform weight mixture across experts of a given library
+    """
+
+    def __init__(self, config: TiesMergeSimpleConfig = None):
+        super().__init__(config or TiesMergeSimpleConfig())
+
+        assert self.config.top_k > 0.0 and self.config.top_k <= 1.0
+
+    def compute_per_task_threhold(self, expert_vectors):
+        # take the absolute value:
+        expert_vectors = torch.stack(expert_vectors, dim=0).abs()
+        topk = int(expert_vectors.size(1)* self.config.beta)
+        per_exp_lth = topk_multiple_experts(expert_vectors, topk, TH_type='lower')
+
+        return per_exp_lth
+
+    @torch.no_grad()
+    def merge_expert(self, experts, expert_vectors, trainable_params, base_expert, base_model_state_dict, expert_type):
+        # ----------------------------------------------------------------------
+        # Compute Threshold score, TH
+        per_exp_lth = self.compute_per_task_threhold(expert_vectors)
+
+        used, total = 0, 0
+        for param_name in base_model_state_dict.keys():
+            if param_name in trainable_params:
+                # stack the expert weights
+                expert_weights = self.extract_expert_weight(base_model_state_dict, experts, param_name, expert_type)
+
+                # keep weights over the threshold
+                TH = per_exp_lth.view(-1, *((1,) * (expert_weights.ndim - 1))) # reshape
+                keep_mask = expert_weights.abs() > TH 
+                expert_weights = expert_weights * keep_mask
+
+                # sign majority vote
+                #sign_per_dim = expert_weights.sign().sum(0, keepdim=True).sign()
+                sign_per_dim = expert_weights.sum(0, keepdim=True).sign()
+                # resolve zero signs: https://github.com/rezazzr/breadcrumbs/blob/main/src/task_vectors.py#L334
+                majority_sign = torch.sign(sign_per_dim.sum())
+                sign_per_dim[sign_per_dim == 0] = majority_sign
+
+                # keep only weights whose sign agree with the majority
+                use_for_avg = expert_weights.sign() == sign_per_dim
+
+                deno = (use_for_avg!=0).sum(0).clamp(min=1.0)
+                sum_param = (expert_weights * use_for_avg).sum(0)
+                final_param = sum_param / deno
+                used += (use_for_avg & (sign_per_dim != 0.0)).sum().item()
+
+                # -----------------------------------------------------
+                # base_weight + sum of the "filtered" task-vector
+                # W = W + delta_W
+                # source : (a) https://openreview.net/pdf?id=6t0Kwf8-jrj (b) https://arxiv.org/pdf/2306.01708
+                final_param = base_model_state_dict[param_name] + self.config.alpha * final_param
+                used += keep_mask.sum().item()
+                total += expert_weights.numel()
+                base_expert.expert_weights[param_name].data.copy_(final_param)
+            else:
+                base_expert.expert_weights[param_name]=copy.deepcopy(base_model_state_dict[param_name])
+
+        logger.info(
+            "Params used to compute Ties mean: {:.10f}%".format(100.0 * used / total)
+        )
+        return base_expert
+
+
+@dataclass
+class SparseSignFixConfig(BaseMergeConfig):
+    top_k: float = 0.2
+    merging_method: str = 'sparse_signfix_merge_expert'
+    alpha: float  = 1 # scaling factor # source : (a) https://openreview.net/pdf?id=6t0Kwf8-jrj (b) https://arxiv.org/pdf/2306.01708
+ 
+
+class SparseSignFix(BaseMerge):
+    """
+    Computes a uniform weight mixture across experts of a given library
+    """
+
+    def __init__(self, config: SparseSignFixConfig = None):
+        super().__init__(config or SparseSignFixConfig())
+
+        assert self.config.top_k > 0.0 and self.config.top_k <= 1.0
+
+    @torch.no_grad()
+    def merge_expert(self, experts, trainable_params, base_expert, base_model_state_dict, expert_type):
+        param_dict= {}
+        for param_name, base_w in base_expert.model.state_dict().items():
+            if param_name in trainable_params:
+                if 'weight' in param_name:
+                    # stack the expert weights
+                    expert_weights = self.extract_expert_weight(base_model_state_dict, experts, param_name, expert_type)
+                    
+                    # sign majority vote
+                    sign_per_dim = expert_weights.sum(0, keepdim=True).sign()  # sum over N experts
+                    use_for_avg = expert_weights.sign() == sign_per_dim
+                    
+                    sum_param = (expert_weights * use_for_avg).sum(0)
+                    mask_overlaps = torch.stack([(e!=0).float() for e in (expert_weights * use_for_avg)],dim=0).sum(0)
+
+                    # sum_param = expert_weights.sum(0)
+                    # mask_overlaps = torch.stack([(e!=0).float() for e in expert_weights],dim=0).sum(0)
+                    
+                    mask_overlaps[mask_overlaps==0]=1
+                    final_param = sum_param/mask_overlaps
+
+                else:
+                    expert_weights = self.extract_expert_weight(base_model_state_dict, experts, param_name, expert_type)
+                    final_param = expert_weights.mean(0)
+
+                param_dict[param_name] = final_param
+            else:
+                param_dict[param_name] = base_w
+            
+
+        return param_dict
+
+    def load_mask(self, expert):
+        try:
+            print('trying to load mask from hf')
+            library_id = expert.training_config.library_id
+            from huggingface_hub import hf_hub_download
+            destination_type, f_name = library_id.split('://')
+            repo_id=('/').join(f_name.split('/')[:2])
+            filename = f'{expert.expert_info.expert_name}_mask.npz'
+            f_path=hf_hub_download(repo_id=repo_id, filename=filename)
+            Mask = np.load(f_path, allow_pickle=True)['arr'].item()
+        except:
+            print('trying to load mask from local dir')
+            m_loc = f'experiment/{expert.training_config.exp_name}/mask.npz'
+            Mask = np.load(m_loc, allow_pickle=True)['arr'].item()
+        return Mask
+
+    def convert_idx_2_mask(self, weight_idx, mat_dim):
+        m = np.zeros(mat_dim)
+        m[tuple(zip(*weight_idx))] = 1
+        return torch.FloatTensor(m)
+    
+
+    @torch.no_grad()
+    def transform(self, library):
+        experts, expert_type, base_expert, base_model, trainable_params = self.pre_configure(library)
+        base_model_state_dict = dict(base_model.state_dict())
+
+
+        from mttl.models.expert_model import ExpertModel
+        base_expert.training_config.device_map='cpu'
+        base_expert = ExpertModel(**vars(base_expert.training_config))
+        trainable_params = [n for n in base_expert.model.state_dict().keys() if ('sparse_layer' in n)] # allow to add weights and bias
+        assert trainable_params!=[], print('could not find sparse-layer modules')
+        base_model_state_dict = base_expert.model.state_dict()
+
+        param_dict = self.merge_expert(experts, trainable_params, base_expert, base_model_state_dict, expert_type)
+        base_expert.model.load_state_dict(param_dict)
+
+        return base_expert
+
+
+
+class UniformSparse(SparseSignFix):
+    """
+    Computes a uniform weight mixture across experts of a given library
+    """
+
+    def __init__(self, config: SparseSignFixConfig = None):
+        super().__init__(config or SparseSignFixConfig())
+        assert self.config.top_k > 0.0 and self.config.top_k <= 1.0
+
+    @torch.no_grad()
+    def merge_expert(self, experts, trainable_params, base_expert, base_model_state_dict, expert_type):
+        param_dict= {}
+        for param_name, base_w in base_expert.model.state_dict().items():
+            if param_name in trainable_params:
+                # ignore bias
+                if 'weight' in param_name:
+                    # stack the expert weights
+                    expert_weights = self.extract_expert_weight(base_model_state_dict, experts, param_name, expert_type)
+
+                    sum_param = expert_weights.sum(0)
+                    mask_overlaps = torch.stack([(e!=0).float() for e in expert_weights],dim=0).sum(0)
+                    
+                    mask_overlaps[mask_overlaps==0]=1
+                    final_param = sum_param/mask_overlaps
+
+                    layer_name = '.'.join(param_name.split('.')[:-2])
+                    updated_param_name = f'{layer_name}.weight'
+                    param_dict[updated_param_name] = final_param
+
+        return param_dict
+
+
+    @torch.no_grad()
+    def transform(self, library):
+        experts, expert_type, base_expert, base_model, trainable_params = self.pre_configure(library)
+        base_model_state_dict = dict(base_model.state_dict())
+
+
+        from mttl.models.expert_model import ExpertModel
+        base_expert.training_config.device_map='cpu'
+        base_expert = ExpertModel(**vars(base_expert.training_config))
+        trainable_params = [n for n in base_expert.model.state_dict().keys() if ('sparse_layer' in n)] # allow to add weights and bias
+        assert trainable_params!=[], print('could not find sparse-layer modules')
+        base_model_state_dict = base_expert.model.state_dict()
+
+        param_dict = self.merge_expert(experts, trainable_params, base_expert, base_model_state_dict, expert_type)
+        
+        config = base_expert.training_config
+        config.model_modifier = None  # load only the base model
+        config.device_map='cpu'
+        config.trainable_param_names='.*' # allows to train all linear layers
+        base_model = ExpertModel(**vars(config))
+
+        for param_name, base_w in base_model.model.state_dict().items():
+            if param_name in param_dict:
+                param_dict[param_name] = base_w + param_dict[param_name].to(base_w.dtype)
+            else:
+                param_dict[param_name] = base_w
+
+        assert set(base_model.model.state_dict().keys()) == set(param_dict.keys()), "Expert weights must have the same keys"
+        base_model.model.load_state_dict(param_dict)
+
+        return base_model
+
+
+@dataclass
+class ModelBreadcrumbsConfig(BaseMergeConfig):
+    merging_method: str = 'model_breadcrumbs_expert'
+    alpha: float = 0.4 # scaling factor # source : (a) https://openreview.net/pdf?id=6t0Kwf8-jrj (b) https://arxiv.org/pdf/2306.01708
+    beta: float = 0.9  # 90% beta=sparsity, keep-ratio=1-beta
+    gamma: float = 0.99 # mask out top 1%
+
+
+class ModelBreadcrumbs(BaseMerge):
+    """
+    Computes a uniform weight mixture across experts of a given library
+    """
+
+    def __init__(self, config: ModelBreadcrumbsConfig = None):
+        super().__init__(config or ModelBreadcrumbsConfig())
+
+    @torch.no_grad()
+    def compute_per_task_threhold(self, expert_vectors):
+
+        # take the absolute value:
+        expert_vectors = torch.stack(expert_vectors, dim=0).abs()
+        lower_topk = int(expert_vectors.size(1)* self.config.beta)
+        upper_topk = int(expert_vectors.size(1)* self.config.gamma)
+
+        per_exp_lth = topk_multiple_experts(expert_vectors, lower_topk, TH_type='lower')
+        per_exp_uth = topk_multiple_experts(expert_vectors, upper_topk, TH_type='upper')
+
+        return per_exp_lth, per_exp_uth
+    
+    @torch.no_grad()
+    def merge_expert(self, experts, expert_vectors, trainable_params, base_expert, base_model_state_dict, expert_type):
+        # Compute Threshold score, TH
+        per_exp_lth, per_exp_uth = self.compute_per_task_threhold(expert_vectors)
+        used, total = 0, 0
+        for param_name in base_model_state_dict.keys():
+            if param_name in trainable_params:
+                # stack the expert weights
+                expert_weights = self.extract_expert_weight(base_model_state_dict, experts, param_name, expert_type)
+
+                # keep weights over the threshold
+                Lower_TH = per_exp_lth.view(-1, *((1,) * (expert_weights.ndim - 1)))
+                Upper_TH = per_exp_uth.view(-1, *((1,) * (expert_weights.ndim - 1)))
+                
+                keep_mask = torch.logical_and(expert_weights.abs() > Lower_TH, expert_weights.abs() < Upper_TH) 
+                #keep_mask = (expert_weights.abs() > Lower_TH and expert_weights.abs() < Upper_TH) 
+                expert_weights = expert_weights * keep_mask
+
+                # base_weight + sum of the "filtered" task-vector
+                final_param = base_model_state_dict[param_name] + self.config.alpha * expert_weights.sum(0)
+                
+                
+                used += keep_mask.sum().item()
+                total += expert_weights.numel()
+
+                base_expert.expert_weights[param_name].data.copy_(final_param)
+            else:
+                base_expert.expert_weights[param_name]=copy.deepcopy(base_model_state_dict[param_name])
+        logger.info(
+            "Params used to compute Model-breadcrumb mean: {:.10f}%".format(100.0 * used / total)
+        )
+
+        return base_expert
