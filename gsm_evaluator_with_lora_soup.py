@@ -14,7 +14,7 @@ setup_logging()
 args = EvaluationConfig.parse()
 
 
-from mttl.datamodule.gsm_data_module import GsmDataConfig, Gsm8kHardDataModule
+from mttl.datamodule.gsm_data_module import GsmDataConfig, Gsm8kHardDataModule, Gsm8kDataModule
 from mttl.models.library.library_transforms import (
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
@@ -75,7 +75,10 @@ config = GsmDataConfig(
     data_dir=args.output_dir
 )
 
-dm = Gsm8kHardDataModule(config, for_generation=True)
+if args.gsm_dataset == "gsm-hard":
+    dm = Gsm8kHardDataModule(config, for_generation=True)
+elif args.gsm_dataset == "gsm":
+    dm = Gsm8kDataModule(config, for_generation=True)
 
 evaluator = GsmEvaluator(dm)
 

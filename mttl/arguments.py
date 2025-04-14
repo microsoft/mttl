@@ -594,6 +594,7 @@ class EvaluationConfig(MultiExpertConfig, TransformArgs):
     recompute_prototypes: bool = False
     gsm_template: str = "cot"
     lora_merge_after: bool= True
+    gsm_dataset: str = "gsm-hard"
     
 
 
