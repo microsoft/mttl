@@ -30,7 +30,6 @@ config = GsmDataConfig(
 )
 
 dm = Gsm8kHardDataModule(config, for_generation=True)
-breakpoint()
 
 evaluator = GsmEvaluator(dm)
 
@@ -43,7 +42,7 @@ else:
 
     if args.merge_or_route == "uniform":
         module.add_experts_from_library(args.library_id)
-        module.model.set_selector("lora", UniformSelectorConfig(lora_merge_after=True))
+        module.model.set_selector("lora", UniformSelectorConfig(lora_merge_after=args.lora_merge_after))
     elif args.expert_selection is not None:
         expert = library.get_expert(args.expert_selection)
         module.add_expert_instance(expert, is_default=True)
