@@ -73,7 +73,7 @@ def eval_qa(training_args):
     model_config = KMMoEModelConfig(
         base_model=training_args.model,
         selector_config=selector_class.from_training_config(training_args),
-        cpu_offload=training_args.cpu_offload,
+        eval_cpu_offload=training_args.cpu_offload,
     )
     model = KMMoEModel(
         model_config,
