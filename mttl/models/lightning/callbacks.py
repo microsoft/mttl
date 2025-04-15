@@ -58,7 +58,7 @@ class UpdateSparseMask(pl.Callback):
             self.update_counter += 1
             if self.update_counter % self.update_interval == 0:
                 # Update mask
-                self.update_mask(pl_module, batch)
+                self.update_mask(pl_module, batch, self.num_train_steps, self.update_counter)
 
     def on_train_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """
