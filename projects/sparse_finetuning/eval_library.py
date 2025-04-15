@@ -20,31 +20,16 @@ from mttl.models.expert_model import MultiExpertModel, ExpertModel
 from mttl.models.expert_config import ExpertConfig
 
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
-from mttl.models.library.library_transforms import (
-    LoRA_ab_LinearMergeConfig,
-    LoRA_ab_LinearMerge,
-    TiesMergeSimple,
-    TiesMergeSimpleConfig,
-    SparseWeightLinearMerge,
-    SparseWeightLinearMergeConfig, 
-    ModelBreadcrumbs, ModelBreadcrumbsConfig,
-    UniformMerge, UniformMergeConfig,
-    TaskArithmetic, TaskArithmeticConfig,
-    SparseSignFixConfig,  SparseSignFix,
-    SLERPMerge, SLERPMergeConfig
-)
-
 from mttl.models.lightning.callbacks import LossCallback
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.rouge_evaluator import RougeEvaluator
 from mttl.logging import TableLogger
 
 
-
 def eval_in_distribution(module, args: ExpertConfig, tasks: list):
     args.include_task_source = "*"
     transfer_table = TableLogger()
-    print(f'eval metric: {args.eval_metric}')
+    print(f"eval metric: {args.eval_metric}")
 
     for i, task in enumerate(tasks):
         args.finetune_task_name = task
@@ -101,7 +86,10 @@ def eval_in_distribution(module, args: ExpertConfig, tasks: list):
     )
     transfer_table.log_final_table()
 
-def eval_in_distribution_sparse_model(module, library, expert, args: ExpertConfig, tasks: list):
+
+def eval_in_distribution_sparse_model(
+    module, library, expert, args: ExpertConfig, tasks: list
+):
     args.include_task_source = "*"
     transfer_table = TableLogger()
 
@@ -162,6 +150,8 @@ def eval_in_distribution_sparse_model(module, library, expert, args: ExpertConfi
         }
     )
     transfer_table.log_final_table()
+
+
 def run_eval(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
 
@@ -173,7 +163,7 @@ def run_eval(args: ExpertConfig):
     remote_login(args.remote_token)
 
     # defult
-    selection = None # for debugging: selection = ['duorc_ParaphraseRC_extract_answer', 'wiki_qa_Topic_Prediction_Question_and_Answer_Pair']
+    selection = None  # for debugging: selection = ['duorc_ParaphraseRC_extract_answer', 'wiki_qa_Topic_Prediction_Question_and_Answer_Pair']
     if selection is None:
         exclude_phi_tasks = [
             "hellaswag_1_1_0",
@@ -184,7 +174,8 @@ def run_eval(args: ExpertConfig):
             "bool_q_1_0_0",
             "openbookqa_0_1_0",
         ]
-    else: exclude_phi_tasks = None
+    else:
+        exclude_phi_tasks = None
     print(args.library_id)
     library = ExpertLibrary.get_expert_library(
         repo_id=args.library_id,
@@ -192,7 +183,7 @@ def run_eval(args: ExpertConfig):
         exclude_selection=exclude_phi_tasks,
         destination_id=args.destination_library_id,
         selection=selection,
-        N_experts=args.N_experts
+        N_experts=args.N_experts,
     )
     an_expert = library[next(iter(library.keys()))]
     train_cfg = deepcopy(an_expert.training_config)
@@ -209,42 +200,51 @@ def run_eval(args: ExpertConfig):
 
     """ Parameter Merging Approaches """
     if args.merge_or_route == "uniform":
+        from mttl.models.library.merging_methods.uniform_merge import UniformMerge, UniformMergeConfig
         cfg = UniformMergeConfig(alpha=args.merge_alpha)
         module = UniformMerge(cfg).transform(library).to("cuda")
 
     elif args.merge_or_route == "ties":
+        from mttl.models.library.merging_methods.ties import TiesMergeSimple, TiesMergeSimpleConfig
         cfg = TiesMergeSimpleConfig(alpha=args.merge_alpha)
         module = TiesMergeSimple(cfg).transform(library).to("cuda")
 
     elif args.merge_or_route == "model_breadcrumbs":
+        from mttl.models.library.merging_methods.model_breadcrumbs import ModelBreadcrumbs, ModelBreadcrumbsConfig
         cfg = ModelBreadcrumbsConfig(alpha=args.merge_alpha)
         module = ModelBreadcrumbs(cfg).transform(library).to("cuda")
 
     elif args.merge_or_route == "task_arithmetic":
+        from mttl.models.library.merging_methods.task_arithmetic import TaskArithmetic, TaskArithmeticConfig
         cfg = TaskArithmeticConfig(alpha=args.merge_alpha)
         module = TaskArithmetic(cfg).transform(library).to("cuda")
 
-    elif args.merge_or_route == "sparse_signfix":
-        cfg = SparseSignFixConfig(alpha=args.merge_alpha)
-        module = SparseSignFix(cfg).transform(library).to("cuda")
-
     elif args.merge_or_route == "SLERP":
+        from mttl.models.library.merging_methods.slerp import SLERPMerge, SLERPMergeConfig
         module = SLERPMerge(SLERPMergeConfig()).transform(library).to("cuda")
 
     elif args.merge_or_route == "uniform_lora_before_op":
-        module = ABWeightedLinearMerge(ABWeightedLinearMergeConfig()).transform(library).to("cuda")
+        from mttl.models.library.merging_methods.LoRA_ablinear import LoRA_ab_LinearMerge, LoRA_ab_LinearMergeConfig
+        module = (
+            LoRA_ab_LinearMerge(LoRA_ab_LinearMergeConfig())
+            .transform(library)
+            .to("cuda")
+        )
 
-    elif args.merge_or_route in ["uniform_sparse_weight", "uniform_sparse_weight_oracle_routing"]:
-        """uuniform merge of all weights"""
+    elif args.merge_or_route in [
+        "uniform_sparse_weight",
+        "uniform_sparse_weight_oracle_routing",
+    ]:
+        """uniform merge of all weights"""
+        from mttl.models.library.merging_methods.sparse_merge import SparseWeightLinearMerge, SparseWeightLinearMergeConfig
         expert = SparseWeightLinearMerge(SparseWeightLinearMergeConfig())
         module = expert.transform(library).to("cuda")
 
         """masked weight for single task"""
         # TODO: remove provide weights of only one task
-        #expert = SparseWeightLinearMerge(SparseWeightLinearMergeConfig())
-        #expert_names = list(library.keys())   #TODO remove
-        #module = expert.transform_dummy(library, expert_names[0]).to("cuda") #TODO remove
-        
+        # expert = SparseWeightLinearMerge(SparseWeightLinearMergeConfig())
+        # expert_names = list(library.keys())   #TODO remove
+        # module = expert.transform_dummy(library, expert_names[0]).to("cuda") #TODO remove
 
     elif args.merge_or_route == "uniform_lora_after_op":
         # Here we merge the LoRA experts after the outer product we cannot really do it
@@ -273,9 +273,6 @@ def run_eval(args: ExpertConfig):
         # update config
         wandb.config.update({f"cmd_args_{k}": v for k, v in vars(args).items()})
 
-
-  
-
     if args.pipeline_eval_tasks in [
         "in_distribution",
     ]:
@@ -288,26 +285,27 @@ def run_eval(args: ExpertConfig):
         train_cfg.eval_metric = args.eval_metric
         train_cfg.subsample_dev = args.subsample_dev
 
-        #debug with in task: tasks = [expert_names[0]]    
-        if args.merge_or_route == 'uniform_sparse_weight_oracle_routing':
-            scores = eval_in_distribution_sparse_model(module, library, expert, train_cfg, tasks)
+        # debug with in task: tasks = [expert_names[0]]
+        if args.merge_or_route == "uniform_sparse_weight_oracle_routing":
+            scores = eval_in_distribution_sparse_model(
+                module, library, expert, train_cfg, tasks
+            )
         else:
             scores = eval_in_distribution(module, train_cfg, tasks)
-    
+
     elif args.pipeline_eval_tasks in [
         "out_distribution",
     ]:
         # give eval tasks in `finetune_task_name` argument
-        if isinstance(args.finetune_task_name,tuple):
+        if isinstance(args.finetune_task_name, tuple):
             tasks = list(args.finetune_task_name)
-        elif isinstance(args.finetune_task_name,str):
+        elif isinstance(args.finetune_task_name, str):
             tasks = args.finetune_task_name.split(",")
 
         train_cfg.eval_metric = args.eval_metric
         train_cfg.subsample_dev = args.subsample_dev
         scores = eval_in_distribution(module, train_cfg, tasks)
-    
-    
+
     else:
         if args.pipeline_eval_tasks == "all":
             args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
@@ -343,8 +341,6 @@ def run_eval(args: ExpertConfig):
             wandb.log({k: v.avg for k, v in metric_logger.meters.items()})
 
         wandb.finish()
-
-
 
 
 if __name__ == "__main__":
