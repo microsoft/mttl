@@ -316,9 +316,7 @@ def make_sparse_model_during_training(
 
     # (2) collect grads
     from mttl.models.utils import transfer_batch_to_device
-
-    # batch = transfer_batch_to_device(batch, module.device)
-    loss = module.forward(batch)
+    loss = module.forward(**batch).loss
     loss.backward()
 
     # (3) compute mask
