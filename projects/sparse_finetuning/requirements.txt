@@ -1,6 +1,7 @@
 pytorch-lightning==2.4.0
 transformers==4.44.2
-huggingface_hub==0.24.7
+# huggingface_hub==0.24.7
+huggingface_hub==0.26.2
 datasets==3.0.0
 bitsandbytes==0.43.3
 accelerate==0.34.2
