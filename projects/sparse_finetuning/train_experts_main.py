@@ -99,19 +99,19 @@ def run_multitask(args: ExpertConfig):
     # Iterative masking using Callback
     # ----------------------------------
     # NOTE: Don't move this block, it's important we call maskCallBack before others
-    if args.use_sparse_model:
-        assert len(args.task_names) == 1, print(
-            "sparse mask does not support more than 1 task"
-        )
-        maskCallback = UpdateSparseMask(
-            update_interval=100,
-            num_train_steps=len(dm.train_dataloader()),
-            save_mask_dir=args.library_id,
-            task_name=args.task_names[0],
-            parameter_selection_procedure=args.parameter_selection_procedure,
-        )  # "per_layer"/"model" use "per_layer" for default
-
-    callbacks.append(maskCallback)
+    if hasattr(args, 'use_sparse_model'):
+        if args.use_sparse_model:
+            assert len(args.task_names) == 1, print(
+                "sparse mask does not support more than 1 task"
+            )
+            maskCallback = UpdateSparseMask(
+                update_interval=100,
+                num_train_steps=len(dm.train_dataloader()),
+                save_mask_dir=args.library_id,
+                task_name=args.task_names[0],
+                parameter_selection_procedure=args.parameter_selection_procedure,
+            )  # "per_layer"/"model" use "per_layer" for default
+            callbacks.append(maskCallback)
 
     checkpoint_callback = LiveCheckpointCallback(
         dirpath=args.output_dir,

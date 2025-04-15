@@ -445,6 +445,9 @@ class SparseMaskConfig(ModifierConfig):
     BLOCK_SIZE: int = 16  # 16x
     sparse_cat: str = "block_sparse"  # ['block_sparse','regular_sparse']
     non_trainable_param_patterns: str = "sparse_layer.weight_mask"
+    use_sparse_model: bool = True
+    parameter_selection_procedure: str = 'per_layer' # {'per_layer': snip per layer, 'model': snip over model, 'weight_magnitude','gradient_magnitude','grow_and_drop'}
+
 
 
 @Modifier.register("sparse_mask_adapter", config_cls=SparseMaskConfig)
