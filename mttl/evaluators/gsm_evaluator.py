@@ -108,6 +108,7 @@ class GsmEvaluator(GenerativeEvaluator):
                 # convert it to code
                 code = outputs
                 data = {}
+                target = target.replace(",", "")
                 data["answer"] = float(target)
                 data["output_pred"] = code
                 file.write(json.dumps(data) + "\n")
