@@ -3,7 +3,7 @@ torch>=2.3.1
 datasets>=2.20.0
 pytorch-lightning>=2.3.3
 accelerate
-deepspeed
+deepspeed==0.16.5
 huggingface_hub>=0.26.2
 click
 wandb
