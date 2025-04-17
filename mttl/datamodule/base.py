@@ -1076,6 +1076,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         )
         dm = MathQADataModule(config, for_generation=for_generation)
     elif dataset == "mathqa_llama":
+        common_kwargs['train_on_inputs'] = True
         config = DatasetConfig(
             **common_kwargs,
         )
