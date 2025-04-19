@@ -2,28 +2,25 @@ from dataclasses import dataclass
 
 from mttl.datamodule.base import DataModule, DatasetConfig, DefaultCollator
 from mttl.models.library.dataset_library import DatasetLibrary
-
+from mttl.datamodule.prompts import get_task_instruction_math
 
 @dataclass
-class MathQADataConfig(DatasetConfig):
+class Math200kDataConfig(DatasetConfig):
     pass
 
 
 @dataclass
-class MathQADataModule(DataModule):
+class Math200kDataModule(DataModule):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def setup_dataset(self):
-        train_dataset = DatasetLibrary.pull_dataset_with_retry("meta-math/MetaMathQA")[
-            "train"
-        ]
-
+    def setup_dataset(self):    
+        dataset = DatasetLibrary.pull_dataset_with_retry("open-r1/OpenR1-Math-220k")
+        dataset = dataset['train']
         def map_example(example):
             # Use tokenizer.apply_chat_template() to format the conversation
             messages = [
-                {"role": "system", "content": "You are a helpful AI assistant."},
                 {
                     "role": "user",
                     "content": example["source"],
@@ -37,19 +34,20 @@ class MathQADataModule(DataModule):
                 messages,
                 tokenize=False,
             )
-
-            source = input.split("<|assistant|>")[0] + "<|assistant|>"
-            target = input.split("<|assistant|>")[1]
+            if "deepseek" in self.config.model:
+                source = input.split("<｜Assistant｜>")[0] + "<｜Assistant｜>"
+                target = input.split("<｜Assistant｜>")[1]
+            else:
+                source = input.split("<|assistant|>")[0] + "<|assistant|>"
+                target = input.split("<|assistant|>")[1]
             return {"source": source, "target": target}
-
-        train_dataset = train_dataset.rename_column("query", "source")
-        train_dataset = train_dataset.rename_column("response", "target")
-        # filter out the rows where the source is empty
-        train_dataset = train_dataset.filter(lambda x: x["source"] != "")
+        # they have their own source
+        dataset = dataset.rename_column("source","dataset_source")
+        dataset = dataset.rename_column("problem", "source") 
+        dataset = dataset.rename_column("solution", "target")
         if self.tokenizer.chat_template is not None:
-            train_dataset = train_dataset.map(map_example, num_proc=1)
-        self.train_dataset = train_dataset
-        self.test_dataset = self.dev_dataset = train_dataset
+            dataset = dataset.map(map_example, num_proc=1)
+        self.train_dataset = self.test_dataset = self.dev_dataset = dataset
 
         self.print_infos()
 
@@ -57,7 +55,7 @@ class MathQADataModule(DataModule):
     def collate_fn(self):
         return DefaultCollator(
             tokenizer=self.tokenizer,
-            padding="longest",
+            padding="longest", 
             max_input_length=self.config.max_input_length,
             max_output_length=self.config.max_output_length,
             return_tensors="pt",
@@ -67,10 +65,10 @@ class MathQADataModule(DataModule):
 
 
 if __name__ == "__main__":
-    config = MathQADataConfig(model="microsoft/Phi-3-mini-4k-instruct")
-    datamodule = MathQADataModule(config)
+    config = Math200kDataConfig(model="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B")
+    datamodule = Math200kDataModule(config)
     train_dataloader = datamodule.train_dataloader()
-    val_dataloder = datamodule.val_dataloader()
-    for batch in val_dataloder:
+    val_dataloader = datamodule.val_dataloader()
+    for batch in val_dataloader:
         print(batch)
         breakpoint()
