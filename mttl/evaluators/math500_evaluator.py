@@ -93,7 +93,7 @@ def extract_answer(output, mode='gen'):
         if matches:
             extracted_text = matches[-1]  # Take the last match
             if extracted_text == "YOUR_ANSWER":
-                extracted_text = output.split("ANSWER:")[-1].strip()
+                extracted_text = output.split("ANSWER:")[-1].replace("$","").strip()
             if mode in ['choose', 'qa']:
                 # Handle 'choose' mode
                 inner_pattern = r'\\text\{(.*)\}'
