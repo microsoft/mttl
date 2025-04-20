@@ -147,7 +147,7 @@ class Math500Evaluator(GenerativeEvaluator):
             
             for gen_text, question, target in zip(generated_texts, batch["sources_texts"], batch["labels_texts"]):
                 metric, pred_answer = evaluate_predictions(gen_text, target, "gen")
-                print(pred_answer)
+                print(pred_answer, target)
                 print(metric)
                 avg_em.append(metric['em'])
                 avg_acc.append(metric['acc'])
