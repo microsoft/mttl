@@ -93,7 +93,10 @@ def extract_answer(output, mode='gen'):
         if matches:
             extracted_text = matches[-1]  # Take the last match
             if extracted_text == "YOUR_ANSWER":
-                extracted_text = output.split("ANSWER:")[-1].replace("$","").strip()
+                if "ANSWER:" in output:
+                    extracted_text = output.split("ANSWER:")[-1].replace("$","").strip()
+                else:
+                    extracted_text = ""
             if mode in ['choose', 'qa']:
                 # Handle 'choose' mode
                 inner_pattern = r'\\text\{(.*)\}'
@@ -144,6 +147,7 @@ class Math500Evaluator(GenerativeEvaluator):
             
             for gen_text, question, target in zip(generated_texts, batch["sources_texts"], batch["labels_texts"]):
                 metric, pred_answer = evaluate_predictions(gen_text, target, "gen")
+                print(pred_answer)
                 print(metric)
                 avg_em.append(metric['em'])
                 avg_acc.append(metric['acc'])
