@@ -1,4 +1,5 @@
 import copy
+import torch
 from dataclasses import dataclass
 from mttl.logging import logger
 from mttl.models.library.expert_library import ExpertLibrary
@@ -6,9 +7,13 @@ from mttl.models.library.library_transforms import (
     LibraryTransform,
     LibraryTransformConfig,
 )
-from mttl.models.expert_model import ExpertModel
-from mttl.models.library.merging_methods import load_mask, convert_idx_2_mask
-import torch
+from mttl.models.expert_model import ExpertModel, ExpertModelConfig
+from mttl.models.utils import model_loader_helper
+from mttl.models.library.merging_methods.utils import (
+    load_mask,
+    convert_idx_2_mask,
+    dict_to_config,
+)
 
 
 @dataclass
@@ -31,7 +36,7 @@ class BaseMerge(LibraryTransform):
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
         logger.info("Averaging {} experts".format(len(experts)))
-        expert_type = experts[0].training_config.model_modifier
+        expert_type = experts[0].training_config["model_modifier"]
         if expert_type is None:
             expert_type = "FFT"
 
@@ -42,22 +47,12 @@ class BaseMerge(LibraryTransform):
         base_expert = copy.deepcopy(experts[0])
         base_expert.name = self.config.merging_method
         train_cfg = copy.deepcopy(base_expert.training_config)
-        train_cfg.device_map = "cpu"
+        train_cfg["device_map"] = "cpu"
         trainable_params = list(
             base_expert.expert_weights.keys()
         )  # 'model.layers.0.self_attn.o_proj.weight'
 
-        # get base model
-        from mttl.models.utils import model_loader_helper
-
-        base_model = model_loader_helper(
-            train_cfg.model,
-            load_in_8bit=train_cfg.load_in_8bit,
-            load_in_4bit=train_cfg.load_in_4bit,
-            device_map=getattr(train_cfg, "device_map", "cpu"),
-        )
-
-        return experts, expert_type, base_expert, base_model, trainable_params
+        return experts, expert_type, base_expert, trainable_params
 
     @torch.no_grad()
     def extract_expert_vector(
@@ -124,7 +119,6 @@ class BaseMerge(LibraryTransform):
             trainable_layers = [
                 ".".join(l.split(".")[:-1])
                 for l in list(base_expert.expert_weights.keys())
-                if "qkv_proj" in l
             ]  ## 'layers.0.self_attn.o_proj'
             trainable_layers = list(
                 dict.fromkeys(trainable_layers)
@@ -149,9 +143,8 @@ class BaseMerge(LibraryTransform):
         elif expert_type == "sparse_mask_adapter":
             base_expert = copy.deepcopy(experts[0])
             trainable_layers = [
-                ".".join(l.split(".")[:-1])
+                ".".join(l.split(".")[:-2])
                 for l in list(base_expert.expert_weights.keys())
-                if "qkv_proj" in l
             ]  ## 'layers.0.self_attn.o_proj'
             trainable_layers = list(
                 dict.fromkeys(trainable_layers)
@@ -163,15 +156,19 @@ class BaseMerge(LibraryTransform):
                 for l in trainable_layers:
                     # weight
                     m = convert_idx_2_mask(
-                        weight_idx=Mask[f"model.{l}"],
-                        mat_dim=expert.expert_weights[f"{l}.weight"].shape,
+                        weight_idx=Mask[f"model.{l}.sparse_layer"],
+                        mat_dim=expert.expert_weights[f"{l}.sparse_layer.weight"].shape,
                     )
                     expert.expert_weights[f"{l}.weight"] = (
-                        expert.expert_weights[f"{l}.weight"] * m
+                        expert.expert_weights[f"{l}.sparse_layer.weight"] * m
                     )
-                    expert.expert_weights[f"{l}.bias"] = expert.expert_weights[
-                        f"{l}.bias"
-                    ]
+                    del expert.expert_weights[f"{l}.sparse_layer.weight"]
+
+            # NOTE: sanity check, please don't remove this block
+            for expert in experts:
+                for l in list(expert.expert_weights.keys()):
+                    if "sparse_layer" in l:
+                        del expert.expert_weights[l]
 
     @torch.no_grad()
     def compute_per_task_threhold(self, expert_vectors):
@@ -193,8 +190,26 @@ class BaseMerge(LibraryTransform):
 
     @torch.no_grad()
     def transform(self, library):
-        experts, expert_type, base_expert, base_model, trainable_params = (
-            self.pre_configure(library)
+        experts, expert_type, base_expert, trainable_params = self.pre_configure(
+            library
+        )
+
+        train_cfg = base_expert.training_config
+        if isinstance(train_cfg, dict):
+            train_cfg = dict_to_config(train_cfg)
+        # change the config to load the base model
+        train_cfg.model_modifier = None  # load only the base model
+        train_cfg.device_map = "cpu"
+        train_cfg.trainable_param_names = ".*"  # change trainable param to all
+        base_model = model_loader_helper(
+            train_cfg.model,
+            load_in_8bit=train_cfg.load_in_8bit,
+            load_in_4bit=train_cfg.load_in_4bit,
+            device_map=getattr(train_cfg, "device_map", "cpu"),
+        )
+        # wrap base-model with `ExpertModel` class
+        base_model = ExpertModel(
+            ExpertModelConfig(base_model=base_model), **vars(train_cfg)
         )
         base_model_state_dict = dict(base_model.state_dict())
         # ----------------------------------------------------------------------
@@ -205,6 +220,7 @@ class BaseMerge(LibraryTransform):
         expert_vectors = self.extract_expert_vector(
             experts, expert_type, base_model_state_dict, trainable_params
         )
+        # merge weights of all the experts
         base_expert = self.merge_expert(
             experts,
             expert_vectors,
@@ -213,15 +229,9 @@ class BaseMerge(LibraryTransform):
             base_model_state_dict,
             expert_type,
         )
-        # load to base model:
-        config = base_expert.training_config
-        config.model_modifier = None  # load only the base model
-        config.device_map = "cpu"
-        config.trainable_param_names = ".*"  # allows to train all linear layers
-        base_model = ExpertModel(**vars(config))
         # load state_dict into model
-        assert set(base_model.model.state_dict().keys()) == set(
+        assert set(base_model.state_dict().keys()) == set(
             base_expert.expert_weights.keys()
         ), "Expert weights must have the same keys"
-        base_model.model.load_state_dict(base_expert._expert_weights)
+        base_model.load_state_dict(base_expert._expert_weights)
         return base_model
