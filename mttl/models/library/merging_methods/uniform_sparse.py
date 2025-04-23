@@ -6,7 +6,8 @@ from mttl.models.library.merging_methods.base_merge import (
     BaseMerge,
     BaseMergeConfig,
 )
-from mttl.models.expert_model import ExpertModel
+from mttl.models.expert_model import ExpertModel, ExpertModelConfig
+from mttl.models.lightning.expert_module import ExpertModule
 
 
 @dataclass
@@ -60,12 +61,15 @@ class UniformSparse(BaseMerge):
         experts, expert_type, base_expert, base_model, trainable_params = (
             self.pre_configure(library)
         )
+        an_expert = library[next(iter(library.keys()))]
         base_model_state_dict = dict(base_model.state_dict())
-        base_expert.training_config.device_map = "cpu"
-        base_expert = ExpertModel(**vars(base_expert.training_config))
+        base_expert.training_config["device_map"] = "cpu"
+        # base_expert = ExpertModel(ExpertModelConfig(base_model=base_model),
+        #                           **base_expert.training_config)
+        base_expert = ExpertModule(**base_expert.training_config)
         trainable_params = [
-            n for n in base_expert.model.state_dict().keys() if ("sparse_layer" in n)
-        ]  # allow to add weights and bias
+            n for n in an_expert.expert_weights.keys() if ("sparse_layer" in n)
+        ]
         assert trainable_params != [], print("could not find sparse-layer modules")
         base_model_state_dict = base_expert.model.state_dict()
 
@@ -77,9 +81,11 @@ class UniformSparse(BaseMerge):
         config.model_modifier = None  # load only the base model
         config.device_map = "cpu"
         config.trainable_param_names = ".*"  # allows to train all linear layers
-        base_model = ExpertModel(**vars(config))
+        merged_model = ExpertModel(
+            ExpertModelConfig(base_model=base_model), **vars(config)
+        )
 
-        for param_name, base_w in base_model.model.state_dict().items():
+        for param_name, base_w in merged_model.state_dict().items():
             if param_name in param_dict:
                 param_dict[param_name] = base_w + param_dict[param_name].to(
                     base_w.dtype
@@ -87,9 +93,9 @@ class UniformSparse(BaseMerge):
             else:
                 param_dict[param_name] = base_w
 
-        assert set(base_model.model.state_dict().keys()) == set(
+        assert set(merged_model.state_dict().keys()) == set(
             param_dict.keys()
         ), "Expert weights must have the same keys"
-        base_model.model.load_state_dict(param_dict)
+        merged_model.load_state_dict(param_dict)
 
-        return base_model
+        return merged_model

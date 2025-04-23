@@ -1,6 +1,13 @@
 import torch
 import numpy as np
 from huggingface_hub import hf_hub_download
+from types import SimpleNamespace
+
+
+def dict_to_config(d):
+    if isinstance(d, dict):
+        return SimpleNamespace(**d)
+    return d  # or raise an error
 
 
 def topk_multiple_experts(expert_vectors, topk, TH_type=None):
@@ -20,9 +27,10 @@ def topk_multiple_experts(expert_vectors, topk, TH_type=None):
 
 
 def load_mask(expert):
+    config = dict_to_config(expert.training_config)
     try:
         print("trying to load mask from hf")
-        library_id = expert.training_config.library_id
+        library_id = config.library_id
         destination_type, f_name = library_id.split("://")
         repo_id = ("/").join(f_name.split("/")[:2])
         filename = f"{expert.expert_info.expert_name}_mask.npz"
@@ -30,7 +38,7 @@ def load_mask(expert):
         Mask = np.load(f_path, allow_pickle=True)["arr"].item()
     except:
         print("trying to load mask from local dir")
-        m_loc = f"experiment/{expert.training_config.exp_name}/mask.npz"
+        m_loc = f"experiment/{config.exp_name}/mask.npz"
         Mask = np.load(m_loc, allow_pickle=True)["arr"].item()
     return Mask
 
@@ -39,3 +47,10 @@ def convert_idx_2_mask(weight_idx, mat_dim):
     m = np.zeros(mat_dim)
     m[tuple(zip(*weight_idx))] = 1
     return torch.FloatTensor(m)
+
+
+def get_nested_model(module):
+    current = module
+    while hasattr(current, "model"):
+        current = current.model
+    return current

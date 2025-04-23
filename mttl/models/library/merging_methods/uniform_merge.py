@@ -65,6 +65,6 @@ class UniformMerge(BaseMerge):
                 )
 
         logger.info(
-            "Params used to compute Ties mean: {:.10f}%".format(100.0 * used / total)
+            "Params used to compute merging: {:.10f}%".format(100.0 * used / total)
         )
         return base_expert

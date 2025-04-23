@@ -434,7 +434,6 @@ def make_sparse_model_during_training(
 
 
 def mod_forward(self, x):
-    # return torch.nn.functional.linear(x, self.weight * self.weight_mask, self.bias)
     return torch.nn.functional.linear(x, self.weight * self.weight_mask, None)
 
 
@@ -445,6 +444,9 @@ class SparseMaskConfig(ModifierConfig):
     BLOCK_SIZE: int = 16  # 16x
     sparse_cat: str = "block_sparse"  # ['block_sparse','regular_sparse']
     non_trainable_param_patterns: str = "sparse_layer.weight_mask"
+    use_sparse_model: bool = True
+    parameter_selection_procedure: str = 'per_layer' # {'per_layer': snip per layer, 'model': snip over model, 'weight_magnitude','gradient_magnitude','grow_and_drop'}
+
 
 
 @Modifier.register("sparse_mask_adapter", config_cls=SparseMaskConfig)
@@ -475,7 +477,6 @@ class SparseMaskAdapter(Modifier):
         self.sparse_layer.weight = nn.Parameter(
             torch.zeros(self.sparse_layer.weight.shape)
         )
-        # self.sparse_layer.bias = nn.Parameter(torch.zeros(self.sparse_layer.bias.shape))
 
         if self.sparse_cat == "block_sparse":
             self.BLOCK_SIZE = config.BLOCK_SIZE

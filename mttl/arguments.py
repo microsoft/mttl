@@ -337,9 +337,8 @@ class TrainingArgs(DataArgs):
     data_dir: str = os.getenv("TRAIN_DIR", "/tmp/")
     output_dir: str = os.getenv("OUTPUT_DIR", "./output")
 
-    # sparse training:
-    use_sparse_model: bool = False
-    parameter_selection_procedure: str = 'per_layer' # {'per_layer': snip per layer, 'model': snip over model, 'weight_magnitude','gradient_magnitude','grow_and_drop'}
+    # merging co-efficient
+    merge_alpha: float = 1.0
 
     # meta-tasks or group of tasks
     finetune_task_path: str = None
