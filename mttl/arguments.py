@@ -595,6 +595,7 @@ class EvaluationConfig(MultiExpertConfig, TransformArgs):
     gsm_template: str = "cot"
     lora_merge_after: bool= True
     gsm_dataset: str = "gsm-hard"
+    save_merged_model: bool = False
     
 
 
