@@ -20,9 +20,15 @@ else:
 if args.checkpoint is not None:
     checkpoint = torch.load(args.checkpoint, weights_only=False)["state_dict"]
     module.load_state_dict(checkpoint)
+
+
 if args.save_merged_model:
     module.model.merge_and_save_base_model(args.output_dir)
+    # clear the gpu memory
 
+    torch.cuda.empty_cache()
+    del module
+    del checkpoint
     tokenizer = AutoTokenizer.from_pretrained(args.output_dir)
     model = AutoModelForCausalLM.from_pretrained(args.output_dir)
     tokenizer.push_to_hub(args.save_merged_model)
