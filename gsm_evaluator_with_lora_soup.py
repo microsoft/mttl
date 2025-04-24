@@ -126,8 +126,6 @@ if args.checkpoint is not None:
     checkpoint = torch.load(args.checkpoint, weights_only=False)["state_dict"]
     module.load_state_dict(checkpoint)
 
-if args.save_merged_model:
-    module.model.merge_and_save_base_model(args.output_dir)
 
 ## evaluate
 result = evaluator.evaluate(module.model, split="test")
