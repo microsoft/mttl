@@ -28,18 +28,22 @@ def topk_multiple_experts(expert_vectors, topk, TH_type=None):
 
 def load_mask(expert):
     config = dict_to_config(expert.training_config)
-    try:
-        print("trying to load mask from hf")
-        library_id = config.library_id
-        destination_type, f_name = library_id.split("://")
-        repo_id = ("/").join(f_name.split("/")[:2])
-        filename = f"{expert.expert_info.expert_name}_mask.npz"
+    library_id = config.library_id
+    destination_type, f_name = library_id.split("://")
+    repo_id = ("/").join(f_name.split("/")[:2])
+    filename = f"{expert.expert_info.expert_name}_mask.npz"
+    if destination_type == "hf":
+        print("loading mask from hf")
         f_path = hf_hub_download(repo_id=repo_id, filename=filename)
         Mask = np.load(f_path, allow_pickle=True)["arr"].item()
-    except:
-        print("trying to load mask from local dir")
-        m_loc = f"experiment/{config.exp_name}/mask.npz"
+    elif destination_type == "local":
+        print("loading mask from local dir")
+        m_loc = f"{repo_id}/{filename}"
         Mask = np.load(m_loc, allow_pickle=True)["arr"].item()
+    else:
+        raise ValueError(
+            f"Unknown destination type {destination_type}. Only 'hf' and 'local' are supported."
+        )
     return Mask
 
 

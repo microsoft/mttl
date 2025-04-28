@@ -48,12 +48,13 @@ def save_mask(module, f_name):
     """
     to load the saved mask use the `load_mask` function
     """
-    mask_dict = {}
+    mask_dict = {"mask": {}, "mask_shape": {}}
     import numpy as np
 
     for m_name, m in dict(module.named_modules()).items():
         if "sparse_layer" in m_name:
-            mask_dict[m_name] = torch.nonzero(m.weight_mask.data).cpu().numpy()
+            mask_dict["mask"][m_name] = torch.nonzero(m.weight_mask.data).cpu().numpy()
+            mask_dict["mask_shape"][m_name] = m.weight_mask.shape
     destination_type = f_name.split("://")[0]
     # save in local dir
     if destination_type == "local":
@@ -289,13 +290,13 @@ def make_sparse_model_during_training(
     num_train_steps,
     current_steps,
     print_statement=False,
-    parameter_selection_procedure="per_layer",
+    parameter_selection_procedure="max_connection_sensitivity",
 ):
     from mttl.models.modifiers.sparse_mask import SparseMaskAdapter as SparseMaskModule
 
     assert parameter_selection_procedure in [
         "model",
-        "per_layer",
+        "max_connection_sensitivity",
         "layer_and_param",
         "weight_magnitude",
         "gradient_magnitude",
@@ -316,12 +317,13 @@ def make_sparse_model_during_training(
 
     # (2) collect grads
     from mttl.models.utils import transfer_batch_to_device
+
     loss = module.forward(**batch).loss
     loss.backward()
 
     # (3) compute mask
     # (a) layer-wise
-    if parameter_selection_procedure == "per_layer":
+    if parameter_selection_procedure == "max_connection_sensitivity":
         for idx, m in enumerate(module.modules()):
             if isinstance(m, SparseMaskModule):
                 if m.sparse_cat == "block_sparse":
@@ -445,8 +447,9 @@ class SparseMaskConfig(ModifierConfig):
     sparse_cat: str = "block_sparse"  # ['block_sparse','regular_sparse']
     non_trainable_param_patterns: str = "sparse_layer.weight_mask"
     use_sparse_model: bool = True
-    parameter_selection_procedure: str = 'per_layer' # {'per_layer': snip per layer, 'model': snip over model, 'weight_magnitude','gradient_magnitude','grow_and_drop'}
-
+    parameter_selection_procedure: str = (
+        "max_connection_sensitivity"  # {'max_connection_sensitivity': max connection sensitivity per layer, 'model': max connection sensitivity over model, 'weight_magnitude','gradient_magnitude','grow_and_drop'}
+    )
 
 
 @Modifier.register("sparse_mask_adapter", config_cls=SparseMaskConfig)

@@ -32,6 +32,27 @@ from projects.modular_llm.compute_transfer_matrix import (
 from mttl.models.lightning.callbacks import UpdateSparseMask
 
 
+@torch.no_grad()
+def add_sparse_model_to_library(checkpoint, expert_name, module, expert_library):
+    from mttl.models.library.expert import load_expert
+
+    expert_dump = load_expert(checkpoint, expert_name=expert_name)
+    if expert_dump.name is None:
+        raise ValueError(
+            "Expert name not found in checkpoint. Need to explicitly provide one as argument."
+        )
+    expert_dump.expert_weights_shape = {}
+    for m_name, m in dict(module.named_modules()).items():
+        if "sparse_layer" in m_name:
+            layer_name = ".".join(m_name.split(".")[1:])
+            assert f"{layer_name}.weight" in expert_dump.expert_weights
+            expert_dump.expert_weights[f"{layer_name}.weight"] = m.weight[
+                m.weight_mask != 0
+            ].data
+            expert_dump.expert_weights_shape[f"{layer_name}.weight"] = m.weight.shape
+    expert_library.add_expert(expert_dump, force=True)
+
+
 def create_transfer_matrix(args, checkpoint):
     ########################
     # create transfer matrix
@@ -99,7 +120,7 @@ def run_multitask(args: ExpertConfig):
     # Iterative masking using Callback
     # ----------------------------------
     # NOTE: Don't move this block, it's important we call maskCallBack before others
-    if hasattr(args, 'use_sparse_model'):
+    if hasattr(args, "use_sparse_model"):
         if args.use_sparse_model:
             assert len(args.task_names) == 1, print(
                 "sparse mask does not support more than 1 task"
@@ -109,8 +130,9 @@ def run_multitask(args: ExpertConfig):
                 num_train_steps=len(dm.train_dataloader()),
                 save_mask_dir=args.library_id,
                 task_name=args.task_names[0],
+                sparse_training_type="iterative",  # default: 'iterative', options: ['iterative', 'one_shot']
                 parameter_selection_procedure=args.parameter_selection_procedure,
-            )  # "per_layer"/"model" use "per_layer" for default
+            )  # use "max_connection_sensitivity" for default
             callbacks.append(maskCallback)
 
     checkpoint_callback = LiveCheckpointCallback(
@@ -209,7 +231,14 @@ def run_multitask(args: ExpertConfig):
 
             if isinstance(module, ExpertModule):
                 expert_name = args.expert_name or args.finetune_task_name
-                expert_library.add_expert_from_ckpt(checkpoint, expert_name, force=True)
+                if args.use_sparse_model:
+                    add_sparse_model_to_library(
+                        checkpoint, expert_name, module, expert_library
+                    )
+                else:
+                    expert_library.add_expert_from_ckpt(
+                        checkpoint, expert_name, force=True
+                    )
             else:
                 raise ValueError("Model class not recognized")
 

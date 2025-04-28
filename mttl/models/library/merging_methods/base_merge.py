@@ -155,13 +155,23 @@ class BaseMerge(LibraryTransform):
                 # for each layer compute the "average of the overlapped weight"
                 for l in trainable_layers:
                     # weight
-                    m = convert_idx_2_mask(
-                        weight_idx=Mask[f"model.{l}.sparse_layer"],
-                        mat_dim=expert.expert_weights[f"{l}.sparse_layer.weight"].shape,
+                    mask = convert_idx_2_mask(
+                        weight_idx=Mask["mask"][f"model.{l}.sparse_layer"],
+                        mat_dim=Mask["mask_shape"][f"model.{l}.sparse_layer"],
                     )
-                    expert.expert_weights[f"{l}.weight"] = (
-                        expert.expert_weights[f"{l}.sparse_layer.weight"] * m
+                    mask_idx = torch.where(mask.flatten() == 1)[0]
+                    expert_dtype = expert.expert_weights[
+                        f"{l}.sparse_layer.weight"
+                    ].dtype
+
+                    dense_weight = torch.zeros(
+                        Mask["mask_shape"][f"model.{l}.sparse_layer"],
+                        dtype=expert_dtype,
                     )
+                    dense_weight.flatten().scatter_add_(
+                        0, mask_idx, expert.expert_weights[f"{l}.sparse_layer.weight"]
+                    )
+                    expert.expert_weights[f"{l}.weight"] = dense_weight
                     del expert.expert_weights[f"{l}.sparse_layer.weight"]
 
             # NOTE: sanity check, please don't remove this block

@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import copy
 from dataclasses import dataclass
 from huggingface_hub import hf_hub_download
 from mttl.models.library.merging_methods.base_merge import (
@@ -8,6 +9,12 @@ from mttl.models.library.merging_methods.base_merge import (
 )
 from mttl.models.expert_model import ExpertModel, ExpertModelConfig
 from mttl.models.lightning.expert_module import ExpertModule
+from mttl.models.utils import model_loader_helper
+from mttl.models.library.merging_methods.utils import (
+    load_mask,
+    convert_idx_2_mask,
+    dict_to_config,
+)
 
 
 @dataclass
@@ -30,72 +37,70 @@ class UniformSparse(BaseMerge):
 
     @torch.no_grad()
     def merge_expert(
-        self, experts, trainable_params, base_expert, base_model_state_dict, expert_type
+        self,
+        experts,
+        trainable_params,
+        base_expert,
+        base_model_state_dict,
+        expert_type,
     ):
-        param_dict = {}
-        for param_name, base_w in base_expert.model.state_dict().items():
+        for param_name in base_model_state_dict.keys():
             if param_name in trainable_params:
-                # ignore bias
-                if "weight" in param_name:
-                    # stack the expert weights
-                    expert_weights = self.extract_expert_weight(
-                        base_model_state_dict, experts, param_name, expert_type
-                    )
+                # stack the expert weights
+                expert_weights = self.extract_expert_weight(
+                    base_model_state_dict, experts, param_name, expert_type
+                )
 
-                    sum_param = expert_weights.sum(0)
-                    mask_overlaps = torch.stack(
-                        [(e != 0).float() for e in expert_weights], dim=0
-                    ).sum(0)
+                sum_param = expert_weights.sum(0)
+                mask_overlaps = torch.stack(
+                    [(e != 0).float() for e in expert_weights], dim=0
+                ).sum(0)
 
-                    mask_overlaps[mask_overlaps == 0] = 1
-                    final_param = sum_param / mask_overlaps
+                mask_overlaps[mask_overlaps == 0] = 1
+                final_param = sum_param / mask_overlaps
+                final_param = (
+                    base_model_state_dict[param_name] + self.config.alpha * final_param
+                )
 
-                    layer_name = ".".join(param_name.split(".")[:-2])
-                    updated_param_name = f"{layer_name}.weight"
-                    param_dict[updated_param_name] = final_param
+                base_expert.expert_weights[param_name].data.copy_(final_param)
+            else:
+                base_expert.expert_weights[param_name] = copy.deepcopy(
+                    base_model_state_dict[param_name]
+                )
 
-        return param_dict
+        return base_expert
 
     @torch.no_grad()
     def transform(self, library):
-        experts, expert_type, base_expert, base_model, trainable_params = (
-            self.pre_configure(library)
+        experts, expert_type, base_expert, trainable_params = self.pre_configure(
+            library
         )
-        an_expert = library[next(iter(library.keys()))]
-        base_model_state_dict = dict(base_model.state_dict())
-        base_expert.training_config["device_map"] = "cpu"
-        # base_expert = ExpertModel(ExpertModelConfig(base_model=base_model),
-        #                           **base_expert.training_config)
-        base_expert = ExpertModule(**base_expert.training_config)
-        trainable_params = [
-            n for n in an_expert.expert_weights.keys() if ("sparse_layer" in n)
-        ]
-        assert trainable_params != [], print("could not find sparse-layer modules")
-        base_model_state_dict = base_expert.model.state_dict()
 
-        param_dict = self.merge_expert(
+        train_cfg = base_expert.training_config
+        if isinstance(train_cfg, dict):
+            train_cfg = dict_to_config(train_cfg)
+        # change the config to load the base model
+        train_cfg.model_modifier = None  # load only the base model
+        train_cfg.device_map = "cpu"
+        train_cfg.trainable_param_names = ".*"  # change trainable param to all
+        base_model = model_loader_helper(
+            train_cfg.model,
+            load_in_8bit=train_cfg.load_in_8bit,
+            load_in_4bit=train_cfg.load_in_4bit,
+            device_map=getattr(train_cfg, "device_map", "cpu"),
+        )
+        # wrap base-model with `ExpertModel` class
+        base_model = ExpertModel(
+            ExpertModelConfig(base_model=base_model), **vars(train_cfg)
+        )
+        base_model_state_dict = dict(base_model.state_dict())
+
+        base_expert = self.merge_expert(
             experts, trainable_params, base_expert, base_model_state_dict, expert_type
         )
-
-        config = base_expert.training_config
-        config.model_modifier = None  # load only the base model
-        config.device_map = "cpu"
-        config.trainable_param_names = ".*"  # allows to train all linear layers
-        merged_model = ExpertModel(
-            ExpertModelConfig(base_model=base_model), **vars(config)
-        )
-
-        for param_name, base_w in merged_model.state_dict().items():
-            if param_name in param_dict:
-                param_dict[param_name] = base_w + param_dict[param_name].to(
-                    base_w.dtype
-                )
-            else:
-                param_dict[param_name] = base_w
-
-        assert set(merged_model.state_dict().keys()) == set(
-            param_dict.keys()
+        # load state_dict into model
+        assert set(base_model.state_dict().keys()) == set(
+            base_expert.expert_weights.keys()
         ), "Expert weights must have the same keys"
-        merged_model.load_state_dict(param_dict)
-
-        return merged_model
+        base_model.load_state_dict(base_expert._expert_weights)
+        return base_model

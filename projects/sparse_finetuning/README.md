@@ -1,5 +1,4 @@
-
-
+# Sparse training:
 
 * Execute the following command to train locally
 ```
@@ -23,4 +22,4 @@ projects/sparse_finetuning/scripts/local/run.sh "full" "local://temp/test_librar
 * Notes:
     * conda create -n mttl python=3.11
     * conda activate mttl
-    * pip install -r requirements.txt
+    * pip install -r projects/sparse_finetuning/requirements.txt

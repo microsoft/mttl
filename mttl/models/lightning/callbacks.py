@@ -20,52 +20,91 @@ from mttl.evaluators import MMLUEvaluator
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.evaluators import Evaluator
 from mttl.logging import logger
-from mttl.models.modifiers.sparse_mask import make_sparse_model_during_training, save_mask
+from mttl.models.modifiers.sparse_mask import (
+    make_sparse_model_during_training,
+    save_mask,
+)
 from mttl.models.utils import transfer_batch_to_device
 
 DEBUG = False
 
 
 class UpdateSparseMask(pl.Callback):
-    def __init__(self, update_interval=5, 
-                 num_train_steps=None, 
-                 dm=None, 
-                 save_mask_dir=None, 
-                 task_name=None, 
-                 parameter_selection_procedure='per_layer'):
+    def __init__(
+        self,
+        update_interval=100,
+        num_train_steps=None,
+        dm=None,
+        save_mask_dir=None,
+        task_name=None,
+        sparse_training_type="iterative",
+        parameter_selection_procedure="max_connection_sensitivity",
+    ):
         super().__init__()
         self.update_interval = update_interval
         self.update_counter = 0
         self.dm = dm
-        self.save_mask_dir = save_mask_dir 
+        self.save_mask_dir = save_mask_dir
         self.task_name = task_name
-        self.num_train_steps=num_train_steps
-        assert parameter_selection_procedure in ['model','per_layer','layer_and_param', 'weight_magnitude', 'gradient_magnitude','grow_and_drop'], "choose the right `parameter_selection_procedure`"
-        self.parameter_selection_procedure=parameter_selection_procedure
+        self.num_train_steps = num_train_steps
+        assert parameter_selection_procedure in [
+            "model",
+            "max_connection_sensitivity",
+            "layer_and_param",
+            "weight_magnitude",
+            "gradient_magnitude",
+            "grow_and_drop",
+        ], "choose the right `parameter_selection_procedure`"
+        self.parameter_selection_procedure = parameter_selection_procedure
+        assert sparse_training_type in [
+            "iterative",
+            "one_shot",
+        ], "choose the right `sparse_training_type`"
+        self.sparse_training_type = sparse_training_type
 
     def update_mask(self, pl_module, batch, num_train_steps, current_steps):
-        make_sparse_model_during_training(pl_module, 
-                                          batch, 
-                                          num_train_steps, 
-                                          current_steps, 
-                                          parameter_selection_procedure=self.parameter_selection_procedure)
+        make_sparse_model_during_training(
+            pl_module,
+            batch,
+            num_train_steps,
+            current_steps,
+            parameter_selection_procedure=self.parameter_selection_procedure,
+        )
 
     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
-        """
-        only updates the mask on epoch=0
-        """
-        if trainer.current_epoch == 0:
-            self.update_counter += 1
-            if self.update_counter % self.update_interval == 0:
-                # Update mask
-                self.update_mask(pl_module, batch, self.num_train_steps, self.update_counter)
+        if self.sparse_training_type == "iterative":
+            """
+            only updates the mask on epoch=0: iteratively update only on the first epoch(=0)
+            """
+            if trainer.current_epoch == 0:
+                self.update_counter += 1
+                if self.update_counter % self.update_interval == 0:
+                    # Update mask
+                    self.update_mask(
+                        pl_module, batch, self.num_train_steps, self.update_counter
+                    )
+
+        elif self.sparse_training_type == "one_shot":
+            """
+            update the mask once: on the first batch after 1 epoch of training
+            """
+            if trainer.current_epoch == 1 and self.update_counter == 0:
+                self.update_mask(
+                    pl_module, batch, self.num_train_steps, self.update_counter
+                )
+                self.update_counter += 1
+        else:
+            raise ValueError(
+                f"Unknown sparse training type: {self.sparse_training_type}"
+            )
 
     def on_train_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """
         save mask end of training
         """
-        f_name = f'{self.save_mask_dir}/{self.task_name}_mask'
+        f_name = f"{self.save_mask_dir}/{self.task_name}_mask"
         save_mask(pl_module, f_name)
+
 
 class LiveCheckpointCallback(pl.Callback):
     """A better model checkpoint callback, that works in synchrony with LiveLogMixin."""
