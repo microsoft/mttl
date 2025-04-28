@@ -25,7 +25,7 @@ def test_sm_adapter():
     keep_ratio_list = [0.05, 0.1]
     sparse_cat_list = ["regular_sparse", "block_sparse"]
     mask_cat_list = ["scatter", None]
-    parameter_selection_procedure_list = ["per_layer", "model"]
+    parameter_selection_procedure_list = ["max_connection_sensitivity", "model"]
 
     for (
         sparse_cat,
@@ -126,7 +126,7 @@ def test_sm_adapter():
         assert outputs != new_outputs
 
         # assert sparsification works as intended
-        if parameter_selection_procedure == "per_layer":
+        if parameter_selection_procedure == "max_connection_sensitivity":
             # assert each layer is properly sparse
             for m in model.modules():
                 if isinstance(m, SparseMaskAdapter):
@@ -166,7 +166,7 @@ def test_load_expert_from_checkpoint():
         modify_layers="k_proj",
         sparse_cat="regular_sparse",
         keep_ratio=0.05,
-        mask_cat="per_layer",
+        mask_cat="max_connection_sensitivity",
     )
 
     model = ExpertModel(
@@ -208,7 +208,7 @@ def test_load_expert_from_checkpoint():
 
     # calculates loss. calcs gradients for weight_mask and updates mask.
     make_sparse_model_during_training(
-        model, batch, parameter_selection_procedure="per_layer"
+        model, batch, parameter_selection_procedure="max_connection_sensitivity"
     )
 
     new_outputs = model(**batch)
