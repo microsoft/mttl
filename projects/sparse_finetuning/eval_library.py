@@ -200,31 +200,55 @@ def run_eval(args: ExpertConfig):
 
     """ Parameter Merging Approaches """
     if args.merge_or_route == "uniform":
-        from mttl.models.library.merging_methods.uniform_merge import UniformMerge, UniformMergeConfig
+        from mttl.models.library.merging_methods.uniform_merge import (
+            UniformMerge,
+            UniformMergeConfig,
+        )
+
         cfg = UniformMergeConfig(alpha=args.merge_alpha)
         module = UniformMerge(cfg).transform(library).to("cuda")
 
     elif args.merge_or_route == "ties":
-        from mttl.models.library.merging_methods.ties import TiesMergeSimple, TiesMergeSimpleConfig
+        from mttl.models.library.merging_methods.ties import (
+            TiesMergeSimple,
+            TiesMergeSimpleConfig,
+        )
+
         cfg = TiesMergeSimpleConfig(alpha=args.merge_alpha)
         module = TiesMergeSimple(cfg).transform(library).to("cuda")
 
     elif args.merge_or_route == "model_breadcrumbs":
-        from mttl.models.library.merging_methods.model_breadcrumbs import ModelBreadcrumbs, ModelBreadcrumbsConfig
+        from mttl.models.library.merging_methods.model_breadcrumbs import (
+            ModelBreadcrumbs,
+            ModelBreadcrumbsConfig,
+        )
+
         cfg = ModelBreadcrumbsConfig(alpha=args.merge_alpha)
         module = ModelBreadcrumbs(cfg).transform(library).to("cuda")
 
     elif args.merge_or_route == "task_arithmetic":
-        from mttl.models.library.merging_methods.task_arithmetic import TaskArithmetic, TaskArithmeticConfig
+        from mttl.models.library.merging_methods.task_arithmetic import (
+            TaskArithmetic,
+            TaskArithmeticConfig,
+        )
+
         cfg = TaskArithmeticConfig(alpha=args.merge_alpha)
         module = TaskArithmetic(cfg).transform(library).to("cuda")
 
     elif args.merge_or_route == "SLERP":
-        from mttl.models.library.merging_methods.slerp import SLERPMerge, SLERPMergeConfig
+        from mttl.models.library.merging_methods.slerp import (
+            SLERPMerge,
+            SLERPMergeConfig,
+        )
+
         module = SLERPMerge(SLERPMergeConfig()).transform(library).to("cuda")
 
     elif args.merge_or_route == "uniform_lora_before_op":
-        from mttl.models.library.merging_methods.LoRA_ablinear import LoRA_ab_LinearMerge, LoRA_ab_LinearMergeConfig
+        from mttl.models.library.merging_methods.LoRA_ablinear import (
+            LoRA_ab_LinearMerge,
+            LoRA_ab_LinearMergeConfig,
+        )
+
         module = (
             LoRA_ab_LinearMerge(LoRA_ab_LinearMergeConfig())
             .transform(library)
@@ -236,15 +260,13 @@ def run_eval(args: ExpertConfig):
         "uniform_sparse_weight_oracle_routing",
     ]:
         """uniform merge of all weights"""
-        from mttl.models.library.merging_methods.sparse_merge import SparseWeightLinearMerge, SparseWeightLinearMergeConfig
-        expert = SparseWeightLinearMerge(SparseWeightLinearMergeConfig())
-        module = expert.transform(library).to("cuda")
+        from mttl.models.library.merging_methods.uniform_sparse import (
+            UniformSparse,
+            UniformSparsConfig,
+        )
 
-        """masked weight for single task"""
-        # TODO: remove provide weights of only one task
-        # expert = SparseWeightLinearMerge(SparseWeightLinearMergeConfig())
-        # expert_names = list(library.keys())   #TODO remove
-        # module = expert.transform_dummy(library, expert_names[0]).to("cuda") #TODO remove
+        expert = UniformSparse(UniformSparsConfig())
+        module = expert.transform(library).to("cuda")
 
     elif args.merge_or_route == "uniform_lora_after_op":
         # Here we merge the LoRA experts after the outer product we cannot really do it
