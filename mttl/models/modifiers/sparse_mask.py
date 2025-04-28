@@ -12,9 +12,75 @@ import bitsandbytes as bnb
 import numpy as np
 import torch
 from torch import nn
-
+from huggingface_hub import hf_hub_download
 from mttl.models.modifiers.base import Modifier, ModifierConfig
 from mttl.utils import logger
+from collections import OrderedDict
+
+
+def hook_factory(keep_mask):
+    """
+    The hook function can't be defined directly here because of Python's
+    late binding which would result in all hooks getting the very last
+    mask! Getting it through another function forces early binding.
+    """
+
+    def hook(grads):
+        return grads * keep_mask
+
+    return hook
+
+
+def load_mask(f_name):
+    destination_type, _ = f_name.split("://")
+    if destination_type == "hf":
+        destination_type, f_name = f_name.split("://")
+        repo_id = ("/").join(f_name.split("/")[:2])
+        task_name = f_name.split("/")[-1]
+        f_path = hf_hub_download(repo_id=repo_id, filename=task_name)
+        mask_dict = np.load(f_path, allow_pickle=True)["arr"]
+    elif destination_type == "local":
+        mask_dict = np.load(f"{f_name}.npz", allow_pickle=True)["arr"]
+    return mask_dict
+
+
+def save_mask(module, f_name):
+    """
+    to load the saved mask use the `load_mask` function
+    """
+    mask_dict = {"mask": {}, "mask_shape": {}}
+    import numpy as np
+
+    for m_name, m in dict(module.named_modules()).items():
+        if "sparse_layer" in m_name:
+            mask_dict["mask"][m_name] = torch.nonzero(m.weight_mask.data).cpu().numpy()
+            mask_dict["mask_shape"][m_name] = m.weight_mask.shape
+    destination_type = f_name.split("://")[0]
+    # save in local dir
+    if destination_type == "local":
+        destination_type, f_name = f_name.split("://")
+        np.savez_compressed(f"./{f_name}.npz", arr=mask_dict)
+
+    # upload to hf
+    elif destination_type == "hf":
+        from huggingface_hub.hf_api import upload_file as hf_upload_file
+
+        destination_type, f_name = f_name.split("://")
+        repo_id = ("/").join(f_name.split("/")[:2])
+        task_name = f_name.split("/")[-1]
+        path_in_repo = f"{task_name}.npz"
+        os.makedirs("./temp/test_library/", exist_ok=True)
+        local_file_path = f"./temp/test_library/{path_in_repo}"
+        np.savez_compressed(local_file_path, arr=mask_dict)
+
+        hf_upload_file(
+            path_or_fileobj=local_file_path,  # path saved in local machine
+            path_in_repo=path_in_repo,  # path with in repo
+            repo_id=repo_id,
+        )  #
+    # exact local dir is provided
+    else:
+        np.savez_compressed(f"./{f_name}.npz", arr=mask_dict)
 
 
 class MatrixBlockIndexer:
@@ -116,15 +182,138 @@ def get_regular_sparse_mask(m):
     return keep_masks
 
 
+def get_gradient_magnitude_based_sparse_mask(m):
+    """
+    parameter-wise sparse calculation based on gradient-magnitude
+    """
+    num_params_to_keep = int(torch.numel(m.sparse_layer.weight) * m.keep_ratio)
+    threshold, _ = torch.topk(
+        m.sparse_layer.weight.grad.abs().flatten(), num_params_to_keep, sorted=True
+    )
+    accepted_score = threshold[-1]
+    keep_masks = (m.sparse_layer.weight.grad.abs() >= accepted_score).float()
+
+    return keep_masks
+
+
+def get_weight_magnitude_based_sparse_mask(m):
+    """
+    parameter-wise sparse calculation based on weight-magnitude
+    """
+    num_params_to_keep = int(torch.numel(m.sparse_layer.weight) * m.keep_ratio)
+    threshold, _ = torch.topk(
+        m.sparse_layer.weight.abs().flatten(), num_params_to_keep, sorted=True
+    )
+    accepted_score = threshold[-1]
+    keep_masks = (m.sparse_layer.weight.abs() >= accepted_score).float()
+
+    return keep_masks
+
+
+def get_grow_drop_based_sparse_mask(m, num_train_steps, current_steps):
+    """
+    parameter-wise sparse calculation based on grow and prune
+    """
+    gamma = 0.2  # peak_replacement_rate
+    grow_prune_frac = gamma * (1 - current_steps / num_train_steps)
+
+    def random_mask():
+        keep_masks = torch.zeros_like(m.sparse_layer.weight)
+        num_params_to_keep = int(torch.numel(m.sparse_layer.weight) * m.keep_ratio)
+        ones_idx = torch.randperm(torch.numel(m.sparse_layer.weight))[
+            :num_params_to_keep
+        ]
+        keep_masks.flatten()[ones_idx] = 1
+        return keep_masks
+
+    def grad_magnitude_mask():
+        num_params_to_keep = int(torch.numel(m.sparse_layer.weight) * m.keep_ratio)
+        threshold, _ = torch.topk(
+            (m.sparse_layer.weight.grad).abs().flatten(),
+            num_params_to_keep,
+            sorted=True,
+        )
+        accepted_score = threshold[-1]
+        keep_masks = (m.sparse_layer.weight.grad.abs() >= accepted_score).float()
+        return keep_masks
+
+    if current_steps == 0:
+        keep_masks = random_mask()
+
+    else:
+        # grow using largest magnitude
+        num_params_to_keep_or_drop = int(
+            torch.numel(m.sparse_layer.weight) * m.keep_ratio * grow_prune_frac
+        )
+        mask_candidate = (1 - m.sparse_layer.weight_mask_old).to(
+            m.sparse_layer.weight.device
+        )
+        threshold, _ = torch.topk(
+            (m.sparse_layer.weight.grad * mask_candidate).abs().flatten(),
+            num_params_to_keep_or_drop,
+            sorted=True,
+        )
+        accepted_score = threshold[-1]
+        if accepted_score == 0:
+            keep_masks = random_mask()
+        else:
+            grow_masks = (
+                (m.sparse_layer.weight.grad.abs() * mask_candidate) >= accepted_score
+            ).float()
+            # prune find the weights changed the least: lowest weight magnitude
+            threshold, _ = torch.topk(
+                (m.sparse_layer.weight * m.sparse_layer.weight_mask).abs().flatten(),
+                num_params_to_keep_or_drop,
+                largest=False,
+                sorted=True,
+            )
+            accepted_score = threshold[-1]
+            prune_masks = (
+                (m.sparse_layer.weight * m.sparse_layer.weight_mask).abs()
+                <= accepted_score
+            ).float()
+            # add 1s from grow mask to existing keep mask
+            keep_masks = m.sparse_layer.weight_mask + grow_masks
+            # remove 1s from prune mask, i.e., set to 0 where prune mask is 1)
+            keep_masks = m.sparse_layer.weight_mask - prune_masks
+            m.sparse_layer.weight.data = (
+                m.sparse_layer.weight.data * prune_masks
+            )  # dropped weights are set to 0
+            assert keep_masks.max() == 1 and keep_masks.min() == 0
+
+    return keep_masks
+
+
 def make_sparse_model_during_training(
-    module, batch, parameter_selection_procedure="per_layer"
+    module,
+    batch,
+    num_train_steps,
+    current_steps,
+    print_statement=False,
+    parameter_selection_procedure="max_connection_sensitivity",
 ):
     from mttl.models.modifiers.sparse_mask import SparseMaskAdapter as SparseMaskModule
 
+    assert parameter_selection_procedure in [
+        "model",
+        "max_connection_sensitivity",
+        "layer_and_param",
+        "weight_magnitude",
+        "gradient_magnitude",
+        "grow_and_drop",
+    ], "choose the right `parameter_selection_procedure`"
     # (1) preprocess the sparse-layers
     for m in module.modules():
         if isinstance(m, SparseMaskModule):
-            m.preprocess_for_mask_update()
+            if parameter_selection_procedure in ["grow_and_drop"]:
+                m.preprocess_for_grow_and_drop_mask_update()
+            elif parameter_selection_procedure in [
+                "weight_magnitude",
+                "gradient_magnitude",
+            ]:
+                m.preprocess_for_weight_and_grad_magnitude()
+            else:
+                m.preprocess_for_mask_update()
 
     # (2) collect grads
     from mttl.models.utils import transfer_batch_to_device
@@ -132,18 +321,18 @@ def make_sparse_model_during_training(
     loss = module.forward(**batch).loss
     loss.backward()
 
-    assert parameter_selection_procedure in [
-        "model",
-        "per_layer",
-    ], "choose the right `parameter_selection_procedure`"
-
     # (3) compute mask
     # (a) layer-wise
-    if parameter_selection_procedure == "per_layer":
-        for m in module.modules():
+    if parameter_selection_procedure == "max_connection_sensitivity":
+        for idx, m in enumerate(module.modules()):
             if isinstance(m, SparseMaskModule):
                 if m.sparse_cat == "block_sparse":
                     keep_masks = get_block_mask(m)
+                    # check: sample noise-block-idx
+                    # block_noise_idx = sample(m.nextK_idx)
+                    # noise_masks_idx = [m.BlockwiseConvolution.get_block_indices(i) for i in block_noise_idx]
+                    # noise_masks_idx=torch.stack(noise_masks_idx).flatten().to(m.layer.weight.device)
+                    # print('check')
                 elif m.sparse_cat == "regular_sparse":
                     keep_masks = get_regular_sparse_mask(m)
 
@@ -151,10 +340,13 @@ def make_sparse_model_during_training(
                 # (a) reverse the require-grad: Turn on for `weight` and turn-off for `weight_mask`
                 # (b) convert `module` back to `cpu`
                 m.revert_weight_grad_and_update_mask(keep_masks)
+                # check
+                # print(f'Layer {idx} sparsity', (keep_masks.sum()/keep_masks.numel()).data.cpu().numpy())
+                # if save_mask_indx: mask_indx.append(torch.nonzero(keep_masks).data.cpu().numpy()) # nonzero finds the ind
 
     # (b) based on whole-net
-    # b.1 compute score
     elif parameter_selection_procedure == "model":
+        # b.1 compute score
         num_params_to_keep = 0
         grads = []
         for m in module.modules():
@@ -166,7 +358,6 @@ def make_sparse_model_during_training(
                     torch.numel(m.sparse_layer.weight_mask) * m.keep_ratio
                 )
                 grads.append(m.sparse_layer.weight_mask.grad.flatten().cpu())
-
         threshold, _ = torch.topk(
             torch.stack(grads).flatten(), num_params_to_keep, sorted=True
         )
@@ -175,11 +366,77 @@ def make_sparse_model_during_training(
         for m in module.modules():
             if isinstance(m, SparseMaskModule):
                 keep_masks = (m.sparse_layer.weight_mask.grad >= accepted_score).float()
+                if print_statement:
+                    print(
+                        "sparsity",
+                        (keep_masks.sum() / m.sparse_layer.weight_mask.numel()) * 100,
+                        "expected",
+                        m.keep_ratio * 100,
+                    )
+                m.revert_weight_grad_and_update_mask(keep_masks)
+
+    # drop layer and params
+    elif parameter_selection_procedure == "layer_and_param":
+        num_params_to_keep = 0
+        grads = []
+        for m in module.modules():
+            if isinstance(m, SparseMaskModule):
+                assert (
+                    m.sparse_cat == "regular_sparse"
+                ), "parameter_selection_procedure over `model` is not implemented for `block_sparse`"
+                num_params_to_keep += int(
+                    torch.numel(m.sparse_layer.weight_mask) * m.keep_ratio
+                )
+                grads.append(m.sparse_layer.weight_mask.grad.flatten().cpu())
+        threshold, _ = torch.topk(
+            torch.stack(grads).flatten(), num_params_to_keep, sorted=True
+        )
+        accepted_score = threshold[-1]
+        # b.2 mask
+        for m in module.modules():
+            if isinstance(m, SparseMaskModule):
+                keep_masks = (m.sparse_layer.weight_mask.grad >= accepted_score).float()
+                if (
+                    keep_masks.sum() / m.sparse_layer.weight_mask.numel()
+                ) >= m.keep_ratio:
+                    keep_masks = get_regular_sparse_mask(m)
+                    m.revert_weight_grad_and_update_mask(keep_masks)
+                else:
+                    keep_masks = torch.zeros_like(m.sparse_layer.weight)
+                    m.revert_weight_grad_and_update_mask(keep_masks)
+    # based on gradient-magnitude
+    elif parameter_selection_procedure == "gradient_magnitude":
+        for m in module.modules():
+            if isinstance(m, SparseMaskModule):
+                assert m.sparse_cat == "regular_sparse", print(
+                    "block-sparse is not implemented fro gradient magnitude sparse"
+                )
+                keep_masks = get_gradient_magnitude_based_sparse_mask(m)
+                m.revert_weight_grad_and_update_mask(keep_masks)
+    # based on weight-magnitude
+    elif parameter_selection_procedure == "weight_magnitude":
+        for m in module.modules():
+            if isinstance(m, SparseMaskModule):
+                assert m.sparse_cat == "regular_sparse", print(
+                    "block-sparse is not implemented fro gradient magnitude sparse"
+                )
+                keep_masks = get_weight_magnitude_based_sparse_mask(m)
+                m.revert_weight_grad_and_update_mask(keep_masks)
+    # based on grow and drop
+    elif parameter_selection_procedure == "grow_and_drop":
+        for m in module.modules():
+            if isinstance(m, SparseMaskModule):
+                assert m.sparse_cat == "regular_sparse", print(
+                    "block-sparse is not implemented fro gradient magnitude sparse"
+                )
+                keep_masks = get_grow_drop_based_sparse_mask(
+                    m, num_train_steps, current_steps
+                )
                 m.revert_weight_grad_and_update_mask(keep_masks)
 
 
 def mod_forward(self, x):
-    return torch.nn.functional.linear(x, self.weight * self.weight_mask, self.bias)
+    return torch.nn.functional.linear(x, self.weight * self.weight_mask, None)
 
 
 @dataclass
@@ -189,6 +446,10 @@ class SparseMaskConfig(ModifierConfig):
     BLOCK_SIZE: int = 16  # 16x
     sparse_cat: str = "block_sparse"  # ['block_sparse','regular_sparse']
     non_trainable_param_patterns: str = "sparse_layer.weight_mask"
+    use_sparse_model: bool = True
+    parameter_selection_procedure: str = (
+        "max_connection_sensitivity"  # {'max_connection_sensitivity': max connection sensitivity per layer, 'model': max connection sensitivity over model, 'weight_magnitude','gradient_magnitude','grow_and_drop'}
+    )
 
 
 @Modifier.register("sparse_mask_adapter", config_cls=SparseMaskConfig)
@@ -213,13 +474,12 @@ class SparseMaskAdapter(Modifier):
         ], "Choose `sparse_cat` from ['block_sparse','regular_sparse'] "
 
         # weight initialization
-        self.sparse_layer = nn.Linear(input_dim, output_dim).to(
+        self.sparse_layer = nn.Linear(input_dim, output_dim, bias=False).to(
             device=layer.weight.device
         )
         self.sparse_layer.weight = nn.Parameter(
             torch.zeros(self.sparse_layer.weight.shape)
         )
-        self.sparse_layer.bias = nn.Parameter(torch.zeros(self.sparse_layer.bias.shape))
 
         if self.sparse_cat == "block_sparse":
             self.BLOCK_SIZE = config.BLOCK_SIZE
@@ -240,6 +500,15 @@ class SparseMaskAdapter(Modifier):
 
     def patch_forward(self):
         self.sparse_layer.forward = types.MethodType(mod_forward, self.sparse_layer)
+
+    @torch.no_grad()
+    def convert_sparse_weight_to_1D(self):
+        assert len(self.sparse_layer.weight.shape) == 2, print(
+            "sparse_layer.weight is already converted to 1D"
+        )
+        self.sparse_layer.weight = nn.Parameter(
+            self.sparse_layer.weight.flatten()[self.keep_mask_idx].data
+        ).to(self.layer.weight.device)
 
     def data_preprocess(self, x):
         sparse_model_dtype = self.sparse_layer.weight.dtype
@@ -277,6 +546,45 @@ class SparseMaskAdapter(Modifier):
         )
         # compute gradient for weight_mask
         self.sparse_layer.weight_mask.requires_grad = True
+        # remove backward-hook
+        self.sparse_layer.weight._backward_hooks = OrderedDict()
+
+    """
+    prepare the mask for weight and grad magnitude
+    """
+
+    def preprocess_for_weight_and_grad_magnitude(self):
+        # Turn off the gradient for weight
+        self.sparse_layer.weight.requires_grad = True
+        # init the mask
+        self.sparse_layer.weight_mask = nn.Parameter(
+            torch.ones(
+                self.sparse_layer.weight_mask.shape, device=self.layer.weight.device
+            )
+        )
+        # compute gradient for weight_mask
+        self.sparse_layer.weight_mask.requires_grad = False
+        # remove backward-hook
+        self.sparse_layer.weight._backward_hooks = OrderedDict()
+
+    """
+    prepare the mask for grow and drop
+    """
+
+    def preprocess_for_grow_and_drop_mask_update(self):
+        # Turn off the gradient for weight
+        assert self.sparse_layer.weight.requires_grad == True
+        self.sparse_layer.weight_mask_old = self.sparse_layer.weight_mask.data.to("cpu")
+        # init the mask
+        self.sparse_layer.weight_mask = nn.Parameter(
+            torch.ones(
+                self.sparse_layer.weight_mask.shape, device=self.layer.weight.device
+            )
+        )
+        # compute gradient for weight_mask
+        self.sparse_layer.weight_mask.requires_grad = False
+        # remove backward-hook
+        self.sparse_layer.weight._backward_hooks = OrderedDict()
 
     """
     after configuring the mask, it's important to update and allow gradient to pass through the weight for training
@@ -306,6 +614,12 @@ class SparseMaskAdapter(Modifier):
                 self.sparse_layer.weight_mask = nn.Parameter(
                     mask, requires_grad=False
                 ).to(self.sparse_layer.weight.device)
+
+            # apply backward-hook
+            self.sparse_layer.weight.register_hook(
+                hook_factory(mask.to(self.sparse_layer.weight.device))
+            )
+
         else:
             print("Mask is not provided, initializing to default mask value=1")
             del self.sparse_layer.weight_mask

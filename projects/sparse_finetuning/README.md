@@ -1,5 +1,4 @@
-
-
+# Sparse training:
 
 * Execute the following command to train locally
 ```
@@ -21,7 +20,6 @@ projects/sparse_finetuning/scripts/local/run.sh "full" "local://temp/test_librar
         
 ---
 * Notes:
-    * conda create -n mttl python=3.9
+    * conda create -n mttl python=3.11
     * conda activate mttl
-    * pip install -r local_requirements.txt
-    * use `transformers==4.42.0` to properly use local `microsoft/phi-2` model
+    * pip install -r projects/sparse_finetuning/requirements.txt
