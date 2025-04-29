@@ -409,7 +409,6 @@ class LMDataModule(DataModule):
 
 @dataclass
 class ConcatDatasetConfig(KMDatasetConfig):
-    n_concat: int = 2
     max_concat_tokens: int = None
     use_only_type: str = "summary"
 
@@ -471,14 +470,10 @@ class ConcatDatasetModule(KMDatasetModule):
                 len_in_tokens = [len(self.tokenizer.encode(o)) for o in concat_outputs]
                 for s_idx in range(len(outputs)):
                     # summary at index i will appear first. Now, sample `n_concat - 1` other indices
-                    other_idx = np.random.choice(
-                        [j for j in range(len(outputs)) if j != s_idx],
-                        min(self.config.n_concat, len(outputs)) - 1,
-                        replace=False,
-                    )
+                    other_idx = [j for j in range(len(outputs)) if j != s_idx]
                     # We will use the indices in `synthetic_idx` to create the synthetic data
                     synthetic_data = []
-                    synthetic_idx = [s_idx] + other_idx.tolist()
+                    synthetic_idx = [s_idx] + other_idx
                     total_tokens = 0
 
                     # let's make sure the total number of concatenated tokens is less than `max_concat_tokens`, but
@@ -498,7 +493,6 @@ class ConcatDatasetModule(KMDatasetModule):
                                 if isinstance(outputs[idx], dict)
                                 else outputs[idx]
                             )
-                            join_str = "\n\n----- New Summary -----\n\n"
                         elif example["type"][i] == "qa":
                             if isinstance(outputs[idx], dict):
                                 output_str = f"\nQuestion: {outputs[idx]['question']}\nAnswer: {outputs[idx]['answer']}"
@@ -508,7 +502,6 @@ class ConcatDatasetModule(KMDatasetModule):
                                 raise TypeError("invalid type for output")
                             prompt_str = "Generate a question-answer pair given the preceding passage."
                             synthetic_data.append(output_str)
-                            join_str = "\n\n"
                         else:
                             raise ValueError(f"Unknown type {example['type'][i]}")
 
@@ -517,6 +510,7 @@ class ConcatDatasetModule(KMDatasetModule):
                         if total_tokens > self.config.max_concat_tokens:
                             break
 
+                    join_str = "\n\n\n\n"
                     concat_data = join_str.join(synthetic_data)
                     context_source, no_context_source = create_dcd_pairs(
                         self.tokenizer, input, concat_data, prompt_str
