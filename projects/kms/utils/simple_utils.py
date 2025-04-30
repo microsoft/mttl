@@ -116,37 +116,35 @@ def mc_loss_iterative(model, inputs, pad_token_id):
     # Process each question group separately
     loss_per_example = []
 
-    with toggle_cache(model, True):
-        for i in range(batch_size):
-            options_start_idx = start_indices[i]
-            options_end_idx = options_start_idx + num_options[i]
+    for i in range(batch_size):
+        options_start_idx = start_indices[i]
+        options_end_idx = options_start_idx + num_options[i]
 
-            # Get all options for this question
-            x_input_ids = input_ids[options_start_idx:options_end_idx]
-            x_attn_mask = attention_mask[options_start_idx:options_end_idx]
-            x_labels = labels[options_start_idx:options_end_idx]
+        # Get all options for this question
+        x_input_ids = input_ids[options_start_idx:options_end_idx]
+        x_attn_mask = attention_mask[options_start_idx:options_end_idx]
+        x_labels = labels[options_start_idx:options_end_idx]
 
-            option_losses = []
-            for j in range(x_input_ids.size(0)):
+        option_losses = []
+        for j in range(x_input_ids.size(0)):
 
-                # At this point, we don't need padding. Removing padding
-                # will remove error when right padded input
-                last_valid_idx = torch.where((x_input_ids[j] != pad_token_id))[0].max()
-                outputs = model(
-                    input_ids=x_input_ids[[j], : last_valid_idx + 1],
-                    attention_mask=x_attn_mask[[j], : last_valid_idx + 1],
-                    task_names=inputs.get("task_names")[
-                        options_start_idx : options_start_idx + 1
-                    ],
-                )
-                loss_per_option = compute_loglike_loss(
-                    outputs.logits,
-                    x_labels[[j], : last_valid_idx + 1],
-                    reduction="none",
-                    normalize_length=True,
-                )
+            # At this point, we don't need padding. Removing padding
+            # will remove error when right padded input
+            outputs = model(
+                input_ids=x_input_ids[[j]],
+                attention_mask=x_attn_mask[[j]],
+                task_names=inputs.get("task_names")[
+                    options_start_idx : options_start_idx + 1
+                ],
+            )
+            loss_per_option = compute_loglike_loss(
+                outputs.logits,
+                x_labels[[j]],
+                reduction="none",
+                normalize_length=True,
+            )
 
-                option_losses += [loss_per_option]
+            option_losses += [loss_per_option]
 
         option_losses = torch.cat(option_losses)
         # build a distribution over all options
