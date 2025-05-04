@@ -8,19 +8,19 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-    "--library_id",
+    "library_id",
     type=str,
     default="local://trained_gpt125m_experts_colab",
     help="ID of the expert library"
 )
 parser.add_argument(
-    "--checkpoint_1",
+    "checkpoint_1",
     type=str,
     required=True,
     help="Path to first expert checkpoint"
 )
 parser.add_argument(
-    "--checkpoint_2", 
+    "checkpoint_2", 
     type=str,
     required=True,
     help="Path to second expert checkpoint"
