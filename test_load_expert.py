@@ -8,21 +8,21 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
-    "library_id",
+    "--library_id",
     type=str,
-    default="local://trained_gpt125m_experts_colab",
+    default="trained_gpt125m_experts_colab",
     help="ID of the expert library"
 )
 parser.add_argument(
-    "checkpoint_1",
+    "--checkpoint_1",
     type=str,
     required=True,
     help="Path to first expert checkpoint"
 )
 parser.add_argument(
-    "checkpoint_2", 
-    type=str,
+    "--checkpoint_2", 
     required=True,
+    type=str,
     help="Path to second expert checkpoint"
 )
 
@@ -34,9 +34,6 @@ library = ExpertLibrary.get_expert_library(f"local://{args.library_id}", create=
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 setup_logging()
-
-args = EvaluationConfig.parse()
-module = ExpertModule(**vars(args)).to(device)
 
 expert_1 = load_expert(
             args.checkpoint_1,
