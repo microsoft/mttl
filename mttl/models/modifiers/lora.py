@@ -128,6 +128,20 @@ class LoRA(Modifier, MergeableModifierMixin):
             ).to(self.layer.weight.device)
             self.layer.state.reset_grads()
         else:
+
+            # we want to compute the similary between the the to_merge weight and original 
+            # weight. if the frobenius_cosine_similarity close to 1, it means they are not suitable
+            # for merge, if they are close to 0, it means they are Orthogonal, they shuld merge
+            # Compute Frobenius inner product between to_merge and original weights
+            original_norm = torch.norm(self.layer.weight.data)
+            to_merge_norm = torch.norm(to_merge)
+            inner_product = torch.sum(self.layer.weight.data * to_merge)
+            
+            # Compute cosine similarity using Frobenius inner product
+            frobenius_cosine_similarity = inner_product / (original_norm * to_merge_norm)
+            
+            # Log the similarity for debugging
+            print((f"Frobenius cosine similarity between original and LoRA weights: {frobenius_cosine_similarity:.4f}"))
             self.layer.weight.data.add_(to_merge.to(self.layer.weight.device))
 
     def create_for_layer(self, layer):
