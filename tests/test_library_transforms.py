@@ -26,6 +26,8 @@ from mttl.models.library.library_transforms import (
     TiesMergeConfig,
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
+    WudiMerge,
+    WudiMergeConfig,
 )
 
 
@@ -261,6 +263,29 @@ def test_mbc_clustering(tmp_path):
     assert len(clusters) == k
 
 
+def test_wudi_merge():
+    logger.setLevel(logging.DEBUG)
+    library = HFExpertLibrary("sordonia/new-test-library")
+
+    # Test with default config
+    transform = WudiMerge()
+    merged_expert = transform.transform(library)
+
+    # Verify merged expert has same structure as original experts
+    assert set(merged_expert.expert_weights.keys()) == set(library[next(iter(library))].expert_weights.keys())
+
+    # Test with custom config
+    custom_config = WudiMergeConfig(iter=100, lr=1e-4)
+    transform = WudiMerge(custom_config)
+    merged_expert = transform.transform(library)
+
+    # Verify merged expert name is set correctly
+    assert merged_expert.name == "wudi_merged_expert"
+
+    # Verify merged weights are not None and have correct device
+    for key, param in merged_expert.expert_weights.items():
+        assert param is not None
+        assert param.device == torch.device('cpu')
 def test_weighted_merge():
     library = HFExpertLibrary("sordonia/new-test-library")
 
