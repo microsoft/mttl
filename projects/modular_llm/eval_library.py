@@ -24,6 +24,8 @@ from mttl.models.library.library_transforms import (
     TiesMergeConfig,
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
+    WudiMerge,
+    WudiMergeConfig,
 )
 from mttl.models.lightning.callbacks import LossCallback
 from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
@@ -167,6 +169,8 @@ def run_eval(args: EvaluationConfig):
     )
     an_expert = library[next(iter(library.keys()))]
     base_model = an_expert.expert_info.expert_model
+    if base_model is None:
+        base_model = an_expert.expert_info.model
     train_cfg = ExpertConfig.from_dict(an_expert.training_config)
 
     loading_kwargs = {
@@ -196,19 +200,21 @@ def run_eval(args: EvaluationConfig):
         raise ValueError("Please specify a valid merge_or_route!")
 
     """ Parameter Merging Approaches """
-    if args.merge_or_route in ["uniform", "ties"]:
+    if args.merge_or_route in ["uniform", "ties", "wudi"]:
         if args.merge_or_route == "uniform":
             expert = WeightedLinearMerge(WeightedLinearMergeConfig()).transform(library)
         elif args.merge_or_route == "ties":
             cfg = TiesMergeConfig(top_k=args.transform_sparsity)
             expert = TiesMerge(cfg).transform(library)
+        elif args.merge_or_route == "wudi":
+            cfg = WudiMergeConfig(iter=300, lr=1e-5)
+            expert = WudiMerge(cfg).transform(library)
 
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
             **loading_kwargs,
         )
         model.add_expert_instance(expert, is_default=True)
-
     elif args.merge_or_route == "uniform_lora_after_op":
         # Here we merge the LoRA experts after the outer product we cannot really do it
         # with the lib transform, cause this would require storing large matrices in memory
