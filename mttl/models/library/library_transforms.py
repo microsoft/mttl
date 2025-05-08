@@ -207,7 +207,7 @@ class SVDEmbeddingTransform(LibraryTransform):
 
 @dataclass
 class WudiMergeConfig(LibraryTransformConfig):
-    iter: int = (300,)
+    iter: int = 300
     lr: float = 1e-5
 
 
