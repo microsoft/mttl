@@ -207,12 +207,12 @@ class SVDEmbeddingTransform(LibraryTransform):
 
 @dataclass
 class WudiMergeConfig(LibraryTransformConfig):
-    iter: int = 300, 
-    lr: float = 1e-5 
+    iter: int = (300,)
+    lr: float = 1e-5
+
 
 @LibraryTransform.register("wudi_merge", WudiMergeConfig)
 class WudiMerge(LibraryTransform):
-
     """
     implement the wudimerge in the paper https://arxiv.org/pdf/2503.08099v1
     """
@@ -222,6 +222,7 @@ class WudiMerge(LibraryTransform):
 
     @torch.no_grad()
     def transform(self, library) -> Expert:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
 
@@ -239,26 +240,33 @@ class WudiMerge(LibraryTransform):
         for key in keys:
             # Stack all expert weights for this parameter
             values = torch.stack([expert.expert_weights[key] for expert in experts])
-            values = values.cuda()
+
+            values = values.to(device)
 
             # Initialize merged vector as sum of all vectors
             merging_vector = torch.nn.Parameter(torch.sum(values, dim=0))
-            optimizer = torch.optim.Adam([merging_vector], lr=self.config.lr, weight_decay= 0)
+            optimizer = torch.optim.Adam(
+                [merging_vector], lr=self.config.lr, weight_decay=0
+            )
 
             # Compute L2 norms
-            l2_norms = torch.square(torch.norm(values.reshape(values.shape[0], -1), p=2, dim=-1))
+            l2_norms = torch.square(
+                torch.norm(values.reshape(values.shape[0], -1), p=2, dim=-1)
+            )
 
             # Optimize merging vector
             for _ in tqdm(range(self.config.iter), desc=f"Optimizing parameter {key}"):
                 disturbing_vectors = merging_vector.unsqueeze(0) - values
-                inner_product = torch.matmul(disturbing_vectors, values.transpose(1,2))
-                
-                loss = torch.sum(torch.square(inner_product) / l2_norms.unsqueeze(-1).unsqueeze(-1))
+                inner_product = torch.matmul(disturbing_vectors, values.transpose(1, 2))
+
+                loss = torch.sum(
+                    torch.square(inner_product) / l2_norms.unsqueeze(-1).unsqueeze(-1)
+                )
                 loss = loss.requires_grad_(True)  # Ensure loss requires gradients
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-            
+
             merging_vector = merging_vector / len(experts)
             # Update base expert weights with optimized merging vector
             base_expert.expert_weights[key].data.copy_(merging_vector.data.cpu())
