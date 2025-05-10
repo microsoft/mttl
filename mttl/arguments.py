@@ -593,10 +593,10 @@ class EvaluationConfig(MultiExpertConfig, TransformArgs):
     n_ng_iterations: int = 30  # number of iterations for LoraHub
     recompute_prototypes: bool = False
     gsm_template: str = "cot"
-    lora_merge_after: bool= True
+    lora_merge_after: bool = True
     gsm_dataset: str = "gsm-hard"
     save_merged_model: str = None
-    
+    expert_weights: str = None
 
 
 @dataclass
