@@ -19,6 +19,52 @@ class LoRAConfig(ModifierConfig):
     lora_init_b_random: bool = False
 
 
+def spectral_distance(W: torch.Tensor, delta_W: torch.Tensor, topk=None) -> float:
+    """
+    Compute L2 distance between eigenvalues of W and W + delta_W.
+    Assumes W is a square matrix. Uses real part only.
+    """
+    W_merged = W + delta_W
+
+    # Compute eigenvalues
+    eigvals_W = torch.linalg.eigvals(W).real
+    eigvals_W_merged = torch.linalg.eigvals(W_merged).real
+
+    # Optionally only take top-k largest magnitude eigenvalues
+    if topk is not None:
+        eigvals_W = eigvals_W[
+            torch.argsort(torch.abs(eigvals_W), descending=True)[:topk]
+        ]
+        eigvals_W_merged = eigvals_W_merged[
+            torch.argsort(torch.abs(eigvals_W_merged), descending=True)[:topk]
+        ]
+
+    # Compute L2 distance
+    distance = torch.norm(eigvals_W - eigvals_W_merged, p=2).item()
+    return distance
+
+
+def spectral_energy_ratio(
+    W: torch.Tensor, delta_W: torch.Tensor, use_svd=True
+) -> float:
+    """
+    Compute the ratio of spectral energy between delta_W and W.
+    For non-square matrices, SVD is preferred.
+    """
+    if use_svd:
+        # Use singular values (recommended for general W)
+        s_W = torch.linalg.svdvals(W)
+        s_delta = torch.linalg.svdvals(delta_W)
+    else:
+        # Use eigenvalues (only valid if W is square and symmetric)
+        s_W = torch.abs(torch.linalg.eigvals(W))
+        s_delta = torch.abs(torch.linalg.eigvals(delta_W))
+
+    energy_W = torch.norm(s_W, p=2)
+    energy_delta = torch.norm(s_delta, p=2)
+    return (energy_delta / energy_W).item()
+
+
 @Modifier.register("lora", config_cls=LoRAConfig)
 class LoRA(Modifier, MergeableModifierMixin):
     def __init__(
@@ -129,20 +175,17 @@ class LoRA(Modifier, MergeableModifierMixin):
             self.layer.state.reset_grads()
         else:
 
-            # we want to compute the similary between the the to_merge weight and original 
-            # weight. if the frobenius_cosine_similarity close to 1, it means they are not suitable
-            # for merge, if they are close to 0, it means they are Orthogonal, they shuld merge
-            # Compute Frobenius inner product between to_merge and original weights
-            original_norm = torch.norm(self.layer.weight.data)
-            to_merge_norm = torch.norm(to_merge)
-            inner_product = torch.sum(self.layer.weight.data * to_merge)
-            
-            # Compute cosine similarity using Frobenius inner product
-            frobenius_cosine_similarity = inner_product / (original_norm * to_merge_norm)
-            
-            # Log the similarity for debugging
-            print((f"Frobenius cosine similarity between original and LoRA weights: {frobenius_cosine_similarity:.4f}"))
-            self.layer.weight.data.add_(to_merge.to(self.layer.weight.device))
+            # Compute spectral metrics
+            W = self.layer.weight.data.to(to_merge.dtype).to(to_merge.device)
+            delta_W = to_merge.to(W.dtype).to(W.device)
+            # eig_dist = spectral_distance(W, delta_W, topk=50)
+            energy_ratio = spectral_energy_ratio(W, delta_W)
+
+            # print(f"Eigenvalue L2 distance: {eig_dist:.4f}")
+            print(f"Spectral energy ratio: {energy_ratio:.4f}")
+
+            if energy_ratio < 0.005:
+                self.layer.weight.data.add_(to_merge.to(self.layer.weight.device))
 
     def create_for_layer(self, layer):
         self.lora_a = nn.Parameter(
