@@ -14,11 +14,16 @@ setup_logging()
 args = EvaluationConfig.parse()
 
 
-from mttl.datamodule.gsm_data_module import GsmDataConfig, Gsm8kHardDataModule, Gsm8kDataModule
+from mttl.datamodule.gsm_data_module import (
+    GsmDataConfig,
+    Gsm8kHardDataModule,
+    Gsm8kDataModule,
+)
 from mttl.models.library.library_transforms import (
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
 )
+
 
 def fetch_prototypes(args: EvaluationConfig, library: ExpertLibrary) -> str:
     """Returns the unique hash storing the saved prototypes."""
@@ -66,13 +71,14 @@ def fetch_prototypes(args: EvaluationConfig, library: ExpertLibrary) -> str:
     else:
         raise ValueError(f"Unknown merge_or_route {args.merge_or_route}")
 
+
 config = GsmDataConfig(
     model=args.model,
     model_family=args.model_family,
     max_input_length=args.max_input_length,
     max_output_length=args.max_output_length,
     gsm_template=args.gsm_template,
-    data_dir=args.output_dir
+    data_dir=args.output_dir,
 )
 
 if args.gsm_dataset == "gsm-hard":
@@ -90,8 +96,16 @@ else:
     module = MultiExpertModule(**vars(args)).to(device)
 
     if args.merge_or_route == "uniform":
-        module.add_experts_from_library(args.library_id)
-        module.model.set_selector("lora", UniformSelectorConfig(lora_merge_after=args.lora_merge_after))
+        # module.add_experts_from_library(args.library_id)
+        # module.model.set_selector("lora", UniformSelectorConfig(lora_merge_after=args.lora_merge_after))
+        experts_names = library.keys()
+        if args.expert_weights:
+            weights = dict(zip(experts_names, map(float, args.expert_weights)))
+            routing_config = WeightedLinearMergeConfig(weights=weights)
+        else:
+            routing_config = WeightedLinearMergeConfig()
+        expert = WeightedLinearMerge(routing_config).transform(library)
+        module.add_expert_instance(expert, is_default=True)
     elif args.merge_or_route in ["phatgoose", "arrow", "avg_act"]:
         module.add_experts_from_library(args.library_id)
         """Routing Approaches"""
