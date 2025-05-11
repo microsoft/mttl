@@ -96,16 +96,24 @@ else:
     module = MultiExpertModule(**vars(args)).to(device)
 
     if args.merge_or_route == "uniform":
-        # module.add_experts_from_library(args.library_id)
-        # module.model.set_selector("lora", UniformSelectorConfig(lora_merge_after=args.lora_merge_after))
+        module.add_experts_from_library(args.library_id)
+
         experts_names = library.keys()
         if args.expert_weights:
-            weights = dict(zip(experts_names, map(float, args.expert_weights)))
-            routing_config = WeightedLinearMergeConfig(weights=weights)
+            module.model.set_selector(
+                "lora",
+                UniformSelectorConfig(
+                    lora_merge_after=args.lora_merge_after,
+                    experts_weight_list=args.expert_weights,
+                ),
+            )
         else:
-            routing_config = WeightedLinearMergeConfig()
-        expert = WeightedLinearMerge(routing_config).transform(library)
-        module.add_expert_instance(expert, is_default=True)
+            module.model.set_selector(
+                "lora",
+                UniformSelectorConfig(
+                    lora_merge_after=args.lora_merge_after, experts_weight_list=None
+                ),
+            )
     elif args.merge_or_route in ["phatgoose", "arrow", "avg_act"]:
         module.add_experts_from_library(args.library_id)
         """Routing Approaches"""

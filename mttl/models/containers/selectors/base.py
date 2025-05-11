@@ -543,7 +543,7 @@ class TaskNameSelector(Selector):
 
 @dataclass
 class UniformSelectorConfig(SelectorConfig):
-    pass
+    experts_weight_list: list = None
 
 
 @Selector.register("uniform_selector", UniformSelectorConfig)
@@ -553,10 +553,14 @@ class UniformSelector(Selector):
 
     @forward_with_cache
     def forward(self, input, **kwargs) -> BatchExpertsSelectorOutput:
+        weights = torch.tensor(
+            (
+                self.config.experts_weight_list
+                if self.config.experts_weight_list is not None
+                else [1.0 / len(self.expert_names)] * len(self.expert_names)
+            ),
+            device=input.device,
+        )
         return ExpertsAndWeightsSelectorOutput(
-            experts=self.expert_names,
-            weights=torch.ones(
-                len(self.expert_names), device=input.device, dtype=input.dtype
-            )
-            / len(self.expert_names),
+            experts=self.expert_names, weights=weights
         )
