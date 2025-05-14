@@ -80,7 +80,6 @@ class GsmEvaluator(GenerativeEvaluator):
                         pred_answer = float(pred[-1])
                         all_predictions.append(pred_answer)
                         logger.info(f"Predictions: {pred_answer}, Targets: {target}")
-                        print(f"Predictions: {pred_answer}, Targets: {target}")
                         json_data = {
                             "pred": pred_answer,
                             "answer": target,
