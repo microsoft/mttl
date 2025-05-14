@@ -7,6 +7,7 @@ from mttl.arguments import EvaluationConfig
 from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
 import torch
 from mttl.logging import setup_logging
+from mttl.models.modifiers.lora import spectral_distance, spectral_energy_ratio
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 setup_logging()
@@ -97,6 +98,65 @@ else:
 
     if args.merge_or_route == "uniform":
         module.add_experts_from_library(args.library_id)
+
+        # experts = library.keys()
+
+        # for layer in range(len(module.model.model.model.layers)):
+        #     for expert in experts:
+        #         q_proj_lora_a = module.model.model.model.layers[
+        #             layer
+        #         ].self_attn.q_proj.lora_a[expert]
+        #         q_proj_lora_b = module.model.model.model.layers[
+        #             layer
+        #         ].self_attn.q_proj.lora_b[expert]
+
+        #         expert_weights = q_proj_lora_a @ q_proj_lora_b
+        #         original_weights = module.model.model.model.layers[
+        #             layer
+        #         ].self_attn.q_proj.layer.weight
+        #         original_weights = original_weights.to(expert_weights.dtype).to(
+        #             expert_weights.device
+        #         )
+        #         # convert the tensor to the format for compute the svd
+        #         expert_weights = expert_weights.detach()
+        #         original_weights = original_weights.detach()
+
+        #         spectral_distance(expert_weights, original_weights)
+        #         spectral_energy_ratio(expert_weights, original_weights)
+
+        #         print(
+        #             f"Layer {layer} Expert {expert} Spectral Distance: {spectral_distance(expert_weights, original_weights)}"
+        #         )
+        #         print(
+        #             f"Layer {layer} Expert {expert} Spectral Energy Ratio: {spectral_energy_ratio(expert_weights, original_weights)}"
+        #         )
+
+        #     k_proj_lora_a = module.model.model.model.layers[
+        #         layer
+        #     ].self_attn.k_proj.lora_a
+        #     k_proj_lora_b = module.model.model.model.layers[
+        #         layer
+        #     ].self_attn.k_proj.lora_b
+
+        #     v_proj_lora_a = module.model.model.model.layers[
+        #         layer
+        #     ].self_attn.v_proj.lora_a
+        #     v_proj_lora_b = module.model.model.model.layers[
+        #         layer
+        #     ].self_attn.v_proj.lora_b
+
+        #     up_proj_lora_a = module.model.model.model.layers[layer].mlp.up_proj.lora_a
+        #     up_proj_lora_b = module.model.model.model.layers[layer].mlp.up_proj.lora_b
+
+        #     down_proj_lora_a = module.model.model.model.layers[
+        #         layer
+        #     ].mlp.down_proj.lora_a
+        #     down_proj_lora_b = module.model.model.model.layers[
+        #         layer
+        #     ].mlp.down_proj.lora_b
+
+        #     print(q_proj_lora_a.shape)
+        #     print(q_proj_lora_b.shape)
 
         experts_names = library.keys()
         if args.expert_weights:

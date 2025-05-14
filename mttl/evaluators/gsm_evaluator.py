@@ -61,7 +61,7 @@ class GsmEvaluator(GenerativeEvaluator):
             ).findall(x)
             return numbers
 
-        def get_predictions(predictions_texts, batch, all_predictions, all_targets):
+        def get_predictions(predictions_texts, batch, all_predictions, all_targets, f):
             # iterate over the predictions and targets
 
             for i, (pred, source, target) in enumerate(
@@ -81,6 +81,12 @@ class GsmEvaluator(GenerativeEvaluator):
                         all_predictions.append(pred_answer)
                         logger.info(f"Predictions: {pred_answer}, Targets: {target}")
                         print(f"Predictions: {pred_answer}, Targets: {target}")
+                        json_data = {
+                            "pred": pred_answer,
+                            "answer": target,
+                        }
+                        f.write(json.dumps(json_data) + "\n")
+                        f.flush()
                 else:
                     all_predictions.append(float("inf"))
             all_targets.extend(batch["labels_texts"])
@@ -118,8 +124,9 @@ class GsmEvaluator(GenerativeEvaluator):
                 predictions_texts = predictions.sequences_texts
                 if self.config.gsm_template == "cot":
                     get_predictions(
-                        predictions_texts, batch, all_predictions, all_targets
+                        predictions_texts, batch, all_predictions, all_targets, f
                     )
+
                 elif self.config.gsm_template == "python":
                     print_python_code(predictions_texts, batch, f)
                 else:
