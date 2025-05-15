@@ -142,6 +142,7 @@ class GsmEvaluator(GenerativeEvaluator):
         correct = 0
 
         for pred_answer, target in tqdm(zip(predictions, targets)):
+            target = target.replace(",", "")
             if pred_answer == float(target):
                 correct += 1
 
