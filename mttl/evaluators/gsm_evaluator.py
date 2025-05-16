@@ -133,6 +133,7 @@ class GsmEvaluator(GenerativeEvaluator):
         if self.config.gsm_template != "python":
             if len(all_predictions) != 0:
                 metrics = self.compute_metrics(all_predictions, all_targets)
+                logger.info(f"Metrics: {metrics}")
                 return metrics
             else:
                 raise ValueError("No predictions found")
