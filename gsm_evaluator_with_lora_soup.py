@@ -6,13 +6,68 @@ from mttl.evaluators.gsm_evaluator import GsmEvaluator
 from mttl.arguments import EvaluationConfig
 from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
 import torch
+from tqdm import tqdm
 from mttl.logging import setup_logging
 from mttl.models.modifiers.lora import spectral_distance, spectral_energy_ratio
+import numpy as np
+import matplotlib.pyplot as plt
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 setup_logging()
 
 args = EvaluationConfig.parse()
+
+
+def compute_analysis(delta_code, delta_math, layer):
+    # SVD for each matrix
+    rank = 4
+
+    # Fix the Code
+    U_code, _, _ = torch.linalg.svd(delta_code, full_matrices=False)
+
+    U_code_k = U_code[:, :rank]
+
+    # Sweep over alpha values (a, with b = 1)
+    alpha_values = np.linspace(0, 1.0, 10)
+    preservation_scores = []
+    top1_overlap_cos = []
+
+    for a in tqdm(alpha_values):
+        delta_ab = a * delta_math + delta_code
+        U_ab, _, _ = torch.linalg.svd(delta_ab, full_matrices=False)
+        U_ab_k = U_ab[:, :rank]
+
+        # Frobenius norm of projection (subspace preservation)
+        preservation = np.linalg.norm(U_code_k.T @ U_ab_k, ord="fro") / rank
+        preservation_scores.append(preservation)
+
+        # Cosine similarity of top-1 singular vectors
+        top1_cos = np.abs(np.dot(U_code_k[:, 0], U_ab_k[:, 0]))
+        top1_overlap_cos.append(top1_cos)
+    # Plot results
+
+    plt.figure(figsize=(12, 6))
+    plt.subplot(1, 2, 1)
+    plt.plot(
+        alpha_values, preservation_scores, label="Subspace Preservation (Frobenius)"
+    )
+    plt.xlabel("Math LoRA Scaling Coefficient (a)")
+    plt.ylabel("Preservation Score")
+    plt.title("Code Subspace Preservation vs. Math LoRA Weight")
+    plt.grid(True)
+
+    plt.subplot(1, 2, 2)
+    plt.plot(
+        alpha_values, top1_overlap_cos, label="Top-1 Cosine Similarity", color="orange"
+    )
+    plt.xlabel("Math LoRA Scaling Coefficient (a)")
+    plt.ylabel("Cosine Similarity")
+    plt.title("Top-1 Spectral Direction Similarity")
+    plt.grid(True)
+
+    plt.tight_layout()
+    plt.savefig(f"analysis_{layer}.png")
+    plt.show()
 
 
 from mttl.datamodule.gsm_data_module import (
@@ -99,37 +154,52 @@ else:
     if args.merge_or_route == "uniform":
         module.add_experts_from_library(args.library_id)
 
-        # experts = library.keys()
+        experts = library.keys()
 
-        # for layer in range(len(module.model.model.model.layers)):
-        #     for expert in experts:
-        #         q_proj_lora_a = module.model.model.model.layers[
-        #             layer
-        #         ].self_attn.q_proj.lora_a[expert]
-        #         q_proj_lora_b = module.model.model.model.layers[
-        #             layer
-        #         ].self_attn.q_proj.lora_b[expert]
+        for layer in range(len(module.model.model.model.layers)):
+            expert_weights = []
+            for expert in experts:
+                q_proj_lora_a = module.model.model.model.layers[
+                    layer
+                ].self_attn.q_proj.lora_a[expert]
+                q_proj_lora_b = module.model.model.model.layers[
+                    layer
+                ].self_attn.q_proj.lora_b[expert]
 
-        #         expert_weights = q_proj_lora_a @ q_proj_lora_b
-        #         original_weights = module.model.model.model.layers[
-        #             layer
-        #         ].self_attn.q_proj.layer.weight
-        #         original_weights = original_weights.to(expert_weights.dtype).to(
-        #             expert_weights.device
-        #         )
-        #         # convert the tensor to the format for compute the svd
-        #         expert_weights = expert_weights.detach()
-        #         original_weights = original_weights.detach()
+                expert_weight = q_proj_lora_a @ q_proj_lora_b
+                expert_weights.append(expert_weight)
+            breakpoint()
+            compute_analysis(
+                expert_weights[0].cpu().detach(),
+                expert_weights[1].cpu().detach(),
+                layer,
+            )
 
-        #         spectral_distance(expert_weights, original_weights)
-        #         spectral_energy_ratio(expert_weights, original_weights)
+        def print_spectral_metrics(expert_weights, original_weights, layer, expert):
+            # Convert tensors to same dtype and device
+            original_weights = original_weights.to(expert_weights.dtype).to(
+                expert_weights.device
+            )
 
-        #         print(
-        #             f"Layer {layer} Expert {expert} Spectral Distance: {spectral_distance(expert_weights, original_weights)}"
-        #         )
-        #         print(
-        #             f"Layer {layer} Expert {expert} Spectral Energy Ratio: {spectral_energy_ratio(expert_weights, original_weights)}"
-        #         )
+            # Detach tensors for computation
+            expert_weights = expert_weights.detach()
+            original_weights = original_weights.detach()
+
+            # Calculate and print metrics
+            dist = spectral_distance(expert_weights, original_weights)
+            ratio = spectral_energy_ratio(expert_weights, original_weights)
+
+            print(f"Layer {layer} Expert {expert} Spectral Distance: {dist}")
+            print(f"Layer {layer} Expert {expert} Spectral Energy Ratio: {ratio}")
+
+            return dist, ratio
+
+        # Calculate expert weights and call print function
+        expert_weights = q_proj_lora_a @ q_proj_lora_b
+        original_weights = module.model.model.model.layers[
+            layer
+        ].self_attn.q_proj.layer.weight
+        print_spectral_metrics(expert_weights, original_weights, layer, expert)
 
         #     k_proj_lora_a = module.model.model.model.layers[
         #         layer
