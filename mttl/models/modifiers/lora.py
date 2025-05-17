@@ -26,7 +26,7 @@ def spectral_distance(W: torch.Tensor, delta_W: torch.Tensor, topk=None) -> floa
     """
     W_merged = W + delta_W
 
-    # Compute eigenvalues
+    # Compute eigenvaluestorch.linalg.svd(delta_code, full_matrices=False)
     eigvals_W = torch.linalg.eigvals(W).real
     eigvals_W_merged = torch.linalg.eigvals(W_merged).real
 
