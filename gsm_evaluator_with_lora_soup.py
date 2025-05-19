@@ -42,6 +42,8 @@ def effective_rank_analysis(delta_code, delta_math, layer):
     U_code, _, _ = torch.linalg.svd(delta_code, full_matrices=False)
     U_math, _, _ = torch.linalg.svd(delta_math, full_matrices=False)
 
+    delta_merge = delta_math + delta_code
+
     def effective_rank(s, threshold=0.01):
         return (s > threshold * s.max()).sum().item()
 
@@ -56,6 +58,7 @@ def effective_rank_analysis(delta_code, delta_math, layer):
     print(f"Effective rank - math: {rank_math}, code: {rank_code}, merged: {rank_merge}")
 
 def spectral_energy_increase(delta_code, delta_math, layer):
+    delta_merge = delta_math + delta_code
     energy_math = torch.norm(delta_math, p='fro')**2
     energy_code = torch.norm(delta_code, p='fro')**2
     energy_merge = torch.norm(delta_merge, p='fro')**2
