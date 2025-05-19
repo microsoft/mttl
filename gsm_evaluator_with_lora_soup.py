@@ -18,6 +18,51 @@ setup_logging()
 args = EvaluationConfig.parse()
 
 
+def consine_similarity_principal_components(delta_code, delta_math, layer):
+    U_code, _, _ = torch.linalg.svd(delta_code, full_matrices=False)
+    U_math, _, _ = torch.linalg.svd(delta_math, full_matrices=False)
+
+    # Cosine of top-1 singular vector
+    top1_cosine = torch.abs(torch.dot(U_math[:, 0], U_code[:, 0]))
+    print(f"Top-1 singular vector cosine similarity: {top1_cosine:.4f}")
+    return top1_cosine
+
+def subspace_preservation(delta_code, delta_math, layer):
+    U_code, _, _ = torch.linalg.svd(delta_code, full_matrices=False)
+    U_math, _, _ = torch.linalg.svd(delta_math, full_matrices=False)
+
+    U_code_k = U_code[:, :rank]
+    U_math_k = U_math[:, :rank]
+    
+    overlap_score = torch.norm(U_math_k.T @ U_code_k, p='fro')
+    print(f"Subspace preservation score: {overlap_score:.4f}")
+    return overlap_score
+
+def effective_rank_analysis(delta_code, delta_math, layer):
+    U_code, _, _ = torch.linalg.svd(delta_code, full_matrices=False)
+    U_math, _, _ = torch.linalg.svd(delta_math, full_matrices=False)
+
+    def effective_rank(s, threshold=0.01):
+        return (s > threshold * s.max()).sum().item()
+
+    # Compute singular values
+    _, S_merge, _ = torch.linalg.svd(delta_merge, full_matrices=False)
+    _, S_math, _ = torch.linalg.svd(delta_math, full_matrices=False)
+    _, S_code, _ = torch.linalg.svd(delta_code, full_matrices=False)
+
+    rank_math = effective_rank(S_math)
+    rank_code = effective_rank(S_code)
+    rank_merge = effective_rank(S_merge)
+    print(f"Effective rank - math: {rank_math}, code: {rank_code}, merged: {rank_merge}")
+
+def spectral_energy_increase(delta_code, delta_math, layer):
+    energy_math = torch.norm(delta_math, p='fro')**2
+    energy_code = torch.norm(delta_code, p='fro')**2
+    energy_merge = torch.norm(delta_merge, p='fro')**2
+
+    print(f"Spectral energy - math: {energy_math:.4f}, code: {energy_code:.4f}, merge: {energy_merge:.4f}")
+    print(f"Sum of individual energies: {(energy_math + energy_code):.4f}")
+
 def compute_analysis(delta_code, delta_math, layer):
     # SVD for each matrix
     rank = 4
@@ -168,12 +213,12 @@ else:
 
                 expert_weight = q_proj_lora_a @ q_proj_lora_b
                 expert_weights.append(expert_weight)
-            breakpoint()
-            compute_analysis(
-                expert_weights[0].cpu().detach(),
-                expert_weights[1].cpu().detach(),
-                layer,
-            )
+
+                consine_similarity_principal_components(expert_weights[0].cpu().detach(), expert_weights[1].cpu().detach(), layer)
+                subspace_preservation(expert_weights[0].cpu().detach(), expert_weights[1].cpu().detach(), layer)
+                effective_rank_analysis(expert_weights[0].cpu().detach(), expert_weights[1].cpu().detach(), layer)
+                spectral_energy_increase(expert_weights[0].cpu().detach(), expert_weights[1].cpu().detach(), layer)
+            
 
         def print_spectral_metrics(expert_weights, original_weights, layer, expert):
             # Convert tensors to same dtype and device
