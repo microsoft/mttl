@@ -214,10 +214,10 @@ else:
                 expert_weight = q_proj_lora_a @ q_proj_lora_b
                 expert_weights.append(expert_weight)
 
-                consine_similarity_principal_components(expert_weights[0].cpu().detach(), expert_weights[1].cpu().detach(), layer)
-                subspace_preservation(expert_weights[0].cpu().detach(), expert_weights[1].cpu().detach(), layer)
-                effective_rank_analysis(expert_weights[0].cpu().detach(), expert_weights[1].cpu().detach(), layer)
-                spectral_energy_increase(expert_weights[0].cpu().detach(), expert_weights[1].cpu().detach(), layer)
+            consine_similarity_principal_components(expert_weights[0].cpu().detach(), expert_weights[1].cpu().detach(), layer)
+            subspace_preservation(expert_weights[0].cpu().detach(), expert_weights[1].cpu().detach(), layer)
+            effective_rank_analysis(expert_weights[0].cpu().detach(), expert_weights[1].cpu().detach(), layer)
+            spectral_energy_increase(expert_weights[0].cpu().detach(), expert_weights[1].cpu().detach(), layer)
             
 
         def print_spectral_metrics(expert_weights, original_weights, layer, expert):
