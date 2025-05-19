@@ -30,7 +30,7 @@ def consine_similarity_principal_components(delta_code, delta_math, layer):
 def subspace_preservation(delta_code, delta_math, layer):
     U_code, _, _ = torch.linalg.svd(delta_code, full_matrices=False)
     U_math, _, _ = torch.linalg.svd(delta_math, full_matrices=False)
-
+    rank = 1
     U_code_k = U_code[:, :rank]
     U_math_k = U_math[:, :rank]
     
