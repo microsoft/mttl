@@ -11,7 +11,7 @@ from mttl.logging import setup_logging
 from mttl.models.modifiers.lora import spectral_distance, spectral_energy_ratio
 import numpy as np
 import matplotlib.pyplot as plt
-
+import json
 device = "cuda" if torch.cuda.is_available() else "cpu"
 setup_logging()
 
@@ -56,6 +56,7 @@ def effective_rank_analysis(delta_code, delta_math, layer):
     rank_code = effective_rank(S_code)
     rank_merge = effective_rank(S_merge)
     print(f"Effective rank - math: {rank_math}, code: {rank_code}, merged: {rank_merge} in the {layer} layer")
+    return rank_math, rank_code, rank_merge
 
 def spectral_energy_increase(delta_code, delta_math, layer):
     delta_merge = delta_math + delta_code
@@ -65,6 +66,7 @@ def spectral_energy_increase(delta_code, delta_math, layer):
 
     print(f"Spectral energy - math: {energy_math:.4f}, code: {energy_code:.4f}, merge: {energy_merge:.4f} in the {layer} layer")
     print(f"Sum of individual energies: {(energy_math + energy_code):.4f} in the {layer} layer")
+    return energy_math, energy_code, energy_merge
 
 def compute_analysis(delta_code, delta_math, layer):
     # SVD for each matrix
@@ -198,7 +200,7 @@ else:
 
     library = ExpertLibrary.get_expert_library(args.library_id)
     module = MultiExpertModule(**vars(args)).to(device)
-
+    file = open("analysis.jsonl", "w")
     if args.merge_or_route == "uniform":
         module.add_experts_from_library(args.library_id)
 
@@ -254,27 +256,72 @@ else:
                 expert_weights_up.append(expert_weight_up)
                 expert_weights_down.append(expert_weight_down)
 
-            consine_similarity_principal_components(expert_weights_q[0].cpu().detach(), expert_weights_q[1].cpu().detach(), layer)
-            consine_similarity_principal_components(expert_weights_k[0].cpu().detach(), expert_weights_k[1].cpu().detach(), layer)
-            consine_similarity_principal_components(expert_weights_v[0].cpu().detach(), expert_weights_v[1].cpu().detach(), layer)
-            consine_similarity_principal_components(expert_weights_up[0].cpu().detach(), expert_weights_up[1].cpu().detach(), layer)
-            consine_similarity_principal_components(expert_weights_down[0].cpu().detach(), expert_weights_down[1].cpu().detach(), layer)
-            subspace_preservation(expert_weights_q[0].cpu().detach(), expert_weights_q[1].cpu().detach(), layer)
-            subspace_preservation(expert_weights_k[0].cpu().detach(), expert_weights_k[1].cpu().detach(), layer)
-            subspace_preservation(expert_weights_v[0].cpu().detach(), expert_weights_v[1].cpu().detach(), layer)
-            subspace_preservation(expert_weights_up[0].cpu().detach(), expert_weights_up[1].cpu().detach(), layer)
-            subspace_preservation(expert_weights_down[0].cpu().detach(), expert_weights_down[1].cpu().detach(), layer)
+            cos_q = consine_similarity_principal_components(expert_weights_q[0].cpu().detach(), expert_weights_q[1].cpu().detach(), layer)
+            cos_k = consine_similarity_principal_components(expert_weights_k[0].cpu().detach(), expert_weights_k[1].cpu().detach(), layer)
+            cos_v = consine_similarity_principal_components(expert_weights_v[0].cpu().detach(), expert_weights_v[1].cpu().detach(), layer)
+            cos_up = consine_similarity_principal_components(expert_weights_up[0].cpu().detach(), expert_weights_up[1].cpu().detach(), layer)
+            cos_down = consine_similarity_principal_components(expert_weights_down[0].cpu().detach(), expert_weights_down[1].cpu().detach(), layer)
+            
+            subspace_preservation_q = subspace_preservation(expert_weights_q[0].cpu().detach(), expert_weights_q[1].cpu().detach(), layer)
+            subspace_preservation_k = subspace_preservation(expert_weights_k[0].cpu().detach(), expert_weights_k[1].cpu().detach(), layer)
+            subspace_preservation_v = subspace_preservation(expert_weights_v[0].cpu().detach(), expert_weights_v[1].cpu().detach(), layer)
+            subspace_preservation_up = subspace_preservation(expert_weights_up[0].cpu().detach(), expert_weights_up[1].cpu().detach(), layer)
+            subspace_preservation_down = subspace_preservation(expert_weights_down[0].cpu().detach(), expert_weights_down[1].cpu().detach(), layer)
 
-            effective_rank_analysis(expert_weights_q[0].cpu().detach(), expert_weights_q[1].cpu().detach(), layer)
-            effective_rank_analysis(expert_weights_k[0].cpu().detach(), expert_weights_k[1].cpu().detach(), layer)
-            effective_rank_analysis(expert_weights_v[0].cpu().detach(), expert_weights_v[1].cpu().detach(), layer)
-            effective_rank_analysis(expert_weights_up[0].cpu().detach(), expert_weights_up[1].cpu().detach(), layer)
-            effective_rank_analysis(expert_weights_down[0].cpu().detach(), expert_weights_down[1].cpu().detach(), layer)
-            spectral_energy_increase(expert_weights_q[0].cpu().detach(), expert_weights_q[1].cpu().detach(), layer)
-            spectral_energy_increase(expert_weights_k[0].cpu().detach(), expert_weights_k[1].cpu().detach(), layer)
-            spectral_energy_increase(expert_weights_v[0].cpu().detach(), expert_weights_v[1].cpu().detach(), layer)
-            spectral_energy_increase(expert_weights_up[0].cpu().detach(), expert_weights_up[1].cpu().detach(), layer)
-            spectral_energy_increase(expert_weights_down[0].cpu().detach(), expert_weights_down[1].cpu().detach(), layer)
+            rank_math_q, rank_code_q, rank_merge_q = effective_rank_analysis(expert_weights_q[0].cpu().detach(), expert_weights_q[1].cpu().detach(), layer)
+            rank_math_k, rank_code_k, rank_merge_k = effective_rank_analysis(expert_weights_k[0].cpu().detach(), expert_weights_k[1].cpu().detach(), layer)
+            rank_math_v, rank_code_v, rank_merge_v = effective_rank_analysis(expert_weights_v[0].cpu().detach(), expert_weights_v[1].cpu().detach(), layer)
+            rank_math_up, rank_code_up, rank_merge_up = effective_rank_analysis(expert_weights_up[0].cpu().detach(), expert_weights_up[1].cpu().detach(), layer)
+            rank_math_down, rank_code_down, rank_merge_down = effective_rank_analysis(expert_weights_down[0].cpu().detach(), expert_weights_down[1].cpu().detach(), layer)
+            energy_math_q, energy_code_q, energy_merge_q = spectral_energy_increase(expert_weights_q[0].cpu().detach(), expert_weights_q[1].cpu().detach(), layer)
+            energy_math_k, energy_code_k, energy_merge_k = spectral_energy_increase(expert_weights_k[0].cpu().detach(), expert_weights_k[1].cpu().detach(), layer)
+            energy_math_v, energy_code_v, energy_merge_v = spectral_energy_increase(expert_weights_v[0].cpu().detach(), expert_weights_v[1].cpu().detach(), layer)
+            energy_math_up, energy_code_up, energy_merge_up = spectral_energy_increase(expert_weights_up[0].cpu().detach(), expert_weights_up[1].cpu().detach(), layer)
+            energy_math_down, energy_code_down, energy_merge_down = spectral_energy_increase(expert_weights_down[0].cpu().detach(), expert_weights_down[1].cpu().detach(), layer)
+
+            write_json = {
+                f"cos_q_{layer}": cos_q,
+                f"cos_k_{layer}": cos_k,
+                f"cos_v_{layer}": cos_v,
+                f"cos_up_{layer}": cos_up,
+                f"cos_down_{layer}": cos_down,
+                f"subspace_preservation_q_{layer}": subspace_preservation_q,
+                f"subspace_preservation_k_{layer}": subspace_preservation_k,
+                f"subspace_preservation_v_{layer}": subspace_preservation_v,
+                f"subspace_preservation_up_{layer}": subspace_preservation_up,
+                f"subspace_preservation_down_{layer}": subspace_preservation_down,
+                f"rank_math_q_{layer}": rank_math_q,
+                f"rank_code_q_{layer}": rank_code_q,
+                f"rank_merge_q_{layer}": rank_merge_q,
+                f"rank_math_k_{layer}": rank_math_k,
+                f"rank_code_k_{layer}": rank_code_k,
+                f"rank_merge_k_{layer}": rank_merge_k,
+                f"rank_math_v_{layer}": rank_math_v,
+                f"rank_code_v_{layer}": rank_code_v,
+                f"rank_merge_v_{layer}": rank_merge_v,
+                f"rank_math_up_{layer}": rank_math_up,
+                f"rank_code_up_{layer}": rank_code_up,
+                f"rank_merge_up_{layer}": rank_merge_up,
+                f"rank_math_down_{layer}": rank_math_down,
+                f"rank_code_down_{layer}": rank_code_down,
+                f"rank_merge_down_{layer}": rank_merge_down,
+                f"energy_math_q_{layer}": energy_math_q,
+                f"energy_code_q_{layer}": energy_code_q,
+                f"energy_merge_q_{layer}": energy_merge_q,
+                f"energy_math_k_{layer}": energy_math_k,
+                f"energy_code_k_{layer}": energy_code_k,
+                f"energy_merge_k_{layer}": energy_merge_k,
+                f"energy_math_v_{layer}": energy_math_v,
+                f"energy_code_v_{layer}": energy_code_v,
+                f"energy_merge_v_{layer}": energy_merge_v,
+                f"energy_math_up_{layer}": energy_math_up,
+                f"energy_code_up_{layer}": energy_code_up,
+                f"energy_merge_up_{layer}": energy_merge_up,
+                f"energy_math_down_{layer}": energy_math_down,
+                f"energy_code_down_{layer}": energy_code_down,
+                f"energy_merge_down_{layer}": energy_merge_down,
+            }
+            file.write(json.dumps(write_json) + "\n")
             
 
         # def print_spectral_metrics(expert_weights, original_weights, layer, expert):
