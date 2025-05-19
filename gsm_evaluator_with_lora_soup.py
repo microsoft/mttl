@@ -56,7 +56,7 @@ def effective_rank_analysis(delta_code, delta_math, layer):
     rank_code = effective_rank(S_code)
     rank_merge = effective_rank(S_merge)
     print(f"Effective rank - math: {rank_math}, code: {rank_code}, merged: {rank_merge} in the {layer} layer")
-    return rank_math.item(), rank_code.item(), rank_merge.item()
+    return rank_math, rank_code, rank_merge
 
 def spectral_energy_increase(delta_code, delta_math, layer):
     delta_merge = delta_math + delta_code
