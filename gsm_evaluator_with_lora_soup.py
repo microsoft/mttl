@@ -24,7 +24,7 @@ def consine_similarity_principal_components(delta_code, delta_math, layer):
 
     # Cosine of top-1 singular vector
     top1_cosine = torch.abs(torch.dot(U_math[:, 0], U_code[:, 0]))
-    print(f"Top-1 singular vector cosine similarity: {top1_cosine:.4f}")
+    print(f"Top-1 singular vector cosine similarity in the {layer} layer: {top1_cosine:.4f}")
     return top1_cosine
 
 def subspace_preservation(delta_code, delta_math, layer):
@@ -35,7 +35,7 @@ def subspace_preservation(delta_code, delta_math, layer):
     U_math_k = U_math[:, :rank]
     
     overlap_score = torch.norm(U_math_k.T @ U_code_k, p='fro')
-    print(f"Subspace preservation score: {overlap_score:.4f}")
+    print(f"Subspace preservation score in the {layer} layer: {overlap_score:.4f}")
     return overlap_score
 
 def effective_rank_analysis(delta_code, delta_math, layer):
@@ -55,7 +55,7 @@ def effective_rank_analysis(delta_code, delta_math, layer):
     rank_math = effective_rank(S_math)
     rank_code = effective_rank(S_code)
     rank_merge = effective_rank(S_merge)
-    print(f"Effective rank - math: {rank_math}, code: {rank_code}, merged: {rank_merge}")
+    print(f"Effective rank - math: {rank_math}, code: {rank_code}, merged: {rank_merge} in the {layer} layer")
 
 def spectral_energy_increase(delta_code, delta_math, layer):
     delta_merge = delta_math + delta_code
@@ -63,8 +63,8 @@ def spectral_energy_increase(delta_code, delta_math, layer):
     energy_code = torch.norm(delta_code, p='fro')**2
     energy_merge = torch.norm(delta_merge, p='fro')**2
 
-    print(f"Spectral energy - math: {energy_math:.4f}, code: {energy_code:.4f}, merge: {energy_merge:.4f}")
-    print(f"Sum of individual energies: {(energy_math + energy_code):.4f}")
+    print(f"Spectral energy - math: {energy_math:.4f}, code: {energy_code:.4f}, merge: {energy_merge:.4f} in the {layer} layer")
+    print(f"Sum of individual energies: {(energy_math + energy_code):.4f} in the {layer} layer")
 
 def compute_analysis(delta_code, delta_math, layer):
     # SVD for each matrix
