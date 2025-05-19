@@ -205,7 +205,11 @@ else:
         experts = library.keys()
 
         for layer in range(len(module.model.model.model.layers)):
-            expert_weights = []
+            expert_weights_q = []
+            expert_weights_k = []
+            expert_weights_v = []
+            expert_weights_up = []
+            expert_weights_down = []
             for expert in experts:
                 q_proj_lora_a = module.model.model.model.layers[
                     layer
@@ -214,64 +218,94 @@ else:
                     layer
                 ].self_attn.q_proj.lora_b[expert]
 
-                expert_weight = q_proj_lora_a @ q_proj_lora_b
-                expert_weights.append(expert_weight)
+                k_proj_lora_a = module.model.model.model.layers[
+                    layer
+                ].self_attn.k_proj.lora_a[expert]
+                k_proj_lora_b = module.model.model.model.layers[
+                    layer
+                ].self_attn.k_proj.lora_b[expert]
 
-            consine_similarity_principal_components(expert_weights[0].cpu().detach(), expert_weights[1].cpu().detach(), layer)
-            subspace_preservation(expert_weights[0].cpu().detach(), expert_weights[1].cpu().detach(), layer)
-            effective_rank_analysis(expert_weights[0].cpu().detach(), expert_weights[1].cpu().detach(), layer)
-            spectral_energy_increase(expert_weights[0].cpu().detach(), expert_weights[1].cpu().detach(), layer)
+                v_proj_lora_a = module.model.model.model.layers[
+                    layer
+                ].self_attn.v_proj.lora_a[expert]
+                v_proj_lora_b = module.model.model.model.layers[
+                    layer
+                ].self_attn.v_proj.lora_b[expert]
+
+                up_proj_lora_a = module.model.model.model.layers[layer].mlp.up_proj.lora_a[expert]
+                up_proj_lora_b = module.model.model.model.layers[layer].mlp.up_proj.lora_b[expert]
+
+                down_proj_lora_a = module.model.model.model.layers[
+                    layer
+                ].mlp.down_proj.lora_a[expert]
+                down_proj_lora_b = module.model.model.model.layers[
+                    layer
+                ].mlp.down_proj.lora_b[expert]
+
+                expert_weight_q = q_proj_lora_a @ q_proj_lora_b
+                expert_weight_k = k_proj_lora_a @ k_proj_lora_b
+                expert_weight_v = v_proj_lora_a @ v_proj_lora_b
+                expert_weight_up = up_proj_lora_a @ up_proj_lora_b
+                expert_weight_down = down_proj_lora_a @ down_proj_lora_b
+
+                expert_weights_q.append(expert_weight_q)
+                expert_weights_k.append(expert_weight_k)
+                expert_weights_v.append(expert_weight_v)
+                expert_weights_up.append(expert_weight_up)
+                expert_weights_down.append(expert_weight_down)
+
+            consine_similarity_principal_components(expert_weights_q[0].cpu().detach(), expert_weights_q[1].cpu().detach(), layer)
+            consine_similarity_principal_components(expert_weights_k[0].cpu().detach(), expert_weights_k[1].cpu().detach(), layer)
+            consine_similarity_principal_components(expert_weights_v[0].cpu().detach(), expert_weights_v[1].cpu().detach(), layer)
+            consine_similarity_principal_components(expert_weights_up[0].cpu().detach(), expert_weights_up[1].cpu().detach(), layer)
+            consine_similarity_principal_components(expert_weights_down[0].cpu().detach(), expert_weights_down[1].cpu().detach(), layer)
+            subspace_preservation(expert_weights_q[0].cpu().detach(), expert_weights_q[1].cpu().detach(), layer)
+            subspace_preservation(expert_weights_k[0].cpu().detach(), expert_weights_k[1].cpu().detach(), layer)
+            subspace_preservation(expert_weights_v[0].cpu().detach(), expert_weights_v[1].cpu().detach(), layer)
+            subspace_preservation(expert_weights_up[0].cpu().detach(), expert_weights_up[1].cpu().detach(), layer)
+            subspace_preservation(expert_weights_down[0].cpu().detach(), expert_weights_down[1].cpu().detach(), layer)
+
+            effective_rank_analysis(expert_weights_q[0].cpu().detach(), expert_weights_q[1].cpu().detach(), layer)
+            effective_rank_analysis(expert_weights_k[0].cpu().detach(), expert_weights_k[1].cpu().detach(), layer)
+            effective_rank_analysis(expert_weights_v[0].cpu().detach(), expert_weights_v[1].cpu().detach(), layer)
+            effective_rank_analysis(expert_weights_up[0].cpu().detach(), expert_weights_up[1].cpu().detach(), layer)
+            effective_rank_analysis(expert_weights_down[0].cpu().detach(), expert_weights_down[1].cpu().detach(), layer)
+            spectral_energy_increase(expert_weights_q[0].cpu().detach(), expert_weights_q[1].cpu().detach(), layer)
+            spectral_energy_increase(expert_weights_k[0].cpu().detach(), expert_weights_k[1].cpu().detach(), layer)
+            spectral_energy_increase(expert_weights_v[0].cpu().detach(), expert_weights_v[1].cpu().detach(), layer)
+            spectral_energy_increase(expert_weights_up[0].cpu().detach(), expert_weights_up[1].cpu().detach(), layer)
+            spectral_energy_increase(expert_weights_down[0].cpu().detach(), expert_weights_down[1].cpu().detach(), layer)
             
 
-        def print_spectral_metrics(expert_weights, original_weights, layer, expert):
-            # Convert tensors to same dtype and device
-            original_weights = original_weights.to(expert_weights.dtype).to(
-                expert_weights.device
-            )
+        # def print_spectral_metrics(expert_weights, original_weights, layer, expert):
+        #     # Convert tensors to same dtype and device
+        #     original_weights = original_weights.to(expert_weights.dtype).to(
+        #         expert_weights.device
+        #     )
 
-            # Detach tensors for computation
-            expert_weights = expert_weights.detach()
-            original_weights = original_weights.detach()
+        #     # Detach tensors for computation
+        #     expert_weights = expert_weights.detach()
+        #     original_weights = original_weights.detach()
 
-            # Calculate and print metrics
-            dist = spectral_distance(expert_weights, original_weights)
-            ratio = spectral_energy_ratio(expert_weights, original_weights)
+        #     # Calculate and print metrics
+        #     dist = spectral_distance(expert_weights, original_weights)
+        #     ratio = spectral_energy_ratio(expert_weights, original_weights)
 
-            print(f"Layer {layer} Expert {expert} Spectral Distance: {dist}")
-            print(f"Layer {layer} Expert {expert} Spectral Energy Ratio: {ratio}")
+        #     print(f"Layer {layer} Expert {expert} Spectral Distance: {dist}")
+        #     print(f"Layer {layer} Expert {expert} Spectral Energy Ratio: {ratio}")
 
-            return dist, ratio
+        #     return dist, ratio
 
-        # Calculate expert weights and call print function
-        expert_weights = q_proj_lora_a @ q_proj_lora_b
-        original_weights = module.model.model.model.layers[
-            layer
-        ].self_attn.q_proj.layer.weight
-        print_spectral_metrics(expert_weights, original_weights, layer, expert)
+        # # Calculate expert weights and call print function
+        # expert_weights = q_proj_lora_a @ q_proj_lora_b
+        # original_weights = module.model.model.model.layers[
+        #     layer
+        # ].self_attn.q_proj.layer.weight
+        # print_spectral_metrics(expert_weights, original_weights, layer, expert)
 
-        #     k_proj_lora_a = module.model.model.model.layers[
-        #         layer
-        #     ].self_attn.k_proj.lora_a
-        #     k_proj_lora_b = module.model.model.model.layers[
-        #         layer
-        #     ].self_attn.k_proj.lora_b
+        #     
 
-        #     v_proj_lora_a = module.model.model.model.layers[
-        #         layer
-        #     ].self_attn.v_proj.lora_a
-        #     v_proj_lora_b = module.model.model.model.layers[
-        #         layer
-        #     ].self_attn.v_proj.lora_b
-
-        #     up_proj_lora_a = module.model.model.model.layers[layer].mlp.up_proj.lora_a
-        #     up_proj_lora_b = module.model.model.model.layers[layer].mlp.up_proj.lora_b
-
-        #     down_proj_lora_a = module.model.model.model.layers[
-        #         layer
-        #     ].mlp.down_proj.lora_a
-        #     down_proj_lora_b = module.model.model.model.layers[
-        #         layer
-        #     ].mlp.down_proj.lora_b
+        #     
 
         #     print(q_proj_lora_a.shape)
         #     print(q_proj_lora_b.shape)
