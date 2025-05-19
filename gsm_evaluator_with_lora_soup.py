@@ -322,6 +322,7 @@ else:
                 f"energy_merge_down_{layer}": energy_merge_down,
             }
             file.write(json.dumps(write_json) + "\n")
+            file.flush()
             
 
         # def print_spectral_metrics(expert_weights, original_weights, layer, expert):
