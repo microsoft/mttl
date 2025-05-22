@@ -43,3 +43,41 @@ class LoraSoupSelector(Selector):
         weights = self._get_weights()
         experts = list(self.module_logits_dict.keys())
         return ExpertsAndWeightsSelectorOutput(experts, weights)
+
+
+@dataclass
+class LoraSoupPriorSelectorConfig(SelectorConfig):
+    pass
+
+
+@Selector.register("lora_soup_prior_router", LoraSoupPriorSelectorConfig)
+class LoraSoupPriorSelector(LoraSoupSelector):
+    """
+    LoraSoupPriorSelector extends LoraSoupSelector to incorporate prior routing information.
+    It blends the learned routing weights with prior routing weights using a learnable alpha parameter.
+    """
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        # Learnable parameter to control blending between prior and current routing
+        self.alpha = nn.Parameter(torch.tensor(0.5))
+
+    def _get_weights(self, prior_weights=None):
+        # Get base weights from parent class
+        current_weights = super()._get_weights()
+
+        if prior_weights is not None:
+            # Blend prior and current weights using learnable alpha
+            weights = self.alpha * prior_weights + (1 - self.alpha) * current_weights
+        else:
+            weights = current_weights
+
+        return weights
+
+    @forward_with_cache
+    def forward(
+        self, input, prior_weights=None, **kwargs
+    ) -> ExpertsAndWeightsSelectorOutput:
+        weights = self._get_weights(prior_weights)
+        experts = list(self.module_logits_dict.keys())
+        return ExpertsAndWeightsSelectorOutput(experts, weights)
