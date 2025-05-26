@@ -12,6 +12,7 @@ from mttl.models.modifiers.lora import spectral_distance, spectral_energy_ratio
 import numpy as np
 import matplotlib.pyplot as plt
 import json
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
 setup_logging()
 
@@ -24,8 +25,11 @@ def consine_similarity_principal_components(delta_code, delta_math, layer):
 
     # Cosine of top-1 singular vector
     top1_cosine = torch.abs(torch.dot(U_math[:, 0], U_code[:, 0]))
-    print(f"Top-1 singular vector cosine similarity in the {layer} layer: {top1_cosine:.4f}")
+    print(
+        f"Top-1 singular vector cosine similarity in the {layer} layer: {top1_cosine:.4f}"
+    )
     return top1_cosine.item()
+
 
 def subspace_preservation(delta_code, delta_math, layer):
     U_code, _, _ = torch.linalg.svd(delta_code, full_matrices=False)
@@ -33,10 +37,11 @@ def subspace_preservation(delta_code, delta_math, layer):
     rank = 1
     U_code_k = U_code[:, :rank]
     U_math_k = U_math[:, :rank]
-    
-    overlap_score = torch.norm(U_math_k.T @ U_code_k, p='fro')
+
+    overlap_score = torch.norm(U_math_k.T @ U_code_k, p="fro")
     print(f"Subspace preservation score in the {layer} layer: {overlap_score:.4f}")
     return overlap_score.item()
+
 
 def effective_rank_analysis(delta_code, delta_math, layer):
     U_code, _, _ = torch.linalg.svd(delta_code, full_matrices=False)
@@ -55,18 +60,26 @@ def effective_rank_analysis(delta_code, delta_math, layer):
     rank_math = effective_rank(S_math)
     rank_code = effective_rank(S_code)
     rank_merge = effective_rank(S_merge)
-    print(f"Effective rank - math: {rank_math}, code: {rank_code}, merged: {rank_merge} in the {layer} layer")
+    print(
+        f"Effective rank - math: {rank_math}, code: {rank_code}, merged: {rank_merge} in the {layer} layer"
+    )
     return rank_math, rank_code, rank_merge
+
 
 def spectral_energy_increase(delta_code, delta_math, layer):
     delta_merge = delta_math + delta_code
-    energy_math = torch.norm(delta_math, p='fro')**2
-    energy_code = torch.norm(delta_code, p='fro')**2
-    energy_merge = torch.norm(delta_merge, p='fro')**2
+    energy_math = torch.norm(delta_math, p="fro") ** 2
+    energy_code = torch.norm(delta_code, p="fro") ** 2
+    energy_merge = torch.norm(delta_merge, p="fro") ** 2
 
-    print(f"Spectral energy - math: {energy_math:.4f}, code: {energy_code:.4f}, merge: {energy_merge:.4f} in the {layer} layer")
-    print(f"Sum of individual energies: {(energy_math + energy_code):.4f} in the {layer} layer")
+    print(
+        f"Spectral energy - math: {energy_math:.4f}, code: {energy_code:.4f}, merge: {energy_merge:.4f} in the {layer} layer"
+    )
+    print(
+        f"Sum of individual energies: {(energy_math + energy_code):.4f} in the {layer} layer"
+    )
     return energy_math.item(), energy_code.item(), energy_merge.item()
+
 
 def compute_analysis(delta_code, delta_math, layer):
     # SVD for each matrix
@@ -205,158 +218,76 @@ else:
         module.add_experts_from_library(args.library_id)
 
         experts = library.keys()
+        layer_count = len(module.model.model.model.layers)
 
-        for layer in range(len(module.model.model.model.layers)):
-            expert_weights_q = []
-            expert_weights_k = []
-            expert_weights_v = []
-            expert_weights_up = []
-            expert_weights_down = []
+        def get_expert_weights(layer, expert, proj_type):
+            """Helper function to get expert weights for a projection type"""
+            layer_obj = module.model.model.model.layers[layer]
+            if proj_type in ["q", "k", "v"]:
+                lora_a = getattr(layer_obj.self_attn, f"{proj_type}_proj").lora_a[
+                    expert
+                ]
+                lora_b = getattr(layer_obj.self_attn, f"{proj_type}_proj").lora_b[
+                    expert
+                ]
+            else:  # up or down
+                lora_a = getattr(layer_obj.mlp, f"{proj_type}_proj").lora_a[expert]
+                lora_b = getattr(layer_obj.mlp, f"{proj_type}_proj").lora_b[expert]
+            return lora_a @ lora_b
+
+        def compute_metrics(weights_list, layer, metric_func):
+            """Helper function to compute metrics for a list of weights"""
+            return metric_func(
+                weights_list[0].cpu().detach(), weights_list[1].cpu().detach(), layer
+            )
+
+        for layer in range(layer_count):
+            # Collect expert weights for each projection type
+            proj_types = ["q", "k", "v", "up", "down"]
+            expert_weights = {pt: [] for pt in proj_types}
+
             for expert in experts:
-                q_proj_lora_a = module.model.model.model.layers[
-                    layer
-                ].self_attn.q_proj.lora_a[expert]
-                q_proj_lora_b = module.model.model.model.layers[
-                    layer
-                ].self_attn.q_proj.lora_b[expert]
+                for pt in proj_types:
+                    expert_weights[pt].append(get_expert_weights(layer, expert, pt))
 
-                k_proj_lora_a = module.model.model.model.layers[
-                    layer
-                ].self_attn.k_proj.lora_a[expert]
-                k_proj_lora_b = module.model.model.model.layers[
-                    layer
-                ].self_attn.k_proj.lora_b[expert]
+            # Compute metrics for each projection type
+            metrics = {}
+            for pt in proj_types:
+                weights = expert_weights[pt]
+                metrics.update(
+                    {
+                        f"cos_{pt}_{layer}": compute_metrics(
+                            weights, layer, consine_similarity_principal_components
+                        ),
+                        f"subspace_preservation_{pt}_{layer}": compute_metrics(
+                            weights, layer, subspace_preservation
+                        ),
+                    }
+                )
 
-                v_proj_lora_a = module.model.model.model.layers[
-                    layer
-                ].self_attn.v_proj.lora_a[expert]
-                v_proj_lora_b = module.model.model.model.layers[
-                    layer
-                ].self_attn.v_proj.lora_b[expert]
+                rank_metrics = compute_metrics(weights, layer, effective_rank_analysis)
+                metrics.update(
+                    {
+                        f"rank_math_{pt}_{layer}": rank_metrics[0],
+                        f"rank_code_{pt}_{layer}": rank_metrics[1],
+                        f"rank_merge_{pt}_{layer}": rank_metrics[2],
+                    }
+                )
 
-                up_proj_lora_a = module.model.model.model.layers[layer].mlp.up_proj.lora_a[expert]
-                up_proj_lora_b = module.model.model.model.layers[layer].mlp.up_proj.lora_b[expert]
+                energy_metrics = compute_metrics(
+                    weights, layer, spectral_energy_increase
+                )
+                metrics.update(
+                    {
+                        f"energy_math_{pt}_{layer}": energy_metrics[0],
+                        f"energy_code_{pt}_{layer}": energy_metrics[1],
+                        f"energy_merge_{pt}_{layer}": energy_metrics[2],
+                    }
+                )
 
-                down_proj_lora_a = module.model.model.model.layers[
-                    layer
-                ].mlp.down_proj.lora_a[expert]
-                down_proj_lora_b = module.model.model.model.layers[
-                    layer
-                ].mlp.down_proj.lora_b[expert]
-
-                expert_weight_q = q_proj_lora_a @ q_proj_lora_b
-                expert_weight_k = k_proj_lora_a @ k_proj_lora_b
-                expert_weight_v = v_proj_lora_a @ v_proj_lora_b
-                expert_weight_up = up_proj_lora_a @ up_proj_lora_b
-                expert_weight_down = down_proj_lora_a @ down_proj_lora_b
-
-                expert_weights_q.append(expert_weight_q)
-                expert_weights_k.append(expert_weight_k)
-                expert_weights_v.append(expert_weight_v)
-                expert_weights_up.append(expert_weight_up)
-                expert_weights_down.append(expert_weight_down)
-
-            cos_q = consine_similarity_principal_components(expert_weights_q[0].cpu().detach(), expert_weights_q[1].cpu().detach(), layer)
-            cos_k = consine_similarity_principal_components(expert_weights_k[0].cpu().detach(), expert_weights_k[1].cpu().detach(), layer)
-            cos_v = consine_similarity_principal_components(expert_weights_v[0].cpu().detach(), expert_weights_v[1].cpu().detach(), layer)
-            cos_up = consine_similarity_principal_components(expert_weights_up[0].cpu().detach(), expert_weights_up[1].cpu().detach(), layer)
-            cos_down = consine_similarity_principal_components(expert_weights_down[0].cpu().detach(), expert_weights_down[1].cpu().detach(), layer)
-            
-            subspace_preservation_q = subspace_preservation(expert_weights_q[0].cpu().detach(), expert_weights_q[1].cpu().detach(), layer)
-            subspace_preservation_k = subspace_preservation(expert_weights_k[0].cpu().detach(), expert_weights_k[1].cpu().detach(), layer)
-            subspace_preservation_v = subspace_preservation(expert_weights_v[0].cpu().detach(), expert_weights_v[1].cpu().detach(), layer)
-            subspace_preservation_up = subspace_preservation(expert_weights_up[0].cpu().detach(), expert_weights_up[1].cpu().detach(), layer)
-            subspace_preservation_down = subspace_preservation(expert_weights_down[0].cpu().detach(), expert_weights_down[1].cpu().detach(), layer)
-
-            rank_math_q, rank_code_q, rank_merge_q = effective_rank_analysis(expert_weights_q[0].cpu().detach(), expert_weights_q[1].cpu().detach(), layer)
-            rank_math_k, rank_code_k, rank_merge_k = effective_rank_analysis(expert_weights_k[0].cpu().detach(), expert_weights_k[1].cpu().detach(), layer)
-            rank_math_v, rank_code_v, rank_merge_v = effective_rank_analysis(expert_weights_v[0].cpu().detach(), expert_weights_v[1].cpu().detach(), layer)
-            rank_math_up, rank_code_up, rank_merge_up = effective_rank_analysis(expert_weights_up[0].cpu().detach(), expert_weights_up[1].cpu().detach(), layer)
-            rank_math_down, rank_code_down, rank_merge_down = effective_rank_analysis(expert_weights_down[0].cpu().detach(), expert_weights_down[1].cpu().detach(), layer)
-            energy_math_q, energy_code_q, energy_merge_q = spectral_energy_increase(expert_weights_q[0].cpu().detach(), expert_weights_q[1].cpu().detach(), layer)
-            energy_math_k, energy_code_k, energy_merge_k = spectral_energy_increase(expert_weights_k[0].cpu().detach(), expert_weights_k[1].cpu().detach(), layer)
-            energy_math_v, energy_code_v, energy_merge_v = spectral_energy_increase(expert_weights_v[0].cpu().detach(), expert_weights_v[1].cpu().detach(), layer)
-            energy_math_up, energy_code_up, energy_merge_up = spectral_energy_increase(expert_weights_up[0].cpu().detach(), expert_weights_up[1].cpu().detach(), layer)
-            energy_math_down, energy_code_down, energy_merge_down = spectral_energy_increase(expert_weights_down[0].cpu().detach(), expert_weights_down[1].cpu().detach(), layer)
-
-            write_json = {
-                f"cos_q_{layer}": cos_q,
-                f"cos_k_{layer}": cos_k,
-                f"cos_v_{layer}": cos_v,
-                f"cos_up_{layer}": cos_up,
-                f"cos_down_{layer}": cos_down,
-                f"subspace_preservation_q_{layer}": subspace_preservation_q,
-                f"subspace_preservation_k_{layer}": subspace_preservation_k,
-                f"subspace_preservation_v_{layer}": subspace_preservation_v,
-                f"subspace_preservation_up_{layer}": subspace_preservation_up,
-                f"subspace_preservation_down_{layer}": subspace_preservation_down,
-                f"rank_math_q_{layer}": rank_math_q,
-                f"rank_code_q_{layer}": rank_code_q,
-                f"rank_merge_q_{layer}": rank_merge_q,
-                f"rank_math_k_{layer}": rank_math_k,
-                f"rank_code_k_{layer}": rank_code_k,
-                f"rank_merge_k_{layer}": rank_merge_k,
-                f"rank_math_v_{layer}": rank_math_v,
-                f"rank_code_v_{layer}": rank_code_v,
-                f"rank_merge_v_{layer}": rank_merge_v,
-                f"rank_math_up_{layer}": rank_math_up,
-                f"rank_code_up_{layer}": rank_code_up,
-                f"rank_merge_up_{layer}": rank_merge_up,
-                f"rank_math_down_{layer}": rank_math_down,
-                f"rank_code_down_{layer}": rank_code_down,
-                f"rank_merge_down_{layer}": rank_merge_down,
-                f"energy_math_q_{layer}": energy_math_q,
-                f"energy_code_q_{layer}": energy_code_q,
-                f"energy_merge_q_{layer}": energy_merge_q,
-                f"energy_math_k_{layer}": energy_math_k,
-                f"energy_code_k_{layer}": energy_code_k,
-                f"energy_merge_k_{layer}": energy_merge_k,
-                f"energy_math_v_{layer}": energy_math_v,
-                f"energy_code_v_{layer}": energy_code_v,
-                f"energy_merge_v_{layer}": energy_merge_v,
-                f"energy_math_up_{layer}": energy_math_up,
-                f"energy_code_up_{layer}": energy_code_up,
-                f"energy_merge_up_{layer}": energy_merge_up,
-                f"energy_math_down_{layer}": energy_math_down,
-                f"energy_code_down_{layer}": energy_code_down,
-                f"energy_merge_down_{layer}": energy_merge_down,
-            }
-            file.write(json.dumps(write_json) + "\n")
+            # Write results
+            file.write(json.dumps(metrics) + "\n")
             file.flush()
-            
-
-        # def print_spectral_metrics(expert_weights, original_weights, layer, expert):
-        #     # Convert tensors to same dtype and device
-        #     original_weights = original_weights.to(expert_weights.dtype).to(
-        #         expert_weights.device
-        #     )
-
-        #     # Detach tensors for computation
-        #     expert_weights = expert_weights.detach()
-        #     original_weights = original_weights.detach()
-
-        #     # Calculate and print metrics
-        #     dist = spectral_distance(expert_weights, original_weights)
-        #     ratio = spectral_energy_ratio(expert_weights, original_weights)
-
-        #     print(f"Layer {layer} Expert {expert} Spectral Distance: {dist}")
-        #     print(f"Layer {layer} Expert {expert} Spectral Energy Ratio: {ratio}")
-
-        #     return dist, ratio
-
-        # # Calculate expert weights and call print function
-        # expert_weights = q_proj_lora_a @ q_proj_lora_b
-        # original_weights = module.model.model.model.layers[
-        #     layer
-        # ].self_attn.q_proj.layer.weight
-        # print_spectral_metrics(expert_weights, original_weights, layer, expert)
-
-        #     
-
-        #     
-
-        #     print(q_proj_lora_a.shape)
-        #     print(q_proj_lora_b.shape)
 
         experts_names = library.keys()
         if args.expert_weights:
