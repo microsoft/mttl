@@ -212,12 +212,6 @@ def load_expert_from_pl_checkpoint(
         if "tokenizer" in expert_checkpoint["hyper_parameters"]:
             expert_checkpoint["hyper_parameters"].pop("tokenizer")
 
-        if not expert_info_data.get("expert_config", None):
-            expert_info_data["expert_config"] = expert_checkpoint["hyper_parameters"]
-        else:
-            if "tokenizer" in expert_info_data["expert_config"]:
-                expert_info_data["expert_config"].pop("tokenizer")
-
         if not expert_info_data.get("expert_name", None):
             expert_info_data["expert_name"] = expert_checkpoint["hyper_parameters"][
                 "expert_name"
