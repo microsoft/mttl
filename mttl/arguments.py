@@ -337,6 +337,9 @@ class TrainingArgs(DataArgs):
     data_dir: str = os.getenv("TRAIN_DIR", "/tmp/")
     output_dir: str = os.getenv("OUTPUT_DIR", "./output")
 
+    # merging co-efficient
+    merge_alpha: float = 1.0
+
     # meta-tasks or group of tasks
     finetune_task_path: str = None
     # name of tasks, or name of group of tasks if finetune_task_path is set
