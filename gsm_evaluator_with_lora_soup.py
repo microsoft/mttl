@@ -242,53 +242,53 @@ else:
                 weights_list[0].cpu().detach(), weights_list[1].cpu().detach(), layer
             )
 
-        for layer in range(layer_count):
-            # Collect expert weights for each projection type
-            proj_types = ["q", "k", "v", "up", "down"]
-            expert_weights = {pt: [] for pt in proj_types}
+        # for layer in range(layer_count):
+        #     # Collect expert weights for each projection type
+        #     proj_types = ["q", "k", "v", "up", "down"]
+        #     expert_weights = {pt: [] for pt in proj_types}
 
-            for expert in experts:
-                for pt in proj_types:
-                    expert_weights[pt].append(get_expert_weights(layer, expert, pt))
+        #     for expert in experts:
+        #         for pt in proj_types:
+        #             expert_weights[pt].append(get_expert_weights(layer, expert, pt))
 
-            # Compute metrics for each projection type
-            metrics = {}
-            for pt in proj_types:
-                weights = expert_weights[pt]
-                metrics.update(
-                    {
-                        f"cos_{pt}_{layer}": compute_metrics(
-                            weights, layer, consine_similarity_principal_components
-                        ),
-                        f"subspace_preservation_{pt}_{layer}": compute_metrics(
-                            weights, layer, subspace_preservation
-                        ),
-                    }
-                )
+        #     # Compute metrics for each projection type
+        #     metrics = {}
+        #     for pt in proj_types:
+        #         weights = expert_weights[pt]
+        #         metrics.update(
+        #             {
+        #                 f"cos_{pt}_{layer}": compute_metrics(
+        #                     weights, layer, consine_similarity_principal_components
+        #                 ),
+        #                 f"subspace_preservation_{pt}_{layer}": compute_metrics(
+        #                     weights, layer, subspace_preservation
+        #                 ),
+        #             }
+        #         )
 
-                rank_metrics = compute_metrics(weights, layer, effective_rank_analysis)
-                metrics.update(
-                    {
-                        f"rank_math_{pt}_{layer}": rank_metrics[0],
-                        f"rank_code_{pt}_{layer}": rank_metrics[1],
-                        f"rank_merge_{pt}_{layer}": rank_metrics[2],
-                    }
-                )
+        #         rank_metrics = compute_metrics(weights, layer, effective_rank_analysis)
+        #         metrics.update(
+        #             {
+        #                 f"rank_math_{pt}_{layer}": rank_metrics[0],
+        #                 f"rank_code_{pt}_{layer}": rank_metrics[1],
+        #                 f"rank_merge_{pt}_{layer}": rank_metrics[2],
+        #             }
+        #         )
 
-                energy_metrics = compute_metrics(
-                    weights, layer, spectral_energy_increase
-                )
-                metrics.update(
-                    {
-                        f"energy_math_{pt}_{layer}": energy_metrics[0],
-                        f"energy_code_{pt}_{layer}": energy_metrics[1],
-                        f"energy_merge_{pt}_{layer}": energy_metrics[2],
-                    }
-                )
+        #         energy_metrics = compute_metrics(
+        #             weights, layer, spectral_energy_increase
+        #         )
+        #         metrics.update(
+        #             {
+        #                 f"energy_math_{pt}_{layer}": energy_metrics[0],
+        #                 f"energy_code_{pt}_{layer}": energy_metrics[1],
+        #                 f"energy_merge_{pt}_{layer}": energy_metrics[2],
+        #             }
+        #         )
 
-            # Write results
-            file.write(json.dumps(metrics) + "\n")
-            file.flush()
+        #     # Write results
+        #     file.write(json.dumps(metrics) + "\n")
+        #     file.flush()
 
         experts_names = library.keys()
         if args.expert_weights:
