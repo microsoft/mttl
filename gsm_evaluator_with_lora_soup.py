@@ -12,6 +12,7 @@ from mttl.models.modifiers.lora import spectral_distance, spectral_energy_ratio
 import numpy as np
 import matplotlib.pyplot as plt
 import json
+from mttl.models.library.library_transforms import WudiMerge, WudiMergeConfig
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 setup_logging()
@@ -305,6 +306,11 @@ else:
                     lora_merge_after=args.lora_merge_after, experts_weight_list=None
                 ),
             )
+    elif args.merge_or_route == "wudi":
+        cfg = WudiMergeConfig(iter=300, lr=1e-5)
+        expert = WudiMerge(cfg).transform(library)
+
+        module.model.add_expert_instance(expert, is_default=True)
     elif args.merge_or_route in ["phatgoose", "arrow", "avg_act"]:
         module.add_experts_from_library(args.library_id)
         """Routing Approaches"""
