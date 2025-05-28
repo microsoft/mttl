@@ -207,7 +207,7 @@ def run_eval(args: EvaluationConfig):
             cfg = TiesMergeConfig(top_k=args.transform_sparsity)
             expert = TiesMerge(cfg).transform(library)
         elif args.merge_or_route == "wudi":
-            cfg = WudiMergeConfig(iter=300, lr=1e-5)
+            cfg = WudiMergeConfig(iter=500, lr=1e-4)
             expert = WudiMerge(cfg).transform(library)
 
         model = MultiExpertModel(
