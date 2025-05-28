@@ -256,7 +256,8 @@ class WudiMerge(LibraryTransform):
             )
 
             # Optimize merging vector
-            for _ in tqdm(range(self.config.iter), desc=f"Optimizing parameter {key}"):
+            pbar = tqdm(range(self.config.iter), desc=f"Optimizing parameter {key}")
+            for step in pbar:
                 disturbing_vectors = merging_vector.unsqueeze(0) - values
                 inner_product = torch.matmul(disturbing_vectors, values.transpose(1, 2))
 
@@ -266,6 +267,7 @@ class WudiMerge(LibraryTransform):
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+                pbar.set_postfix({"loss": f"{loss.item():.4f}"})
             merging_vector = merging_vector / len(experts)
             # Update base expert weights with optimized merging vector
             base_expert.expert_weights[key].data.copy_(merging_vector.data.cpu())
