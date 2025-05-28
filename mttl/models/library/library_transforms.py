@@ -220,7 +220,6 @@ class WudiMerge(LibraryTransform):
     def __init__(self, config: WudiMergeConfig = None):
         super().__init__(config or WudiMergeConfig())
 
-    @torch.no_grad()
     def transform(self, library) -> Expert:
         device = "cuda" if torch.cuda.is_available() else "cpu"
         if type(library) == str:
@@ -244,7 +243,9 @@ class WudiMerge(LibraryTransform):
             values = values.to(device)
 
             # Initialize merged vector as sum of all vectors
-            merging_vector = torch.nn.Parameter(torch.sum(values, dim=0))
+            merging_vector = torch.nn.Parameter(
+                torch.sum(values, dim=0), requires_grad=True
+            )
             optimizer = torch.optim.Adam(
                 [merging_vector], lr=self.config.lr, weight_decay=0
             )
@@ -262,11 +263,9 @@ class WudiMerge(LibraryTransform):
                 loss = torch.sum(
                     torch.square(inner_product) / l2_norms.unsqueeze(-1).unsqueeze(-1)
                 )
-                loss = loss.requires_grad_(True)  # Ensure loss requires gradients
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-
             merging_vector = merging_vector / len(experts)
             # Update base expert weights with optimized merging vector
             base_expert.expert_weights[key].data.copy_(merging_vector.data.cpu())
