@@ -257,6 +257,11 @@ class WudiMerge(LibraryTransform):
 
             # Optimize merging vector
             pbar = tqdm(range(self.config.iter), desc=f"Optimizing parameter {key}")
+            prev_loss = float("inf")
+            patience = 5  # Number of steps to wait for improvement
+            no_improve_count = 0
+            min_delta = 1e-4  # Minimum change in loss to be considered improvement
+
             for step in pbar:
                 disturbing_vectors = merging_vector.unsqueeze(0) - values
                 inner_product = torch.matmul(disturbing_vectors, values.transpose(1, 2))
@@ -267,6 +272,21 @@ class WudiMerge(LibraryTransform):
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
+
+                # Check if loss improvement is significant
+                if abs(prev_loss - loss.item()) < min_delta:
+                    no_improve_count += 1
+                else:
+                    no_improve_count = 0
+
+                # Early stopping if no significant improvement for patience steps
+                if no_improve_count >= patience:
+                    logger.info(
+                        f"Early stopping at step {step} due to minimal loss change"
+                    )
+                    break
+
+                prev_loss = loss.item()
                 pbar.set_postfix({"loss": f"{loss.item():.4f}"})
             merging_vector = merging_vector / len(experts)
             # Update base expert weights with optimized merging vector
