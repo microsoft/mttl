@@ -684,7 +684,7 @@ class DataModule(LightningDataModule, Registrable):
     @property
     def train_task_names(self):
         if not hasattr(self, "_train_task_names"):
-            if len(self.train_dataset) == 0:
+            if not self.train_dataset or len(self.train_dataset) == 0:
                 self._train_task_names = []
             else:
                 self._train_task_names = list(
@@ -800,7 +800,7 @@ class DataModule(LightningDataModule, Registrable):
                             if value == task_name
                         ]
                     )
-                    idxs = get_dst_idxs_sampled(n_samples, len(task_idxs))
+                    idxs = get_dst_idxs_sampled(n_samples // len(task_names), len(task_idxs))
                     task_idxs = task_idxs[idxs]
                     task_dataset = dataset.select(task_idxs)
                     subsampled_dataset.append(task_dataset)
