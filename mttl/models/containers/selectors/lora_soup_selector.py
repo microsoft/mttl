@@ -1,9 +1,12 @@
 from mttl.models.containers.selectors.base import (
     ExpertsAndWeightsSelectorOutput,
-    BatchSequenceExpertsAndWeightsSelectorOutput,
     forward_with_cache,
     SelectorConfig,
     Selector,
+)
+from mttl.models.containers.selectors.selector_output import (
+    ALL_EXPERTS,
+    BatchSequenceExpertsAndWeightsSelectorOutput,
 )
 from dataclasses import dataclass
 import torch.nn as nn
@@ -11,6 +14,7 @@ import torch
 from mttl.models.containers.selectors.lora_merge_eign_input_analysis import (
     AdaptiveLoRAMerger,
 )
+from typing import Tuple
 
 
 @dataclass
@@ -88,6 +92,94 @@ class LoraSoupSelectorEign(LoraSoupSelector):
         weights = torch.tensor(proj_coeffs).to(self.device)
         experts = list(self.module_logits_dict.keys())
         return ExpertsAndWeightsSelectorOutput(experts, weights)
+
+
+class Encoder(nn.Module):
+    def __init__(self, input_dim, hidden_dim, z_dim):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+        )
+        self.u_plus = nn.Linear(hidden_dim, z_dim)
+        self.delta_plus = nn.Linear(hidden_dim, z_dim)
+        self.u_minus = nn.Linear(hidden_dim, z_dim)
+        self.delta_minus = nn.Linear(hidden_dim, z_dim)
+
+    def forward(self, R):
+        h = self.net(R)
+        return self.u_plus(h), self.delta_plus(h), self.u_minus(h), self.delta_minus(h)
+
+
+@dataclass
+class VariationalLoRSelectorConfig(SelectorConfig):
+    encoder_hidden_dim: int = 256
+    encoder_latent_dim: int = 64
+    num_experts: int = 3
+
+
+@Selector.register("variational_lora_router", VariationalLoRSelectorConfig)
+class VariationalLoRASelector(Selector):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+
+        layer = kwargs["layer"]
+        self.output_dim, self.input_dim = layer.out_features, layer.in_features
+
+        self.hidden_dim = self.config.encoder_hidden_dim
+        self.latent_dim = self.config.encoder_latent_dim
+        # Encoder network for inferring latent variable distribution
+        self.encoder = Encoder(self.input_dim, self.hidden_dim, self.latent_dim)
+        # Adapter selector network
+        self.adapter_selector = nn.Sequential(
+            nn.Linear(self.latent_dim, self.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self.hidden_dim, self.config.num_experts),
+            nn.Sigmoid(),  # Output weights for each adapter
+        )
+
+    def forward(self, input, **kwargs) -> ExpertsAndWeightsSelectorOutput:
+        # Encode to get latent distribution
+        u_plus, delta_plus, u_minus, delta_minus = self.encoder(input)
+        z_plus = u_plus + torch.randn_like(u_plus) * torch.exp(delta_plus)
+        z_minus = u_minus + torch.randn_like(u_minus) * torch.exp(delta_minus)
+
+        z = z_plus + z_minus
+        u_z = u_plus + u_minus
+        delta_z = delta_plus + delta_minus
+        # Get adapter weights based on latent variable
+        weights = self.adapter_selector(z)
+
+        kl_zp = self.kl_divergence(u_plus, delta_plus, u_z, delta_z)
+        kl_zm = self.kl_divergence(u_minus, delta_minus, u_z, delta_z)
+
+        kl_loss = kl_zp + kl_zm
+
+        # Store auxiliary losses
+        aug_losses = self.info_container.routing_infos.aux_losses
+        aug_losses[self.layer_name] = kl_loss
+
+        experts = ALL_EXPERTS
+        return BatchSequenceExpertsAndWeightsSelectorOutput(experts, weights)
+
+    # -----------------------------
+
+    # KL Divergence Between Two Gaussians
+    # -----------------------------
+    def kl_divergence(self, mu1, logvar1, mu2, logvar2):
+        var1 = torch.exp(logvar1)
+        var2 = torch.exp(logvar2)
+        return (
+            0.5
+            * torch.sum(
+                logvar2 - logvar1 + (var1 + (mu1 - mu2) ** 2) / var2 - 1, dim=1
+            ).mean()
+        )
+
+    def compute_kl_divergence_gaussian(self, mu, log_var):
+        """Compute KL divergence between Gaussian and standard normal distribution"""
+        kl = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp(), dim=1)
+        return torch.mean(kl)
 
 
 @dataclass

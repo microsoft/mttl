@@ -52,9 +52,23 @@ class LightningTrainingMixin:
         return self.model.generate(**kwargs)
 
     def training_step(self, batch, _):
-        outputs = self.forward(**batch)
+        outputs, context = self.forward(**batch, return_context=True)
         loss = outputs.loss
         total_loss = loss
+        aug_losses = []
+        for name, module in self.model.model.named_modules():
+            if "selector" in name and hasattr(module, "aug_loss"):
+                aug_losses.append(module.aug_loss)
+
+        if aug_losses:
+            total_aug_loss = sum(aug_losses)
+            total_loss += total_aug_loss
+            self.log(
+                f"{self._log_pref}train/total_aug_loss",
+                total_aug_loss,
+                on_step=True,
+                prog_bar=True,
+            )
 
         self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
         self.log(

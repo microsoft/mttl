@@ -295,6 +295,19 @@ def finetune_lib_lora_soup(args: FinetuneConfig, dm):
     return train_module(args, module, dm)
 
 
+@register_finetune_func("lib_variational_lora_router")
+def finetune_lib_variational_lora_router(args: FinetuneConfig, dm):
+    """ """
+    args.router_selector = "variational_lora_router"
+
+    args.trainable_param_names = "|.*module_logits_dict.*|.*selector.*"
+
+    module = MultiExpertModule(**vars(args)).to("cuda")
+    module.add_experts_from_library(args.library_id)
+
+    return train_module(args, module, dm)
+
+
 @register_finetune_func("lib_mu_svdretr")
 def finetune_lib_mu_with_svd_retrieval(args: FinetuneConfig, dm):
     """
