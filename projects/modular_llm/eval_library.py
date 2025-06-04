@@ -204,7 +204,7 @@ def run_eval(args: EvaluationConfig):
         if args.merge_or_route == "uniform":
             expert = WeightedLinearMerge(WeightedLinearMergeConfig()).transform(library)
         elif args.merge_or_route == "ties":
-            cfg = TiesMergeConfig(top_k=1)
+            cfg = TiesMergeConfig()
             expert = TiesMerge(cfg).transform(library)
         elif args.merge_or_route == "wudi":
             cfg = WudiMergeConfig(iter=300, lr=1e-5)
