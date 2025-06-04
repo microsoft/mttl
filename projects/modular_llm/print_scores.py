@@ -30,7 +30,7 @@ scores = []
 for key in key_order:
     score = data.get(key)
     if score is not None:
-        scores.append(f"{score:.3f}")
+        scores.append(f"{score * 100:.1f}")
     else:
         scores.append("N/A")
 
