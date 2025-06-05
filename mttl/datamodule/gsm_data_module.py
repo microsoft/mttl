@@ -6,12 +6,16 @@ from mttl.models.library.dataset_library import DatasetLibrary
 from functools import partial
 import json
 from datasets import load_dataset
+
 ANSWER_TRIGGER = "####"
 import re
+
 INVALID_ANS = "[invalid]"
 
 with open("mttl/datamodule/math.json", "r") as f:
     cot_data = json.load(f)
+
+
 @dataclass
 class GsmDataConfig(DatasetConfig):
     gsm_template: str = (
@@ -32,12 +36,9 @@ def generate_math_prompt_with_python(instruction):
 
 
 def instruct_template_python(example):
-    example["source"] = generate_math_prompt_with_python(
-        example["input"]
-    )
+    example["source"] = generate_math_prompt_with_python(example["input"])
     example["target"] = str(example["answer"])
     return example
-
 
 
 def clean_answer(model_pred):
@@ -69,10 +70,13 @@ def clean_answer(model_pred):
         pred = pred[:-1]
 
     return pred
+
+
 def extract_answer(example):
-    example['answer'] = example['answer'].split("####")[-1].strip()
-    example['input'] = example['question']
+    example["answer"] = example["answer"].split("####")[-1].strip()
+    example["input"] = example["question"]
     return example
+
 
 def instruct_template_cot(example):
 
@@ -117,9 +121,9 @@ def instruct_template_cot(example):
 class Gsm8kDataModule(DataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 1))
-        dataset = load_dataset("openai/gsm8k","main")
-        dataset = dataset['test']
-        dataset = dataset.map(extract_answer,num_proc=n_proc)
+        dataset = load_dataset("openai/gsm8k", "main")
+        dataset = dataset["test"]
+        dataset = dataset.map(extract_answer, num_proc=n_proc)
         if self.config.gsm_template == "cot":
             dataset = dataset.map(instruct_template_cot, num_proc=n_proc)
         elif self.config.gsm_template == "python":
@@ -130,6 +134,37 @@ class Gsm8kDataModule(DataModule):
         self.train_dataset = dataset
         self.dev_dataset = self.test_dataset = dataset
 
+
+def extract_number_str(text):
+    match = re.search(r"[\d.,]+", text)
+    if match:
+        return match.group().replace(",", "")
+    return None
+
+
+@DataModule.register("gsm-8k-perturb", config_cls=GsmDataConfig)
+class Gsm8kPerturbDataModule(DataModule):
+
+    def setup_dataset(self):
+        n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 1))
+        dataset = load_dataset("zhan1993/gsm-8k-perturb")
+        dataset = dataset["train"]
+        dataset = dataset.map(extract_answer, num_proc=n_proc)
+        dataset = dataset.map(
+            lambda x: {"answer": extract_number_str(x["answer"])}, num_proc=n_proc
+        )
+        dataset = dataset.map(instruct_template_cot, num_proc=n_proc)
+        if self.config.gsm_template == "cot":
+            dataset = dataset.map(instruct_template_cot, num_proc=n_proc)
+        elif self.config.gsm_template == "python":
+            dataset = dataset.map(
+                instruct_template_python,
+                num_proc=n_proc,
+            )
+        self.train_dataset = dataset
+        self.dev_dataset = self.test_dataset = dataset
+
+
 @DataModule.register("gsm-8k-hard", config_cls=GsmDataConfig)
 class Gsm8kHardDataModule(DataModule):
     def setup_dataset(self):
@@ -139,7 +174,7 @@ class Gsm8kHardDataModule(DataModule):
         if self.config.gsm_template == "cot":
             dataset = dataset.map(instruct_template_cot, num_proc=n_proc)
         elif self.config.gsm_template == "python":
-            dataset = dataset.map(instruct_template_python,num_proc=n_proc)
+            dataset = dataset.map(instruct_template_python, num_proc=n_proc)
         self.train_dataset = dataset["train"]
         self.dev_dataset = self.test_dataset = dataset["train"]
 
@@ -149,7 +184,7 @@ if __name__ == "__main__":
         model="microsoft/Phi-3-mini-4k-instruct", gsm_template="python"
     )
 
-    datamodule = Gsm8kDataModule(config, for_generation=True)
+    datamodule = Gsm8kPerturbDataModule(config, for_generation=True)
     train_dataloader = datamodule.train_dataloader()
     val_dataloder = datamodule.val_dataloader()
     for batch in val_dataloder:
