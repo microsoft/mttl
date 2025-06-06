@@ -78,6 +78,12 @@ def extract_answer(example):
     return example
 
 
+def extract_answer_for_perturb(example):
+    example["answer"] = example["answer"].split("<Answer>")[-1].split("</Answer>")[0]
+    example["input"] = example["question"]
+    return example
+
+
 def instruct_template_cot(example):
 
     PREAMBLE = """As an expert problem solver solve step by step the following mathematical questions."""
@@ -149,7 +155,7 @@ class Gsm8kPerturbDataModule(DataModule):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 1))
         dataset = load_dataset("zhan1993/gsm-8k-perturb")
         dataset = dataset["train"]
-        dataset = dataset.map(extract_answer, num_proc=n_proc)
+        dataset = dataset.map(extract_answer_for_perturb, num_proc=n_proc)
         dataset = dataset.map(
             lambda x: {"answer": extract_number_str(x["answer"])}, num_proc=n_proc
         )
@@ -188,5 +194,4 @@ if __name__ == "__main__":
     train_dataloader = datamodule.train_dataloader()
     val_dataloder = datamodule.val_dataloader()
     for batch in val_dataloder:
-        print(batch)
-        breakpoint()
+        print(batch["labels_texts"])

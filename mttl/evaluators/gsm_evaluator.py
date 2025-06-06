@@ -76,6 +76,13 @@ class GsmEvaluator(GenerativeEvaluator):
                     pred = find_numbers(predictions)
                     if not pred:
                         all_predictions.append(float("inf"))
+                        logger.info(f"No predictions: {pred}")
+                        json_data = {
+                            "pred": "inf",
+                            "answer": target,
+                        }
+                        f.write(json.dumps(json_data) + "\n")
+                        f.flush()
                     else:
                         pred_answer = float(pred[-1])
                         all_predictions.append(pred_answer)
@@ -88,6 +95,13 @@ class GsmEvaluator(GenerativeEvaluator):
                         f.flush()
                 else:
                     all_predictions.append(float("inf"))
+                    logger.info(f"No predictions: {pred}")
+                    json_data = {
+                        "pred": "inf",
+                        "answer": target,
+                    }
+                    f.write(json.dumps(json_data) + "\n")
+                    f.flush()
             all_targets.extend(batch["labels_texts"])
 
         def extract_code(text):
@@ -144,6 +158,7 @@ class GsmEvaluator(GenerativeEvaluator):
 
         for pred_answer, target in tqdm(zip(predictions, targets)):
             target = target.replace(",", "")
+            target = target.replace("...", "")
             if pred_answer == float(target):
                 correct += 1
 
