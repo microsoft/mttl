@@ -222,7 +222,7 @@ class WudiMerge(LibraryTransform):
 
     @torch.no_grad()
     def transform(self, library) -> Expert:
-        from mttl.models.library.merging import wudi_merge
+        from mttl.models.merging import wudi_merge
         
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
@@ -249,7 +249,7 @@ class WeightedLinearMerge(LibraryTransform):
 
     @torch.no_grad()
     def transform(self, library) -> Expert:
-        from mttl.models.library.merging import weighted_linear_merge
+        from mttl.models.merging import weighted_linear_merge
         
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
@@ -279,7 +279,7 @@ class TiesMerge(LibraryTransform):
 
     @torch.no_grad()
     def transform(self, library) -> Expert:
-        from mttl.models.library.merging import ties_merge
+        from mttl.models.merging import ties_merge
         
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
