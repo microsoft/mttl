@@ -262,13 +262,6 @@ def run_eval(args: EvaluationConfig):
             ExpertModelConfig(base_model=base_model),
             **loading_kwargs,
         )
-    elif args.merge_or_route == "lora":
-        expert = library.get_expert(args.finetune_task_name)
-        model = MultiExpertModel(
-            MultiExpertModelConfig(base_model=base_model),
-            **loading_kwargs,
-        )
-        model.add_expert_instance(expert, is_default=True)
     elif args.merge_or_route in ["phatgoose", "arrow", "avg_act"]:
         """Routing Approaches"""
         from mttl.models.containers.selectors import (
@@ -378,13 +371,13 @@ def run_eval(args: EvaluationConfig):
         print(expert_p)
         print(angle)
 
-    if wandb.run is not None:
-        if scores is not None:
-            wandb.log({f"downstream/{k}": v for k, v in scores.items()})
-        if len(metric_logger) > 0:
-            wandb.log({k: v.avg for k, v in metric_logger.meters.items()})
+    # if wandb.run is not None:
+    #     if scores is not None:
+    #         wandb.log({f"downstream/{k}": v for k, v in scores.items()})
+    #     if len(metric_logger) > 0:
+    #         wandb.log({k: v.avg for k, v in metric_logger.meters.items()})
 
-        wandb.finish()
+    #     wandb.finish()
 
 
 if __name__ == "__main__":
