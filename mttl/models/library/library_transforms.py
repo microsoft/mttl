@@ -216,7 +216,7 @@ class WudiMergeAfter(LibraryTransform):
     """
     implement the wudimerge in the paper https://arxiv.org/pdf/2503.08099v1
 
-    we mat the lora A and lora B and then merge the experts to the model.
+    we multiply the lora A and lora B and then merge the experts to the model(merge after).
     """
 
     def __init__(self, config: WudiMergeConfig = None):
@@ -319,16 +319,16 @@ class WudiMergeAfter(LibraryTransform):
                 lr=self.config.lr,
             )
 
-            # add the merged task vector to the model
+            # save the merged task vector in each layer
             task_merged_vectors[layer] = merged_task_vector / len(experts)
         # merge the task vectors to the model
         for name, param in model.named_parameters():
             name = name.split(".weight")[0]
             if name in task_merged_vectors.keys():
                 logger.info(f"Merging {name} to the model")
-                ## some times the shape is the reverse the task_merged_vectors
+                ## sometimes the shape is the reverse of the task_merged_vectors
                 if param.shape != task_merged_vectors[name].shape:
-                    print(
+                    logger.info(
                         f"shape mismatch {param.shape} {task_merged_vectors[name].shape}"
                     )
                     task_merged_vectors[name] = task_merged_vectors[name].T
