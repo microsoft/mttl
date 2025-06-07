@@ -211,6 +211,131 @@ class WudiMergeConfig(LibraryTransformConfig):
     lr: float = 1e-5
 
 
+@LibraryTransform.register("wudi_merge_after", WudiMergeConfig)
+class WudiMergeAfter(LibraryTransform):
+    """
+    implement the wudimerge in the paper https://arxiv.org/pdf/2503.08099v1
+
+    we mat the lora A and lora B and then merge the experts to the model.
+    """
+
+    def __init__(self, config: WudiMergeConfig = None):
+        super().__init__(config or WudiMergeConfig())
+
+    def _get_task_vectors(self, expert):
+        task_vectors = {}
+        for key in expert.expert_weights.keys():
+            base_layer_name = key.split(".lora_")[
+                0
+            ]  # Get base layer name by removing .lora_a or .lora_b
+            if base_layer_name not in task_vectors:
+                task_vectors[base_layer_name] = None
+
+        for layer in task_vectors.keys():
+            lora_a = expert.expert_weights[f"{layer}.lora_a"]
+            lora_b = expert.expert_weights[f"{layer}.lora_b"]
+            task_vectors[layer] = lora_a.data @ lora_b.data
+
+        return task_vectors
+
+    def get_redundant_task_vector(self, layer_name, task_vectors, iter, lr):
+        task_vectors = task_vectors.cuda()
+        merging_vector = torch.nn.Parameter((torch.sum(task_vectors, dim=0)))
+        optimizer = torch.optim.Adam([merging_vector], lr=lr, weight_decay=0)
+
+        l2_norms = torch.square(
+            torch.norm(task_vectors.reshape(task_vectors.shape[0], -1), p=2, dim=-1)
+        )
+
+        pbar = tqdm(range(iter), desc=f"Optimizing parameter {layer_name}")
+        prev_loss = float("inf")
+        patience = 5  # Number of steps to wait for improvement
+        no_improve_count = 0
+        min_delta = 1e-4  # Minimum change in loss to be considered improvement
+
+        for step in pbar:
+            disturbing_vectors = merging_vector.unsqueeze(0) - task_vectors
+            inner_product = torch.matmul(
+                disturbing_vectors, task_vectors.transpose(1, 2)
+            )
+            loss = torch.sum(
+                torch.square(inner_product) / l2_norms.unsqueeze(-1).unsqueeze(-1)
+            )
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            # Check if loss improvement is significant
+            if abs(prev_loss - loss.item()) < min_delta:
+                no_improve_count += 1
+            else:
+                no_improve_count = 0
+
+            # Early stopping if no significant improvement for patience steps
+            if no_improve_count >= patience:
+                logger.info(f"Early stopping at step {step} due to minimal loss change")
+                break
+
+            prev_loss = loss.item()
+            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+        return merging_vector
+
+    def transform(self, library, model):
+
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+        expert_names = list(library.keys())
+        experts = [library[name] for name in expert_names]
+        logger.info("Merging {} experts using WuDi merge".format(len(experts)))
+
+        one_expert = experts[0]
+        # get the layer names from the model
+        layer_names = [
+            name.split(".lora_")[0] for name in one_expert.expert_weights.keys()
+        ]
+        layer_names = list(set(layer_names))
+
+        # get the task vectors for each expert
+        task_vectors_experts = {}
+        for expert in experts:
+            task_vectors = self._get_task_vectors(expert)
+            task_vectors_experts[expert.name] = task_vectors
+        task_merged_vectors = {}
+        # wudi merge the task vectors
+        for layer in layer_names:
+
+            # get the experts for this layer
+            task_vectors = [
+                task_vectors_experts[expert.name][layer] for expert in experts
+            ]
+
+            task_vectors = torch.stack(task_vectors, dim=0)
+            # get the redundant task vector
+            merged_task_vector = self.get_redundant_task_vector(
+                layer_name=layer,
+                task_vectors=task_vectors,
+                iter=self.config.iter,
+                lr=self.config.lr,
+            )
+
+            # add the merged task vector to the model
+            task_merged_vectors[layer] = merged_task_vector / len(experts)
+        # merge the task vectors to the model
+        for name, param in model.named_parameters():
+            name = name.split(".weight")[0]
+            if name in task_merged_vectors.keys():
+                logger.info(f"Merging {name} to the model")
+                ## some times the shape is the reverse the task_merged_vectors
+                if param.shape != task_merged_vectors[name].shape:
+                    print(
+                        f"shape mismatch {param.shape} {task_merged_vectors[name].shape}"
+                    )
+                    task_merged_vectors[name] = task_merged_vectors[name].T
+                res = param + task_merged_vectors[name]
+                param.data.copy_(res)
+
+
 @LibraryTransform.register("wudi_merge", WudiMergeConfig)
 class WudiMerge(LibraryTransform):
     """
