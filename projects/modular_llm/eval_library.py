@@ -318,14 +318,7 @@ def run_eval(args: EvaluationConfig):
     if args.pipeline_eval_tasks in [
         "in_distribution",
     ]:
-        tasks = [expert.expert_task_name for expert in library.data.values()]
-
-        if tasks[0] is None:
-            # for some older version of lib (in case of joint experts) no expert_task_name was set
-            tasks = json.load(open(args.flan_tasks_path))["flan256"]
-
-        # make sure we evaluate each task seperately (so the mean is over tasks at the end)
-        tasks = ",".join(tasks).split(",")
+        tasks = args.expert_selection.split(",")
         train_cfg.eval_metric = args.eval_metric
         scores = eval_in_distribution(model, train_cfg, tasks)
     elif args.finetune_task_name is not None:
