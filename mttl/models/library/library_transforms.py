@@ -34,6 +34,7 @@ from mttl.models.train_utils import train_model
 from mttl.models.utils import transfer_batch_to_device
 from mttl.registrable import Registrable
 from mttl.serializable import Serializable
+from mttl.models.library.wudi_closed_form import AnalyticalLoRAMerger
 
 
 class LibraryTransform(abc.ABC, Registrable):
@@ -418,6 +419,78 @@ class WudiMerge(LibraryTransform):
             base_expert.expert_weights[key].data.copy_(merging_vector.data.cpu())
 
         return base_expert
+
+
+@dataclass
+class AnalyticalWudiMergeConfig(LibraryTransformConfig):
+    pass
+
+
+@LibraryTransform.register("analytical_wudi_merge", AnalyticalWudiMergeConfig)
+class AnalyticalWudiMerge(LibraryTransform):
+    """ """
+
+    def __init__(self, config: AnalyticalWudiMergeConfig = None):
+        super().__init__(config or AnalyticalWudiMergeConfig())
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.merger = AnalyticalLoRAMerger(regularization=1e-6, device=device)
+
+    def _get_task_vectors(self, expert):
+        task_vectors = {}
+        for key in expert.expert_weights.keys():
+            base_layer_name = key.split(".lora_")[
+                0
+            ]  # Get base layer name by removing .lora_a or .lora_b
+            if base_layer_name not in task_vectors:
+                task_vectors[base_layer_name] = None
+
+        for layer in task_vectors.keys():
+            lora_a = expert.expert_weights[f"{layer}.lora_a"]
+            lora_b = expert.expert_weights[f"{layer}.lora_b"]
+            task_vectors[layer] = lora_a.data @ lora_b.data
+
+        return task_vectors
+
+    def transform(self, library, model) -> Expert:
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+        expert_names = list(library.keys())
+        experts = [library[name] for name in expert_names]
+        logger.info(
+            "Merging {} experts using WuDi analytical merge".format(len(experts))
+        )
+
+        # get the task vectors for each expert
+        task_vectors_experts = {}
+        for expert in experts:
+            task_vectors = self._get_task_vectors(expert)
+            task_vectors_experts[expert.name] = task_vectors
+        task_merged_vectors = {}
+        # merge the task vectors
+        layer_names = list(task_vectors_experts[experts[0].name].keys())
+        for layer in layer_names:
+            task_vectors = [
+                task_vectors_experts[expert.name][layer] for expert in experts
+            ]
+
+            # Get optimal merged matrix using analytical solution
+            merged_matrix = self.merger.merge_loras(
+                task_vectors, use_pseudoinverse=True
+            )
+
+            # Convert back to torch tensor with same device and dtype
+            merged_task_vector = torch.tensor(
+                merged_matrix, device=task_vectors.device, dtype=task_vectors.dtype
+            )
+            # add the merged task vector to the model
+            task_merged_vectors[layer] = merged_task_vector / len(experts)
+        # merge the task vectors to the model
+        for name, param in model.named_parameters():
+            name = name.split(".weight")[0]
+            if name in task_merged_vectors.keys():
+                logger.info(f"Merging {name} to the model")
+                res = param + task_merged_vectors[name]
+                param.data.copy_(res)
 
 
 @dataclass
