@@ -43,7 +43,6 @@ def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
 
     for i, task in enumerate(tasks):
         args.finetune_task_name = task
-        args.predict_batch_size = 16
         if args.eval_metric in ["val_loss", "loss"]:
             dm = get_datamodule(args)
             evaluator = LossCallback(
