@@ -29,6 +29,8 @@ from mttl.models.library.library_transforms import (
     WudiMergeAfter,
     AnalyticalWudiMerge,
     AnalyticalWudiMergeConfig,
+    WuDiMerge2,
+    WuDiMerge2Config,
 )
 from mttl.models.lightning.callbacks import LossCallback
 from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
@@ -244,6 +246,13 @@ def run_eval(args: EvaluationConfig):
         )
         cfg = WudiMergeConfig(iter=300, lr=1e-5)
         WudiMergeAfter(cfg).transform(library, model.model)
+    elif args.merge_or_route == "wudi_merge_2":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = WuDiMerge2Config()
+        WuDiMerge2(cfg).transform(library, model.model)
     elif args.merge_or_route == "analytical_wudi_merge":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),

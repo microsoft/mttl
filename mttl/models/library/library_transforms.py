@@ -289,13 +289,12 @@ class WudiMergeAfter(LibraryTransform):
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
         logger.info("Merging {} experts using WuDi merge".format(len(experts)))
-
         one_expert = experts[0]
         # get the layer names from the model
         layer_names = [
             name.split(".lora_")[0] for name in one_expert.expert_weights.keys()
         ]
-        layer_names = list(set(layer_names))
+        layer_names = sorted(list(set(layer_names)))
 
         # get the task vectors for each expert
         task_vectors_experts = {}
@@ -419,6 +418,74 @@ class WudiMerge(LibraryTransform):
             base_expert.expert_weights[key].data.copy_(merging_vector.data.cpu())
 
         return base_expert
+
+
+@dataclass
+class WuDiMerge2Config(LibraryTransformConfig):
+    iter: int = 300
+    lr: float = 1e-4
+
+
+@LibraryTransform.register("wudi_merge_2", WuDiMerge2Config)
+class WuDiMerge2(WudiMergeAfter):
+    """
+    implement the wudimerge in the paper
+    """
+
+    def __init__(self, config: WuDiMerge2Config = None):
+        super().__init__(config or WuDiMerge2Config())
+
+    def get_redundant_task_vector(self, layer_name, task_vectors, iter=300, lr=1e-4):
+        original_dtype = task_vectors.dtype
+        task_vectors = task_vectors.cuda()
+        average_vector = task_vectors.mean(dim=0)
+        low_rank_list = []
+        taskvector_list = []
+        for i in tqdm(range(task_vectors.shape[0]), desc=f"SVDing {layer_name}"):
+            vector = task_vectors[i]
+            u, s, v = torch.linalg.svd(vector, full_matrices=True)
+            u2, s2, v2 = torch.linalg.svd(vector, full_matrices=False)
+            reduced_index_s = int(s.shape[0] / task_vectors.shape[0])
+            u2 = u2[:, :reduced_index_s]
+            s2 = s2[:reduced_index_s]
+            v2 = v2[:reduced_index_s, :]
+            s_mask = torch.zeros_like(s)
+            s_mask[:reduced_index_s] = 1
+            s = s * s_mask
+            v_mask = torch.zeros_like(v)
+            v_mask[:reduced_index_s, :] = 1
+            v = v * v_mask  # (n, n)
+            S_matrix = torch.zeros(
+                vector.shape[0], vector.shape[1], device=s.device
+            )  # m x n
+            min_dim = min(vector.shape)
+            S_matrix[:min_dim, :min_dim] = torch.diag_embed(s)
+            low_rank_list.append(S_matrix @ v)
+            taskvector_list.append(u2 @ torch.diag_embed(s2) @ v2)
+            # del u, s, v, u2, s2, v2, S_matrix, s_mask, v_mask
+        low_rank = torch.stack(low_rank_list).to(original_dtype)
+        taskvector = torch.stack(taskvector_list).to(original_dtype)
+
+        merging_vector = torch.nn.Parameter(average_vector.to(original_dtype))
+        # optimizer = torch.optim.SGD([merging_vector], lr=lr, momentum=0.9)
+        optimizer = torch.optim.Adam([merging_vector], lr=lr, weight_decay=0)
+        l2_norms = torch.square(
+            torch.norm(taskvector.reshape(taskvector.shape[0], -1), p=2, dim=-1)
+        ).to(original_dtype)
+        # del task_vectors, low_rank_list, taskvector_list
+        # torch.cuda.empty_cache()
+        pbar = tqdm(range(iter), desc=f"Optimizing {layer_name}", leave=False)
+        for step in pbar:
+            disturbing_vectors = merging_vector.unsqueeze(0) - taskvector
+            inner_product = torch.matmul(disturbing_vectors, low_rank.transpose(1, 2))
+            loss = torch.sum(
+                torch.square(inner_product) / l2_norms.unsqueeze(-1).unsqueeze(-1)
+            )
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+        return merging_vector
 
 
 @dataclass
