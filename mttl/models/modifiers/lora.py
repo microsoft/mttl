@@ -175,17 +175,17 @@ class LoRA(Modifier, MergeableModifierMixin):
             self.layer.state.reset_grads()
         else:
 
-            # Compute spectral metrics
-            W = self.layer.weight.data.to(to_merge.dtype).to(to_merge.device)
-            delta_W = to_merge.to(W.dtype).to(W.device)
-            # eig_dist = spectral_distance(W, delta_W, topk=50)
-            energy_ratio = spectral_energy_ratio(W, delta_W)
+            # # Compute spectral metrics
+            # W = self.layer.weight.data.to(to_merge.dtype).to(to_merge.device)
+            # delta_W = to_merge.to(W.dtype).to(W.device)
+            # # eig_dist = spectral_distance(W, delta_W, topk=50)
+            # energy_ratio = spectral_energy_ratio(W, delta_W)
 
-            # print(f"Eigenvalue L2 distance: {eig_dist:.4f}")
-            print(f"Spectral energy ratio: {energy_ratio:.4f}")
+            # # print(f"Eigenvalue L2 distance: {eig_dist:.4f}")
+            # print(f"Spectral energy ratio: {energy_ratio:.4f}")
 
-            if energy_ratio < 0.005:
-                self.layer.weight.data.add_(to_merge.to(self.layer.weight.device))
+            # if energy_ratio < 0.005:
+            self.layer.weight.data.add_(to_merge.to(self.layer.weight.device))
 
     def create_for_layer(self, layer):
         self.lora_a = nn.Parameter(

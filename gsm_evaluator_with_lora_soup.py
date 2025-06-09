@@ -138,6 +138,7 @@ from mttl.datamodule.gsm_data_module import (
     GsmDataConfig,
     Gsm8kHardDataModule,
     Gsm8kDataModule,
+    Gsm8kPerturbDataModule,
 )
 from mttl.models.library.library_transforms import (
     WeightedLinearMerge,
@@ -205,6 +206,8 @@ if args.gsm_dataset == "gsm-hard":
     dm = Gsm8kHardDataModule(config, for_generation=True)
 elif args.gsm_dataset == "gsm":
     dm = Gsm8kDataModule(config, for_generation=True)
+elif args.gsm_dataset == "gsm-perturb":
+    dm = Gsm8kPerturbDataModule(config, for_generation=True)
 
 evaluator = GsmEvaluator(dm)
 

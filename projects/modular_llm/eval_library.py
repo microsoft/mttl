@@ -26,11 +26,18 @@ from mttl.models.library.library_transforms import (
     WeightedLinearMergeConfig,
     WudiMerge,
     WudiMergeConfig,
+    WudiMergeAfter,
+    AnalyticalWudiMerge,
+    AnalyticalWudiMergeConfig,
+    WuDiMerge2,
+    WuDiMerge2Config,
 )
 from mttl.models.lightning.callbacks import LossCallback
 from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.utils import remote_login
+from mttl.models.containers.selectors.base import UniformSelectorConfig
+from mttl.models.containers.selectors import TaskNameSelectorConfig
 
 
 def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
@@ -39,7 +46,6 @@ def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
 
     for i, task in enumerate(tasks):
         args.finetune_task_name = task
-        args.predict_batch_size = 16
         if args.eval_metric in ["val_loss", "loss"]:
             dm = get_datamodule(args)
             evaluator = LossCallback(
@@ -64,6 +70,8 @@ def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
                 verbose=False,
             )
         elif args.eval_metric == "rougeL":
+            if isinstance(module.selector_config, TaskNameSelectorConfig):
+                module.set_default_expert(task)
             dm = get_datamodule(args, for_generation=True)
             evaluator = RougeEvaluator(
                 datamodule=dm,
@@ -200,21 +208,62 @@ def run_eval(args: EvaluationConfig):
         raise ValueError("Please specify a valid merge_or_route!")
 
     """ Parameter Merging Approaches """
-    if args.merge_or_route in ["uniform", "ties", "wudi"]:
-        if args.merge_or_route == "uniform":
+    if args.merge_or_route == "uniform":
+        if args.lora_merge_after:
+            model = MultiExpertModel(
+                MultiExpertModelConfig(base_model=base_model),
+                **loading_kwargs,
+            )
+            model.add_experts_from_library(library)
+            model.set_selector(
+                "lora",
+                UniformSelectorConfig(
+                    lora_merge_after=args.lora_merge_after,
+                    experts_weight_list=args.expert_weights,
+                ),
+            )
+        else:
             expert = WeightedLinearMerge(WeightedLinearMergeConfig()).transform(library)
-        elif args.merge_or_route == "ties":
-            cfg = TiesMergeConfig(top_k=1)
+            model = MultiExpertModel(
+                MultiExpertModelConfig(base_model=base_model),
+                **loading_kwargs,
+            )
+            model.add_expert_instance(expert, is_default=True)
+
+    elif args.merge_or_route in ["ties", "wudi"]:
+        if args.merge_or_route == "ties":
+            cfg = TiesMergeConfig()
             expert = TiesMerge(cfg).transform(library)
         elif args.merge_or_route == "wudi":
-            cfg = WudiMergeConfig(iter=300, lr=1e-5)
+            cfg = WudiMergeConfig(iter=1000, lr=1e-5)
             expert = WudiMerge(cfg).transform(library)
-
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
             **loading_kwargs,
         )
         model.add_expert_instance(expert, is_default=True)
+    elif args.merge_or_route == "wudi_merge_after":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = WudiMergeConfig(iter=300, lr=1e-5)
+        WudiMergeAfter(cfg).transform(library, model.model)
+    elif args.merge_or_route == "wudi_merge_2":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = WuDiMerge2Config(iter=300, lr=1e-5)
+        WuDiMerge2(cfg).transform(library, model.model)
+    elif args.merge_or_route == "analytical_wudi_merge":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = AnalyticalWudiMergeConfig()
+        AnalyticalWudiMerge(cfg).transform(library, model.model)
+
     elif args.merge_or_route == "uniform_lora_after_op":
         # Here we merge the LoRA experts after the outer product we cannot really do it
         # with the lib transform, cause this would require storing large matrices in memory
@@ -233,7 +282,6 @@ def run_eval(args: EvaluationConfig):
             ExpertModelConfig(base_model=base_model),
             **loading_kwargs,
         )
-
     elif args.merge_or_route in ["phatgoose", "arrow", "avg_act"]:
         """Routing Approaches"""
         from mttl.models.containers.selectors import (
@@ -263,7 +311,6 @@ def run_eval(args: EvaluationConfig):
 
     elif args.merge_or_route == "oracle":
         """TaskNameSelector"""
-        from mttl.models.containers.selectors import TaskNameSelectorConfig
 
         selector_config = TaskNameSelectorConfig.from_training_config(args)
 
@@ -272,6 +319,7 @@ def run_eval(args: EvaluationConfig):
             selector_config=selector_config,
             **loading_kwargs,
         )
+        # model.set_default_expert(args.finetune_task_name)
     else:
         raise ValueError(f"Unknown merge_or_route {args.merge_or_route}")
 
@@ -289,35 +337,12 @@ def run_eval(args: EvaluationConfig):
     if args.pipeline_eval_tasks in [
         "in_distribution",
     ]:
-        tasks = [expert.expert_task_name for expert in library.data.values()]
-
-        if tasks[0] is None:
-            # for some older version of lib (in case of joint experts) no expert_task_name was set
-            tasks = json.load(open(args.flan_tasks_path))["flan256"]
-
-        # make sure we evaluate each task seperately (so the mean is over tasks at the end)
-        tasks = ",".join(tasks).split(",")
+        tasks = args.expert_selection.split(",")
         train_cfg.eval_metric = args.eval_metric
         scores = eval_in_distribution(model, train_cfg, tasks)
-    elif (
-        args.pipeline_eval_tasks
-        in [
-            "task1356_xlsum_title_generation",
-            "task304_numeric_fused_head_resolution",
-            "task202_mnli_contradiction_classification",
-            "task035_winogrande_question_modification_person",
-            "task614_glucose_cause_event_detection",
-            "task362_spolin_yesand_prompt_response_sub_classification",
-            "task242_tweetqa_classification",
-            "task613_politifact_text_generation",
-            "task1728_web_nlg_data_to_text",
-            "task1153_bard_analogical_reasoning_affordance",
-            "task039_qasc_find_overlapping_words",
-            "task1557_jfleg_answer_generation",
-        ]
-        or args.finetune_task_name is not None
-    ):
-        task = args.pipeline_eval_tasks or args.finetune_task_name
+    elif args.finetune_task_name is not None:
+
+        task = args.finetune_task_name
         logger.info(f"Evaluating Rouge on: {task}")
 
         train_cfg.finetune_task_name = task
@@ -330,8 +355,6 @@ def run_eval(args: EvaluationConfig):
         if wandb.run is not None:
             if rouge is not None:
                 wandb.log({f"downstream/test_rougeL": rouge})
-
-        return
     else:
         if args.pipeline_eval_tasks == "all":
             args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"
@@ -360,13 +383,13 @@ def run_eval(args: EvaluationConfig):
         print(expert_p)
         print(angle)
 
-    if wandb.run is not None:
-        if scores is not None:
-            wandb.log({f"downstream/{k}": v for k, v in scores.items()})
-        if len(metric_logger) > 0:
-            wandb.log({k: v.avg for k, v in metric_logger.meters.items()})
+    # if wandb.run is not None:
+    #     if scores is not None:
+    #         wandb.log({f"downstream/{k}": v for k, v in scores.items()})
+    #     if len(metric_logger) > 0:
+    #         wandb.log({k: v.avg for k, v in metric_logger.meters.items()})
 
-        wandb.finish()
+    #     wandb.finish()
 
 
 if __name__ == "__main__":

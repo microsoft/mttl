@@ -256,7 +256,7 @@ class DefaultCollator(PackedMixin):
 
         # adds the eos token
         labels_ = [
-            l + ((self.tokenizer.eos_token) if self.add_eos_to_targets else "")
+            l + ((" " + self.tokenizer.eos_token) if self.add_eos_to_targets else "")
             for l in labels_
         ]
         return sources_, labels_
@@ -961,11 +961,9 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
     from mttl.datamodule.alpaca_data_module import (
         AlpacaCodeDataModule,
         MathQaAlpacaCodeDataModule,
-        MathQallamaDataModule
+        MathQallamaDataModule,
     )
-    from mttl.datamodule.math200k_data_module import (
-        Math200kDataModule
-    )
+    from mttl.datamodule.math200k_data_module import Math200kDataModule
     from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
     from mttl.datamodule.mt_seq_to_seq_module import (
         FlanConfig,
@@ -1091,7 +1089,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         )
         dm = MathQADataModule(config, for_generation=for_generation)
     elif dataset == "mathqa_llama":
-        common_kwargs['train_on_inputs'] = True
+        common_kwargs["train_on_inputs"] = True
         config = DatasetConfig(
             **common_kwargs,
         )
