@@ -239,7 +239,10 @@ class WudiMergeAfter(LibraryTransform):
 
         return task_vectors
 
-    def get_redundant_task_vector(self, layer_name, task_vectors, iter, lr):
+    def get_optimized_task_vector(self, layer_name, task_vectors, iter, lr):
+        """
+        min Σᵢ (1/||τᵢ,ₗ||²F) ||(τₘ,ₗ - τᵢ,ₗ)(τᵢ,ₗ)ᵀ||²F
+        """
         task_vectors = task_vectors.cuda()
         merging_vector = torch.nn.Parameter((torch.sum(task_vectors, dim=0)))
         optimizer = torch.optim.Adam([merging_vector], lr=lr, weight_decay=0)
@@ -312,7 +315,7 @@ class WudiMergeAfter(LibraryTransform):
 
             task_vectors = torch.stack(task_vectors, dim=0)
             # get the redundant task vector
-            merged_task_vector = self.get_redundant_task_vector(
+            merged_task_vector = self.get_optimized_task_vector(
                 layer_name=layer,
                 task_vectors=task_vectors,
                 iter=self.config.iter,
@@ -429,13 +432,17 @@ class WuDiMerge2Config(LibraryTransformConfig):
 @LibraryTransform.register("wudi_merge_2", WuDiMerge2Config)
 class WuDiMerge2(WudiMergeAfter):
     """
-    implement the wudimerge in the paper
+    implement the wudimerge in the paper https://arxiv.org/pdf/2505.19892
     """
 
     def __init__(self, config: WuDiMerge2Config = None):
         super().__init__(config or WuDiMerge2Config())
 
-    def get_redundant_task_vector(self, layer_name, task_vectors, iter=300, lr=1e-4):
+    def get_optimized_task_vector(self, layer_name, task_vectors, iter=300, lr=1e-4):
+        """
+        get the optimized task vector for the layer
+        min Σᵢ (1/||τᵢ,ₗ||²F) ||(τₘ,ₗ - τᵢ,ₗ)(τᵢ,ₗ)ᵀ||²F
+        """
         original_dtype = task_vectors.dtype
         task_vectors = task_vectors.cuda()
         average_vector = task_vectors.mean(dim=0)
