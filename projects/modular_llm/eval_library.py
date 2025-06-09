@@ -251,7 +251,7 @@ def run_eval(args: EvaluationConfig):
             MultiExpertModelConfig(base_model=base_model),
             **loading_kwargs,
         )
-        cfg = WuDiMerge2Config()
+        cfg = WuDiMerge2Config(iter=300, lr=1e-5)
         WuDiMerge2(cfg).transform(library, model.model)
     elif args.merge_or_route == "analytical_wudi_merge":
         model = MultiExpertModel(

@@ -472,9 +472,13 @@ class WuDiMerge2(WudiMergeAfter):
         l2_norms = torch.square(
             torch.norm(taskvector.reshape(taskvector.shape[0], -1), p=2, dim=-1)
         ).to(original_dtype)
-        # del task_vectors, low_rank_list, taskvector_list
-        # torch.cuda.empty_cache()
+
         pbar = tqdm(range(iter), desc=f"Optimizing {layer_name}", leave=False)
+        prev_loss = float("inf")
+        patience = 5  # Number of steps to wait for improvement
+        no_improve_count = 0
+        min_delta = 1e-4  # Minimum change in loss to be considered improvement
+
         for step in pbar:
             disturbing_vectors = merging_vector.unsqueeze(0) - taskvector
             inner_product = torch.matmul(disturbing_vectors, low_rank.transpose(1, 2))
@@ -484,6 +488,17 @@ class WuDiMerge2(WudiMergeAfter):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+
+            if abs(prev_loss - loss.item()) < min_delta:
+                no_improve_count += 1
+            else:
+                no_improve_count = 0
+
+            if no_improve_count >= patience:
+                logger.info(f"Early stopping at step {step} due to minimal loss change")
+                break
+
+            prev_loss = loss.item()
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
         return merging_vector
 
