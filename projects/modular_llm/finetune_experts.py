@@ -542,7 +542,6 @@ def train_module(args: FinetuneConfig, module: ExpertModule, dm):
 
     monitor = "val/loss"
     mode = "min"
-
     if "rouge" in args.es_metric:  # early stop on Rouge
         monitor = "val/rougeL"
         mode = "max"
@@ -551,18 +550,18 @@ def train_module(args: FinetuneConfig, module: ExpertModule, dm):
         monitor = f"downstream/{args.finetune_task_name}"
         mode = "max"
 
-    try:
-        dm_for_gen = get_datamodule(args, for_generation=True)
-        rouge_callback = RougeCallback(
-            datamodule=dm_for_gen,
-        )
-        callbacks.append(rouge_callback)
-    except:
-        logger.warning("Deactivating rouge callback. Exception thrown.")
-        if "rouge" in args.es_metric:
-            raise ValueError(
-                "Cannot stop on Rouge if no rouge callback is present! An exception was encountered while trying to load it."
-            )
+    # try:
+    #     dm_for_gen = get_datamodule(args, for_generation=True)
+    #     rouge_callback = RougeCallback(
+    #         datamodule=dm_for_gen,
+    #     )
+    #     callbacks.append(rouge_callback)
+    # except:
+    #     logger.warning("Deactivating rouge callback. Exception thrown.")
+    #     if "rouge" in args.es_metric:
+    #         raise ValueError(
+    #             "Cannot stop on Rouge if no rouge callback is present! An exception was encountered while trying to load it."
+    #         )
 
     checkpoint_callback = LiveCheckpointCallback(
         dirpath=args.output_dir,

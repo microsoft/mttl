@@ -293,6 +293,7 @@ class MoEModule(LightningTrainingMixin, LightningEfficientCheckpoint):
 
         self.training_config = MoEExpertConfig.fromdict(kwargs)
         config = MoEModelConfig(
+            library_id=self.training_config.library_id,
             base_model=self.training_config.model,
             moe_num_experts=self.training_config.moe_num_experts,
             modifier_config=self.training_config.modifier_config,

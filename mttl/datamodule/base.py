@@ -957,6 +957,11 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         HellaswagMultiChoiceDataModule,
     )
     from mttl.datamodule.mathqa_data_module import MathQADataConfig, MathQADataModule
+    from mttl.datamodule.gsm_data_module import GsmDataConfig, GsmDataModule
+    from mttl.datamodule.abstention_data_module import (
+        AbstentionDataConfig,
+        AbstentionDataModule,
+    )
     from mttl.datamodule.base import DatasetConfig
     from mttl.datamodule.alpaca_data_module import (
         AlpacaCodeDataModule,
@@ -1067,6 +1072,9 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         assert not for_generation
         config = dataset_to_klass_map[dataset][0]
         dm = dataset_to_klass_map[dataset][1](config)
+    elif "coconot" in dataset:
+        config = AbstentionDataConfig(**common_kwargs)
+        dm = AbstentionDataModule(config, for_generation=for_generation)
     elif "flan" in dataset:
         config = FlanConfig(
             **common_kwargs,
