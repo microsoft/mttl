@@ -37,6 +37,7 @@ from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.utils import remote_login
 from mttl.models.containers.selectors.base import UniformSelectorConfig
+from mttl.models.containers.selectors import TaskNameSelectorConfig
 
 
 def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
@@ -69,6 +70,8 @@ def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
                 verbose=False,
             )
         elif args.eval_metric == "rougeL":
+            if isinstance(module.selector_config, TaskNameSelectorConfig):
+                module.set_default_expert(task)
             dm = get_datamodule(args, for_generation=True)
             evaluator = RougeEvaluator(
                 datamodule=dm,
@@ -308,7 +311,6 @@ def run_eval(args: EvaluationConfig):
 
     elif args.merge_or_route == "oracle":
         """TaskNameSelector"""
-        from mttl.models.containers.selectors import TaskNameSelectorConfig
 
         selector_config = TaskNameSelectorConfig.from_training_config(args)
 
@@ -317,7 +319,7 @@ def run_eval(args: EvaluationConfig):
             selector_config=selector_config,
             **loading_kwargs,
         )
-        model.set_default_expert(args.finetune_task_name)
+        # model.set_default_expert(args.finetune_task_name)
     else:
         raise ValueError(f"Unknown merge_or_route {args.merge_or_route}")
 
