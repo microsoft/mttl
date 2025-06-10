@@ -223,6 +223,9 @@ class WudiMergeAfter(LibraryTransform):
         super().__init__(config or WudiMergeConfig())
 
     def _get_task_vectors(self, expert):
+        """
+        get the incremental weights for each layer, LoRA A outproduct LoRA B
+        """
         task_vectors = {}
         for key in expert.expert_weights.keys():
             base_layer_name = key.split(".lora_")[
@@ -238,7 +241,14 @@ class WudiMergeAfter(LibraryTransform):
 
         return task_vectors
 
-    def get_redundant_task_vector(self, layer_name, task_vectors, iter, lr):
+    def get_optimized_task_vector(
+        self, layer_name, task_vectors, iter, lr
+    ) -> torch.Tensor:
+        """
+        min Σᵢ (1/||τᵢ,ₗ||²F) ||(τₘ,ₗ - τᵢ,ₗ)(τᵢ,ₗ)ᵀ||²F
+
+        return the optimized merged task vector for each layer
+        """
         task_vectors = task_vectors.cuda()
         merging_vector = torch.nn.Parameter((torch.sum(task_vectors, dim=0)))
         optimizer = torch.optim.Adam([merging_vector], lr=lr, weight_decay=0)
@@ -312,7 +322,7 @@ class WudiMergeAfter(LibraryTransform):
 
             task_vectors = torch.stack(task_vectors, dim=0)
             # get the redundant task vector
-            merged_task_vector = self.get_redundant_task_vector(
+            merged_task_vector = self.get_optimized_task_vector(
                 layer_name=layer,
                 task_vectors=task_vectors,
                 iter=self.config.iter,
