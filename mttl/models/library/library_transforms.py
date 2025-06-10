@@ -291,7 +291,10 @@ class WudiMergeAfter(LibraryTransform):
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
         return merging_vector
 
-    def transform(self, library, model):
+    def transform(self, library, persist=True, recompute=False) -> dict:
+        """
+        return the task merged vectors in each layer
+        """
 
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
@@ -331,19 +334,7 @@ class WudiMergeAfter(LibraryTransform):
 
             # save the merged task vector in each layer
             task_merged_vectors[layer] = merged_task_vector / len(experts)
-        # merge the task vectors to the model
-        for name, param in model.named_parameters():
-            name = name.split(".weight")[0]
-            if name in task_merged_vectors.keys():
-                logger.info(f"Merging {name} to the model")
-                ## sometimes the shape is the reverse of the task_merged_vectors
-                if param.shape != task_merged_vectors[name].shape:
-                    logger.info(
-                        f"shape mismatch {param.shape} {task_merged_vectors[name].shape}"
-                    )
-                    task_merged_vectors[name] = task_merged_vectors[name].T
-                res = param + task_merged_vectors[name]
-                param.data.copy_(res)
+        return task_merged_vectors
 
 
 @LibraryTransform.register("wudi_merge", WudiMergeConfig)
