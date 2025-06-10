@@ -248,7 +248,8 @@ def run_eval(args: EvaluationConfig):
             **loading_kwargs,
         )
         cfg = WudiMergeConfig(iter=300, lr=1e-5)
-        WudiMergeAfter(cfg).transform(library, model.model)
+        task_merged_vectors = WudiMergeAfter(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors)
     elif args.merge_or_route == "wudi_merge_2":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
