@@ -12,20 +12,22 @@ from mttl.models.library.expert import Expert
 from mttl.models.library.library_transforms import WeightedLinearMergeConfig
 
 
-def weighted_linear_merge(experts: List[Expert], config: WeightedLinearMergeConfig) -> Expert:
+def weighted_linear_merge(
+    experts: List[Expert], config: WeightedLinearMergeConfig
+) -> Expert:
     """
     Merge experts using weighted linear averaging.
-    
+
     Args:
         experts: List of Expert objects to merge
         config: WeightedLinearMergeConfig containing merge parameters
-        
+
     Returns:
         Expert: Merged expert
     """
     if not experts:
         raise ValueError("Cannot merge empty list of experts")
-    
+
     expert_names = [expert.name for expert in experts]
     logger.info("Averaging {} experts".format(len(experts)))
 

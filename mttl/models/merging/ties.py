@@ -17,17 +17,17 @@ from mttl.models.library.library_transforms import TiesMergeConfig
 def ties_merge(experts: List[Expert], config: TiesMergeConfig) -> Expert:
     """
     Merge experts using TIES merge algorithm.
-    
+
     Args:
         experts: List of Expert objects to merge
         config: TiesMergeConfig containing merge parameters
-        
+
     Returns:
         Expert: Merged expert
     """
     if not experts:
         raise ValueError("Cannot merge empty list of experts")
-    
+
     logger.info("Averaging {} experts".format(len(experts)))
 
     base_expert = copy.deepcopy(experts[0])

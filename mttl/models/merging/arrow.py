@@ -1,7 +1,7 @@
 """
 Arrow transform algorithm for Expert objects.
 
-This module implements Arrow transform that extracts input directions most affected 
+This module implements Arrow transform that extracts input directions most affected
 by the linear transforms in expert weights.
 """
 
@@ -17,25 +17,27 @@ from mttl.models.library.library_transforms import ArrowTransformConfig
 from mttl.models.modifiers.base import get_target_2_source_param_mapping
 
 
-def arrow_transform(experts: List[Expert], config: ArrowTransformConfig) -> Dict[str, Dict[str, torch.Tensor]]:
+def arrow_transform(
+    experts: List[Expert], config: ArrowTransformConfig
+) -> Dict[str, Dict[str, torch.Tensor]]:
     """
     Apply Arrow transform to experts to extract input directions most affected by linear transforms.
-    
+
     Args:
         experts: List of Expert objects to transform
         config: ArrowTransformConfig containing transform parameters
-        
+
     Returns:
         Dict mapping expert names to their Arrow prototypes (layer_name -> prototype vector)
     """
     if not experts:
         raise ValueError("Cannot transform empty list of experts")
-    
+
     logger.info(f"Computing Arrow prototypes for {len(experts)} experts")
-    
+
     vectors = {}
     eigvals = {}
-    
+
     for expert in experts:
         expert_name = expert.name
         logger.info(f"Computing SVD for expert {expert_name}")
@@ -128,7 +130,9 @@ def arrow_transform(experts: List[Expert], config: ArrowTransformConfig) -> Dict
                 top_value = Sigma_W[0] ** 2
                 top_vector = U_W[:, 0]
             else:
-                raise NotImplementedError("Base model weights not supported in standalone function")
+                raise NotImplementedError(
+                    "Base model weights not supported in standalone function"
+                )
 
             # Save eigenvector and eigenvalue
             for parent in parent_names:

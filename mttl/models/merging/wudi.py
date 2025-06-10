@@ -18,17 +18,17 @@ from mttl.models.library.library_transforms import WudiMergeConfig
 def wudi_merge(experts: List[Expert], config: WudiMergeConfig) -> Expert:
     """
     Merge experts using WuDi merge algorithm.
-    
+
     Args:
         experts: List of Expert objects to merge
         config: WudiMergeConfig containing merge parameters
-        
+
     Returns:
         Expert: Merged expert
     """
     if not experts:
         raise ValueError("Cannot merge empty list of experts")
-    
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Merging {} experts using WuDi merge".format(len(experts)))
 
@@ -46,9 +46,7 @@ def wudi_merge(experts: List[Expert], config: WudiMergeConfig) -> Expert:
 
         # Initialize merged vector as sum of all vectors
         merging_vector = torch.nn.Parameter(torch.sum(values, dim=0))
-        optimizer = torch.optim.Adam(
-            [merging_vector], lr=config.lr, weight_decay=0
-        )
+        optimizer = torch.optim.Adam([merging_vector], lr=config.lr, weight_decay=0)
 
         # Compute L2 norms
         l2_norms = torch.square(
