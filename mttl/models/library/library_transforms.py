@@ -217,13 +217,16 @@ class WudiMergeAfter(LibraryTransform):
     """
     implement the wudimerge in the paper https://arxiv.org/pdf/2503.08099v1
 
-    we mat the lora A and lora B and then merge the experts to the model.
+    we multiply the lora A and lora B and then merge the experts to the model(merge after).
     """
 
     def __init__(self, config: WudiMergeConfig = None):
         super().__init__(config or WudiMergeConfig())
 
     def _get_task_vectors(self, expert):
+        """
+        get the incremental weights for each layer, LoRA A outproduct LoRA B
+        """
         task_vectors = {}
         for key in expert.expert_weights.keys():
             base_layer_name = key.split(".lora_")[
@@ -239,9 +242,13 @@ class WudiMergeAfter(LibraryTransform):
 
         return task_vectors
 
-    def get_optimized_task_vector(self, layer_name, task_vectors, iter, lr):
+    def get_optimized_task_vector(
+        self, layer_name, task_vectors, iter, lr
+    ) -> torch.Tensor:
         """
         min Σᵢ (1/||τᵢ,ₗ||²F) ||(τₘ,ₗ - τᵢ,ₗ)(τᵢ,ₗ)ᵀ||²F
+
+        return the optimized merged task vector for each layer
         """
         task_vectors = task_vectors.cuda()
         merging_vector = torch.nn.Parameter((torch.sum(task_vectors, dim=0)))
@@ -300,7 +307,7 @@ class WudiMergeAfter(LibraryTransform):
         layer_names = [
             name.split(".lora_")[0] for name in one_expert.expert_weights.keys()
         ]
-        layer_names = sorted(list(set(layer_names)))
+        layer_names = list(set(layer_names))
 
         # get the task vectors for each expert
         task_vectors_experts = {}
@@ -325,7 +332,7 @@ class WudiMergeAfter(LibraryTransform):
                 lr=self.config.lr,
             )
 
-            # add the merged task vector to the model
+            # save the merged task vector in each layer
             task_merged_vectors[layer] = merged_task_vector / len(experts)
         return task_merged_vectors
 
