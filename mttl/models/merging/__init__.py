@@ -6,7 +6,7 @@ as input and return merged or transformed experts. These functions are decoupled
 from library transforms and can be used independently.
 """
 
-from .wudi import wudi_merge
+from .wudi import wudi_merge, wudi_merge_after
 from .weighted_linear import weighted_linear_merge
 from .ties import ties_merge
 from .arrow import arrow_transform
@@ -18,6 +18,7 @@ from .phatgoose import (
 
 __all__ = [
     "wudi_merge",
+    "wudi_merge_after",
     "weighted_linear_merge",
     "ties_merge",
     "arrow_transform",
