@@ -222,119 +222,18 @@ class WudiMergeAfter(LibraryTransform):
     def __init__(self, config: WudiMergeConfig = None):
         super().__init__(config or WudiMergeConfig())
 
-    def _get_task_vectors(self, expert):
-        """
-        get the incremental weights for each layer, LoRA A outproduct LoRA B
-        """
-        task_vectors = {}
-        for key in expert.expert_weights.keys():
-            base_layer_name = key.split(".lora_")[
-                0
-            ]  # Get base layer name by removing .lora_a or .lora_b
-            if base_layer_name not in task_vectors:
-                task_vectors[base_layer_name] = None
-
-        for layer in task_vectors.keys():
-            lora_a = expert.expert_weights[f"{layer}.lora_a"]
-            lora_b = expert.expert_weights[f"{layer}.lora_b"]
-            task_vectors[layer] = lora_a.data @ lora_b.data
-
-        return task_vectors
-
-    def get_optimized_task_vector(
-        self, layer_name, task_vectors, iter, lr
-    ) -> torch.Tensor:
-        """
-        min Σᵢ (1/||τᵢ,ₗ||²F) ||(τₘ,ₗ - τᵢ,ₗ)(τᵢ,ₗ)ᵀ||²F
-
-        return the optimized merged task vector for each layer
-        """
-        task_vectors = task_vectors.cuda()
-        merging_vector = torch.nn.Parameter((torch.sum(task_vectors, dim=0)))
-        optimizer = torch.optim.Adam([merging_vector], lr=lr, weight_decay=0)
-
-        l2_norms = torch.square(
-            torch.norm(task_vectors.reshape(task_vectors.shape[0], -1), p=2, dim=-1)
-        )
-
-        pbar = tqdm(range(iter), desc=f"Optimizing parameter {layer_name}")
-        prev_loss = float("inf")
-        patience = 5  # Number of steps to wait for improvement
-        no_improve_count = 0
-        min_delta = 1e-4  # Minimum change in loss to be considered improvement
-
-        for step in pbar:
-            disturbing_vectors = merging_vector.unsqueeze(0) - task_vectors
-            inner_product = torch.matmul(
-                disturbing_vectors, task_vectors.transpose(1, 2)
-            )
-            loss = torch.sum(
-                torch.square(inner_product) / l2_norms.unsqueeze(-1).unsqueeze(-1)
-            )
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            # Check if loss improvement is significant
-            if abs(prev_loss - loss.item()) < min_delta:
-                no_improve_count += 1
-            else:
-                no_improve_count = 0
-
-            # Early stopping if no significant improvement for patience steps
-            if no_improve_count >= patience:
-                logger.info(f"Early stopping at step {step} due to minimal loss change")
-                break
-
-            prev_loss = loss.item()
-            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
-        return merging_vector
-
     def transform(self, library, persist=True, recompute=False) -> dict:
         """
         return the task merged vectors in each layer
         """
+        from mttl.models.merging import wudi_merge_after
 
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
-        logger.info("Merging {} experts using WuDi merge".format(len(experts)))
 
-        one_expert = experts[0]
-        # get the layer names from the model
-        layer_names = [
-            name.split(".lora_")[0] for name in one_expert.expert_weights.keys()
-        ]
-        layer_names = list(set(layer_names))
-
-        # get the task vectors for each expert
-        task_vectors_experts = {}
-        for expert in experts:
-            task_vectors = self._get_task_vectors(expert)
-            task_vectors_experts[expert.name] = task_vectors
-        task_merged_vectors = {}
-        # wudi merge the task vectors
-        for layer in layer_names:
-
-            # get the experts for this layer
-            task_vectors = [
-                task_vectors_experts[expert.name][layer] for expert in experts
-            ]
-
-            task_vectors = torch.stack(task_vectors, dim=0)
-            # get the redundant task vector
-            merged_task_vector = self.get_optimized_task_vector(
-                layer_name=layer,
-                task_vectors=task_vectors,
-                iter=self.config.iter,
-                lr=self.config.lr,
-            )
-
-            # save the merged task vector in each layer
-            task_merged_vectors[layer] = merged_task_vector / len(experts)
-        return task_merged_vectors
+        return wudi_merge_after(experts, self.config)
 
 
 @LibraryTransform.register("wudi_merge", WudiMergeConfig)
@@ -347,78 +246,15 @@ class WudiMerge(LibraryTransform):
         super().__init__(config or WudiMergeConfig())
 
     def transform(self, library) -> Expert:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        from mttl.models.merging import wudi_merge
+
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
 
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
 
-        logger.info("Merging {} experts using WuDi merge".format(len(experts)))
-
-        base_expert = copy.deepcopy(experts[0])
-        base_expert.name = "wudi_merged_expert"
-
-        # Get all parameter keys that we want to merge
-        keys = [key for key in base_expert.expert_weights.keys()]
-
-        for key in keys:
-            # Stack all expert weights for this parameter
-            values = torch.stack([expert.expert_weights[key] for expert in experts])
-
-            values = values.to(device)
-
-            # Initialize merged vector as sum of all vectors
-            merging_vector = torch.nn.Parameter(
-                torch.sum(values, dim=0), requires_grad=True
-            )
-            optimizer = torch.optim.Adam(
-                [merging_vector], lr=self.config.lr, weight_decay=0
-            )
-
-            # Compute L2 norms
-            l2_norms = torch.square(
-                torch.norm(values.reshape(values.shape[0], -1), p=2, dim=-1)
-            )
-
-            # Optimize merging vector
-            pbar = tqdm(range(self.config.iter), desc=f"Optimizing parameter {key}")
-            prev_loss = float("inf")
-            patience = 5  # Number of steps to wait for improvement
-            no_improve_count = 0
-            min_delta = 1e-4  # Minimum change in loss to be considered improvement
-
-            for step in pbar:
-                disturbing_vectors = merging_vector.unsqueeze(0) - values
-                inner_product = torch.matmul(disturbing_vectors, values.transpose(1, 2))
-
-                loss = torch.sum(
-                    torch.square(inner_product) / l2_norms.unsqueeze(-1).unsqueeze(-1)
-                )
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-                # Check if loss improvement is significant
-                if abs(prev_loss - loss.item()) < min_delta:
-                    no_improve_count += 1
-                else:
-                    no_improve_count = 0
-
-                # Early stopping if no significant improvement for patience steps
-                if no_improve_count >= patience:
-                    logger.info(
-                        f"Early stopping at step {step} due to minimal loss change"
-                    )
-                    break
-
-                prev_loss = loss.item()
-                pbar.set_postfix({"loss": f"{loss.item():.4f}"})
-            merging_vector = merging_vector / len(experts)
-            # Update base expert weights with optimized merging vector
-            base_expert.expert_weights[key].data.copy_(merging_vector.data.cpu())
-
-        return base_expert
+        return wudi_merge(experts, self.config)
 
 
 @dataclass
@@ -437,55 +273,15 @@ class WeightedLinearMerge(LibraryTransform):
 
     @torch.no_grad()
     def transform(self, library) -> Expert:
+        from mttl.models.merging import weighted_linear_merge
+
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
 
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
 
-        logger.info("Averaging {} experts".format(len(experts)))
-
-        base_expert = copy.deepcopy(experts[0])
-        base_expert.name = "weighted_expert"
-
-        if self.config.weights is not None:
-            assert set(self.config.weights.keys()) == set(
-                expert_names
-            ), "Weights must have the same keys as the experts"
-            if not (1 - 1e-6) <= sum(self.config.weights.values()) <= (1 + 1e-6):
-                logger.warning(
-                    "Weights do not sum to 1.0, please make sure this is intended"
-                )
-
-            # scale the base expert
-            for k, v in base_expert.expert_weights.items():
-                base_expert.expert_weights[k] *= self.config.weights[expert_names[0]]
-
-        for _, expert in zip(expert_names[1:], experts[1:]):
-            # Validate that the expert is compatible
-            assert type(expert.expert_info.expert_config) == type(
-                base_expert.expert_info.expert_config
-            ), "Expert configs must be the same type"
-            assert set(expert.expert_weights.keys()) == set(
-                base_expert.expert_weights.keys()
-            ), "Expert weights must have the same keys"
-
-            weight = 1.0
-            if self.config.weights is not None:
-                weight = self.config.weights[expert.expert_info.expert_name]
-
-            for k, v in expert.expert_weights.items():
-                base_expert.expert_weights[k] += v * weight
-
-        # Normalize the final expert
-        if self.config.weights is None:
-            for k, v in base_expert.expert_weights.items():
-                base_expert.expert_weights[k] /= len(experts)
-
-        # manually change the config of the expert to remove the tie_params
-        base_expert.expert_config.tie_params = None
-
-        return base_expert
+        return weighted_linear_merge(experts, self.config)
 
 
 @dataclass
@@ -507,81 +303,15 @@ class TiesMerge(LibraryTransform):
 
     @torch.no_grad()
     def transform(self, library) -> Expert:
+        from mttl.models.merging import ties_merge
+
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
 
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
 
-        logger.info("Averaging {} experts".format(len(experts)))
-
-        base_expert = copy.deepcopy(experts[0])
-        base_expert.name = "ties_weighted_expert"
-
-        state_dict_keys = list(base_expert.expert_weights.keys())
-
-        # Build n_tasks x D experts
-        # TODO: No need to build this matrix, can be done 1 expert at a time
-        expert_vectors = []
-        for expert in experts:
-            expert_vectors += [
-                torch.nn.utils.parameters_to_vector(
-                    list(expert.expert_weights[k] for k in state_dict_keys)
-                )
-            ]
-
-        expert_vectors = torch.stack(expert_vectors, dim=0)
-        per_exp_th = expert_vectors.abs().quantile(1.0 - self.config.top_k, dim=1)
-        keep_param = expert_vectors.abs() >= per_exp_th.view(-1, 1)
-
-        mean_valid_per_task = keep_param.float().mean(1)
-        assert torch.all((mean_valid_per_task - self.config.top_k).abs() < 1e-4)
-
-        used, kept, total = 0, 0, 0
-
-        for param_name in state_dict_keys:
-            # stack the expert weights
-            expert_weights = torch.stack(
-                [expert.expert_weights[param_name] for expert in experts], dim=0
-            )
-
-            # keep weights over the threshold
-            TH = per_exp_th.view(-1, *((1,) * (expert_weights.ndim - 1)))
-            keep_mask = expert_weights.abs() >= TH
-            expert_weights = expert_weights * keep_mask
-
-            if self.config.only_sparsify:
-                final_param = expert_weights.mean(0)
-                used += keep_mask.sum().item()
-            else:
-                # sign majority vote
-                sign_per_dim = expert_weights.sign().sum(0, keepdim=True).sign()
-                sign_per_dim = expert_weights.sum(0, keepdim=True).sign()
-
-                # keep only weights whose sign agree with the majority
-                use_for_avg = expert_weights.sign() == sign_per_dim
-
-                deno = use_for_avg.sum(0).clamp(min=1.0)
-                sum_param = (expert_weights * use_for_avg).sum(0)
-                final_param = sum_param / deno
-                used += (use_for_avg & (sign_per_dim != 0.0)).sum().item()
-
-            kept += (expert_weights.abs() > TH).sum()
-            total += expert_weights.numel()
-
-            base_expert.expert_weights[param_name].data.copy_(final_param)
-
-        logger.info(
-            "Params not reset to 0 in TIES merge: {:.10f}%".format(100.0 * kept / total)
-        )
-        logger.info(
-            "Params used to compute TIES mean: {:.10f}%".format(100.0 * used / total)
-        )
-
-        # manually change the config of the expert to remove the tie_params
-        base_expert.expert_config.tie_params = None
-
-        return base_expert
+        return ties_merge(experts, self.config)
 
 
 @dataclass
