@@ -299,7 +299,7 @@ class WudiMergeAfter(LibraryTransform):
             library = ExpertLibrary.get_expert_library(library)
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
-        logger.info("Merging {} experts using WuDi merge".format(len(experts)))
+        logger.info("Merging {} experts using WuDi merge after".format(len(experts)))
         one_expert = experts[0]
         # get the layer names from the model
         layer_names = [
@@ -352,14 +352,13 @@ class WudiMerge(LibraryTransform):
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
 
-        logger.info("Merging {} experts using WuDi merge".format(len(experts)))
+        logger.info("Merging {} experts using WuDi merge before".format(len(experts)))
 
         base_expert = copy.deepcopy(experts[0])
-        base_expert.name = "wudi_merged_expert"
 
         # Get all parameter keys that we want to merge
         keys = [key for key in base_expert.expert_weights.keys()]
-
+        task_merged_vectors = {}
         for key in keys:
             # Stack all expert weights for this parameter
             values = torch.stack([expert.expert_weights[key] for expert in experts])
@@ -413,10 +412,8 @@ class WudiMerge(LibraryTransform):
                 prev_loss = loss.item()
                 pbar.set_postfix({"loss": f"{loss.item():.4f}"})
             merging_vector = merging_vector / len(experts)
-            # Update base expert weights with optimized merging vector
-            base_expert.expert_weights[key].data.copy_(merging_vector.data.cpu())
-
-        return base_expert
+            task_merged_vectors[key] = merging_vector
+        return task_merged_vectors
 
 
 @dataclass

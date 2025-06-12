@@ -235,13 +235,13 @@ def run_eval(args: EvaluationConfig):
             cfg = TiesMergeConfig()
             expert = TiesMerge(cfg).transform(library)
         elif args.merge_or_route == "wudi":
-            cfg = WudiMergeConfig(iter=1000, lr=1e-5)
-            expert = WudiMerge(cfg).transform(library)
-        model = MultiExpertModel(
-            MultiExpertModelConfig(base_model=base_model),
-            **loading_kwargs,
-        )
-        model.add_expert_instance(expert, is_default=True)
+            cfg = WudiMergeConfig(iter=300, lr=1e-5)
+            task_merged_vectors = WudiMerge(cfg).transform(library)
+            model = MultiExpertModel(
+                MultiExpertModelConfig(base_model=base_model),
+                **loading_kwargs,
+            )
+            model.task_vector_apply(task_merged_vectors)
     elif args.merge_or_route == "wudi_merge_after":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
