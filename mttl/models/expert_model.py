@@ -624,7 +624,7 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
                         f"shape mismatch {param.shape} {task_merged_vectors[name].shape}"
                     )
                     task_merged_vectors[name] = task_merged_vectors[name].T
-                res = param + task_merged_vectors[name]
+                res = param + task_merged_vectors[name].to(param.device)
                 param.data.copy_(res)
 
     def merge_and_save_base_model(self, output_dir, expert_name, device="cpu"):

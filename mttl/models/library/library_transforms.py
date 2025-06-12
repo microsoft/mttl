@@ -34,7 +34,7 @@ from mttl.models.train_utils import train_model
 from mttl.models.utils import transfer_batch_to_device
 from mttl.registrable import Registrable
 from mttl.serializable import Serializable
-from mttl.models.library.wudi_closed_form import AnalyticalLoRAMerger
+from mttl.models.library.wudi_closed_form import AnalyticalSolver
 
 
 class LibraryTransform(abc.ABC, Registrable):
@@ -269,9 +269,7 @@ class WudiMergeAfter(LibraryTransform):
             inner_product = torch.matmul(
                 disturbing_vectors, task_vectors.transpose(1, 2)
             )
-            loss = torch.sum(
-                torch.square(inner_product) / l2_norms.unsqueeze(-1).unsqueeze(-1)
-            )
+            loss = torch.sum(torch.square(inner_product))
 
             optimizer.zero_grad()
             loss.backward()
@@ -510,6 +508,7 @@ class WuDiMerge2(WudiMergeAfter):
 
 @dataclass
 class AnalyticalWudiMergeConfig(LibraryTransformConfig):
+    regularization: float = 1e-6
     pass
 
 
@@ -519,8 +518,7 @@ class AnalyticalWudiMerge(LibraryTransform):
 
     def __init__(self, config: AnalyticalWudiMergeConfig = None):
         super().__init__(config or AnalyticalWudiMergeConfig())
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.merger = AnalyticalLoRAMerger(regularization=1e-6, device=device)
+        self.merger = AnalyticalSolver(regularization_omega=self.config.regularization)
 
     def _get_task_vectors(self, expert):
         task_vectors = {}
@@ -538,7 +536,7 @@ class AnalyticalWudiMerge(LibraryTransform):
 
         return task_vectors
 
-    def transform(self, library, model) -> Expert:
+    def transform(self, library) -> dict:
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
         expert_names = list(library.keys())
@@ -561,23 +559,17 @@ class AnalyticalWudiMerge(LibraryTransform):
             ]
 
             # Get optimal merged matrix using analytical solution
-            merged_matrix = self.merger.merge_loras(
-                task_vectors, use_pseudoinverse=True
-            )
-
+            logger.info(f"Merging {layer} with {len(task_vectors)} task vectors")
+            merged_matrix = self.merger.compute_analytical_solution(task_vectors)
             # Convert back to torch tensor with same device and dtype
             merged_task_vector = torch.tensor(
-                merged_matrix, device=task_vectors.device, dtype=task_vectors.dtype
+                merged_matrix,
+                device=task_vectors[0].device,
+                dtype=task_vectors[0].dtype,
             )
             # add the merged task vector to the model
             task_merged_vectors[layer] = merged_task_vector / len(experts)
-        # merge the task vectors to the model
-        for name, param in model.named_parameters():
-            name = name.split(".weight")[0]
-            if name in task_merged_vectors.keys():
-                logger.info(f"Merging {name} to the model")
-                res = param + task_merged_vectors[name]
-                param.data.copy_(res)
+        return task_merged_vectors
 
 
 @dataclass

@@ -263,7 +263,8 @@ def run_eval(args: EvaluationConfig):
             **loading_kwargs,
         )
         cfg = AnalyticalWudiMergeConfig()
-        AnalyticalWudiMerge(cfg).transform(library, model.model)
+        task_merged_vectors = AnalyticalWudiMerge(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors)
 
     elif args.merge_or_route == "uniform_lora_after_op":
         # Here we merge the LoRA experts after the outer product we cannot really do it

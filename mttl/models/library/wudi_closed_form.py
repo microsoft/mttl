@@ -1,308 +1,300 @@
+import numpy as np
+from torch.linalg import inv, pinv, solve
+import warnings
 import torch
-from typing import List, Optional, Union
 
 
-class AnalyticalLoRAMerger:
+class AnalyticalSolver:
     """
-    Analytical solver for LoRA merging optimization problem using PyTorch.
+    Implementation of the analytical solution:
+    τ_{m,l} = Matmul(Σ_i (1/||τ_{i,l}||_F^2) τ_{i,l}(τ_{i,l}^T τ_{i,l} + ωI),
+                     (Σ_i (1/||τ_{i,l}||_F^2) (τ_{i,l}^T τ_{i,l} + ωI))^{-1})
 
-    Solves: min Σᵢ (1/||τᵢ,ₗ||²F) ||(τₘ,ₗ - τᵢ,ₗ)(τᵢ,ₗ)ᵀ||²F
+    Where:
+    - τ_{i,l} are the input matrices (corresponding to your low-rank factors)
+    - ω is a regularization parameter
+    - The formula computes a weighted combination with Frobenius norm weighting
     """
 
-    def __init__(
-        self, regularization: float = 1e-8, device: Optional[torch.device] = None
-    ):
+    def __init__(self, regularization_omega=1e-6):
         """
-        Initialize the solver.
+        Initialize the analytical solver
 
         Args:
-            regularization: Small value added to diagonal for numerical stability
-            device: Device to perform computations on (GPU/CPU)
+            regularization_omega: Regularization parameter ω for numerical stability
         """
-        self.regularization = regularization
-        self.device = device if device is not None else torch.device("cpu")
+        self.omega = regularization_omega
 
-    def merge_loras(
-        self, lora_matrices: List[torch.Tensor], use_pseudoinverse: bool = False
-    ) -> torch.Tensor:
+    def compute_analytical_solution(self, tau_matrices, omega=None):
         """
-        Analytically merge multiple LoRA matrices.
+        Compute the analytical solution using the given formula
 
         Args:
-            lora_matrices: List of LoRA tensors τᵢ,ₗ to merge
-            use_pseudoinverse: Whether to use pseudoinverse for numerical stability
+            tau_matrices: List of matrices τ_{i,l}, each of shape (n, k)
+            omega: Regularization parameter (if None, uses self.omega)
 
         Returns:
-            Optimal merged LoRA tensor τₘ,ₗ*
+            tau_ml: The computed solution matrix
         """
-        if len(lora_matrices) == 0:
-            raise ValueError("At least one LoRA matrix is required")
+        if omega is None:
+            omega = self.omega
 
-        # Move tensors to the specified device
-        lora_matrices = [mat.to(self.device) for mat in lora_matrices]
+        n_matrices = len(tau_matrices)
+        if n_matrices == 0:
+            raise ValueError("Need at least one input matrix")
 
-        # Get dimensions
-        n_matrices = len(lora_matrices)
-        rows, cols = lora_matrices[0].shape
+        # Get dimensions from first matrix
+        n_rows, n_cols = tau_matrices[0].shape
 
-        # Validate all matrices have same shape
-        for i, matrix in enumerate(lora_matrices):
-            if matrix.shape != (rows, cols):
+        # Verify all matrices have same shape
+        for i, tau_i in enumerate(tau_matrices):
+            if tau_i.shape != (n_rows, n_cols):
                 raise ValueError(
-                    f"Matrix {i} has shape {matrix.shape}, expected {(rows, cols)}"
+                    f"Matrix {i} has shape {tau_i.shape}, expected {(n_rows, n_cols)}"
                 )
 
-        # Compute weights wᵢ = 1/||τᵢ,ₗ||²F
+        # Compute Frobenius norms and weights
+        frobenius_norms = []
         weights = []
-        for matrix in lora_matrices:
-            frobenius_norm_sq = torch.sum(matrix**2)
-            if frobenius_norm_sq < 1e-12:
-                print(
-                    f"Warning: Matrix has very small Frobenius norm: {frobenius_norm_sq.item()}"
+
+        for tau_i in tau_matrices:
+            frob_norm = torch.linalg.norm(tau_i, "fro")
+            if frob_norm < 1e-12:  # Handle near-zero matrices
+                warnings.warn(
+                    "Found matrix with very small Frobenius norm, using small regularization"
                 )
-                weights.append(torch.tensor(1.0, device=self.device))  # Fallback weight
-            else:
-                weights.append(1.0 / frobenius_norm_sq)
+                frob_norm = 1e-12
 
-        # Build the system Gm = y
-        G, y = self._build_system(lora_matrices, weights)
+            frobenius_norms.append(frob_norm)
+            weights.append(1.0 / (frob_norm**2))
 
-        # Solve the system
-        if use_pseudoinverse:
-            m_optimal = torch.linalg.pinv(G) @ y
-        else:
-            # Use normal equation: m* = (G^T G)^(-1) G^T y
-            GtG = G.T @ G
+        # print(f"Frobenius norms: {frobenius_norms}")
+        # print(f"Weights: {weights}")
 
-            # Add regularization for numerical stability
-            GtG += self.regularization * torch.eye(
-                GtG.shape[0], device=self.device, dtype=G.dtype
-            )
+        # Compute the first sum: Σ_i (1/||τ_{i,l}||_F^2) τ_{i,l}(τ_{i,l}^T τ_{i,l} + ωI)
+        first_sum = torch.zeros((n_rows, n_cols))
 
-            try:
-                # Use torch.linalg.solve for better numerical stability
-                m_optimal = torch.linalg.solve(GtG, G.T @ y)
-            except torch.linalg.LinAlgError:
-                print("Warning: Normal equation failed, using pseudoinverse")
-                m_optimal = torch.linalg.pinv(G) @ y
+        for tau_i, weight in zip(tau_matrices, weights):
+            # Compute τ_{i,l}^T τ_{i,l} + ωI
+            gram_matrix = tau_i.T @ tau_i + omega * torch.eye(n_cols)
 
-        # Reshape back to matrix form
-        merged_matrix = m_optimal.reshape(cols, rows).T
+            # Add weighted contribution: weight * τ_{i,l} * gram_matrix
+            first_sum += weight * tau_i @ gram_matrix
 
-        return merged_matrix
+        # Compute the second sum: Σ_i (1/||τ_{i,l}||_F^2) (τ_{i,l}^T τ_{i,l} + ωI)
+        second_sum = torch.zeros((n_cols, n_cols))
 
-    def _build_system(
-        self, lora_matrices: List[torch.Tensor], weights: List[torch.Tensor]
-    ):
+        for tau_i, weight in zip(tau_matrices, weights):
+            # Compute τ_{i,l}^T τ_{i,l} + ωI
+            gram_matrix = tau_i.T @ tau_i + omega * np.eye(n_cols)
+
+            # Add weighted contribution
+            second_sum += weight * gram_matrix
+
+        # Compute the final result: first_sum @ inv(second_sum)
+        try:
+            # Try regular inverse first
+            second_sum_inv = inv(second_sum)
+        except torch.linalg.LinAlgError:
+            # Fall back to pseudo-inverse if singular
+            warnings.warn("Second sum matrix is singular, using pseudo-inverse")
+            second_sum_inv = pinv(second_sum)
+
+        tau_ml = first_sum @ second_sum_inv
+
+        return tau_ml
+
+    def compute_analytical_solution_stable(self, tau_matrices, omega=None):
         """
-        Build the weighted least squares system Gm = y.
+        Numerically stable version using solve instead of explicit inversion
 
         Args:
-            lora_matrices: List of LoRA tensors
-            weights: Corresponding weights
+            tau_matrices: List of matrices τ_{i,l}
+            omega: Regularization parameter
 
         Returns:
-            G: System matrix
-            y: Target vector
+            tau_ml: The computed solution matrix
         """
-        rows, cols = lora_matrices[0].shape
-        n_matrices = len(lora_matrices)
-        dtype = lora_matrices[0].dtype
+        if omega is None:
+            omega = self.omega
 
-        # Each matrix contributes (rows * cols) equations
-        total_equations = n_matrices * rows * cols
-        total_variables = rows * cols
+        n_matrices = len(tau_matrices)
+        if n_matrices == 0:
+            raise ValueError("Need at least one input matrix")
 
-        G = torch.zeros(
-            total_equations, total_variables, device=self.device, dtype=dtype
-        )
-        y = torch.zeros(total_equations, device=self.device, dtype=dtype)
+        n_rows, n_cols = tau_matrices[0].shape
 
-        I = torch.eye(
-            rows, device=self.device, dtype=dtype
-        )  # Identity matrix for Kronecker product
+        # Compute weights
+        weights = []
+        for tau_i in tau_matrices:
+            frob_norm = torch.linalg.norm(tau_i, "fro")
+            if frob_norm < 1e-12:
+                frob_norm = 1e-12
+            weights.append(1.0 / (frob_norm**2))
 
-        for i, (matrix, weight) in enumerate(zip(lora_matrices, weights)):
-            sqrt_weight = torch.sqrt(weight)
+        # Compute sums
+        first_sum = torch.zeros((n_rows, n_cols))
+        second_sum = torch.zeros((n_cols, n_cols))
 
-            # Compute Kronecker product: C_i ⊗ I
-            # Using torch.kron for efficient Kronecker product
-            kron_product = torch.kron(matrix, I)
+        for tau_i, weight in zip(tau_matrices, weights):
+            gram_matrix = tau_i.T @ tau_i + omega * torch.eye(n_cols)
+            first_sum += weight * tau_i @ gram_matrix
+            second_sum += weight * gram_matrix
 
-            # Add to system matrix with weighting
-            start_row = i * rows * cols
-            end_row = (i + 1) * rows * cols
-            G[start_row:end_row, :] = sqrt_weight * kron_product
+        # Solve instead of inverting: tau_ml @ second_sum = first_sum
+        # This is equivalent to: tau_ml = first_sum @ inv(second_sum)
+        try:
+            tau_ml = solve(second_sum.T, first_sum.T).T
+        except torch.linalg.LinAlgError:
+            # Fall back to least squares if singular
+            warnings.warn("Using least squares solve due to singular matrix")
+            tau_ml = np.linalg.lstsq(second_sum.T, first_sum.T, rcond=None)[0].T
 
-            # Compute target: vec(C_i^2)
-            target_matrix = matrix @ matrix  # C_i^2 = C_i * C_i
-            target_vec = target_matrix.T.flatten()  # vec(M^T) for consistency
+        return tau_ml
 
-            # Add to target vector with weighting
-            y[start_row:end_row] = sqrt_weight * target_vec
-
-        return G, y
-
-    def compute_objective_value(
-        self, merged_matrix: torch.Tensor, lora_matrices: List[torch.Tensor]
-    ) -> torch.Tensor:
+    def verify_solution_properties(self, tau_ml, tau_matrices):
         """
-        Compute the objective function value for verification.
+        Verify properties of the computed solution
 
         Args:
-            merged_matrix: The merged LoRA tensor
-            lora_matrices: List of individual LoRA tensors
+            tau_ml: Computed solution
+            tau_matrices: Original input matrices
 
         Returns:
-            Objective function value
+            dict: Dictionary of verification metrics
         """
-        total_loss = torch.tensor(0.0, device=self.device, dtype=merged_matrix.dtype)
+        metrics = {}
 
-        # Ensure all tensors are on the same device
-        merged_matrix = merged_matrix.to(self.device)
-        lora_matrices = [mat.to(self.device) for mat in lora_matrices]
+        # Compute residuals for each input matrix
+        residuals = []
+        for i, tau_i in enumerate(tau_matrices):
+            residual = torch.linalg.norm(tau_ml - tau_i, "fro")
+            residuals.append(residual)
 
-        for matrix in lora_matrices:
-            # Compute weight
-            weight = 1.0 / torch.sum(matrix**2)
+        residuals = torch.stack(residuals)
 
-            # Compute the term: (τₘ,ₗ - τᵢ,ₗ)(τᵢ,ₗ)ᵀ
-            diff = merged_matrix - matrix
-            term = diff @ matrix.T
+        metrics["residuals"] = residuals
+        metrics["mean_residual"] = torch.mean(residuals)
+        metrics["solution_norm"] = torch.linalg.norm(tau_ml, "fro")
 
-            # Add weighted Frobenius norm squared
-            total_loss += weight * torch.sum(term**2)
+        # Check rank
+        try:
+            metrics["solution_rank"] = torch.linalg.matrix_rank(tau_ml)
+        except:
+            metrics["solution_rank"] = None
 
-        return total_loss
+        return metrics
 
 
-def merge_loras(
-    lora_tensors: List[torch.Tensor],
-    regularization: float = 1e-8,
-    use_pseudoinverse: bool = False,
-    device: Optional[torch.device] = None,
-) -> torch.Tensor:
+def demo_analytical_solution():
     """
-    Convenient function to merge LoRA tensors analytically.
-
-    Args:
-        lora_tensors: List of PyTorch LoRA tensors
-        regularization: Regularization parameter
-        use_pseudoinverse: Whether to use pseudoinverse for stability
-        device: Device to perform computations on
-
-    Returns:
-        Merged LoRA tensor
+    Demonstrate the analytical solution with example data
     """
-    if device is None:
-        device = lora_tensors[0].device if lora_tensors else torch.device("cpu")
+    print("Demo: Analytical Solution Implementation")
+    print("=" * 50)
 
-    merger = AnalyticalLoRAMerger(regularization=regularization, device=device)
-    return merger.merge_loras(lora_tensors, use_pseudoinverse=use_pseudoinverse)
-
-
-def merge_loras_batched(
-    lora_tensors: List[torch.Tensor],
-    batch_size: int = 10,
-    regularization: float = 1e-8,
-    device: Optional[torch.device] = None,
-) -> torch.Tensor:
-    """
-    Merge LoRA tensors in batches for memory efficiency.
-
-    Args:
-        lora_tensors: List of PyTorch LoRA tensors
-        batch_size: Number of tensors to process at once
-        regularization: Regularization parameter
-        device: Device to perform computations on
-
-    Returns:
-        Merged LoRA tensor
-    """
-    if len(lora_tensors) <= batch_size:
-        return merge_loras(lora_tensors, regularization, device=device)
-
-    # Process in batches and then merge the results
-    merged_results = []
-    for i in range(0, len(lora_tensors), batch_size):
-        batch = lora_tensors[i : i + batch_size]
-        merged_batch = merge_loras(batch, regularization, device=device)
-        merged_results.append(merged_batch)
-
-    # Recursively merge the batch results
-    return merge_loras_batched(merged_results, batch_size, regularization, device)
-
-
-# Example usage and benchmarking
-if __name__ == "__main__":
-    # Set device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
-
-    # Create some example LoRA matrices
+    # Create test data
     torch.manual_seed(42)
-
-    # Generate some random LoRA matrices
+    n_rows, n_cols = 3047, 3047  # Small example
     n_matrices = 5
-    matrix_size = (64, 64)  # Larger size to showcase GPU benefits
 
-    lora_matrices = []
+    # Generate test matrices with some shared structure
+    base_matrix = torch.randn(n_rows, n_cols)
+    tau_matrices = []
+
     for i in range(n_matrices):
-        # Create structured matrices (low-rank-like)
-        U = torch.randn(matrix_size[0], 4, device=device)
-        V = torch.randn(4, matrix_size[1], device=device)
-        matrix = U @ V + 0.1 * torch.randn(*matrix_size, device=device)
-        lora_matrices.append(matrix)
+        # Add noise to base matrix to create related matrices
+        noise = 0.3 * torch.randn(n_rows, n_cols)
+        tau_i = base_matrix + noise
+        tau_matrices.append(tau_i)
 
-    print(f"Created {n_matrices} LoRA matrices of size {matrix_size}")
+    print(f"Generated {n_matrices} test matrices of shape {(n_rows, n_cols)}")
 
-    # Create merger and solve
-    merger = AnalyticalLoRAMerger(regularization=1e-6, device=device)
+    # Initialize solver
+    solver = AnalyticalSolver(regularization_omega=1e-4)
 
-    print("Merging LoRA matrices...")
+    # Compute analytical solution
+    print("\nComputing analytical solution...")
+    tau_ml_regular = solver.compute_analytical_solution(tau_matrices)
 
-    # Time the operation
-    if device.type == "cuda":
-        torch.cuda.synchronize()
-        start_time = torch.cuda.Event(enable_timing=True)
-        end_time = torch.cuda.Event(enable_timing=True)
-        start_time.record()
+    print(f"Solution shape: {tau_ml_regular.shape}")
+    print(f"Solution Frobenius norm: {torch.linalg.norm(tau_ml_regular, 'fro'):.6f}")
 
-    merged_matrix = merger.merge_loras(lora_matrices)
+    # Compute stable version
+    print("\nComputing numerically stable version...")
+    tau_ml_stable = solver.compute_analytical_solution_stable(tau_matrices)
 
-    if device.type == "cuda":
-        end_time.record()
-        torch.cuda.synchronize()
-        elapsed_time = start_time.elapsed_time(end_time)
-        print(f"GPU time: {elapsed_time:.2f} ms")
+    # Compare solutions
+    difference = torch.linalg.norm(tau_ml_regular - tau_ml_stable, "fro")
+    print(f"Difference between regular and stable solutions: {difference:.8f}")
 
-    # Compute objective value
-    obj_value = merger.compute_objective_value(merged_matrix, lora_matrices)
-    print(f"Objective function value: {obj_value.item():.6f}")
+    # Verify solution properties
+    print("\nVerifying solution properties...")
+    metrics = solver.verify_solution_properties(tau_ml_stable, tau_matrices)
 
-    # Compare with average (baseline)
-    avg_matrix = torch.stack(lora_matrices).mean(dim=0)
-    avg_obj_value = merger.compute_objective_value(avg_matrix, lora_matrices)
-    print(f"Average baseline objective: {avg_obj_value.item():.6f}")
-    print(f"Improvement: {(avg_obj_value - obj_value).item():.6f}")
+    print(f"Mean residual: {metrics['mean_residual']:.6f}")
+    print(f"Solution rank: {metrics['solution_rank']}")
+    print(f"Individual residuals: {[f'{r:.4f}' for r in metrics['residuals']]}")
 
-    # Test convenient function
-    print("\nTesting convenient merge_loras function...")
-    merged_matrix_2 = merge_loras(lora_matrices, device=device)
-    diff = torch.norm(merged_matrix - merged_matrix_2)
-    print(f"Difference between methods: {diff.item():.8f}")
+    return tau_ml_stable, tau_matrices, metrics
 
-    # Test batched merging for memory efficiency
-    print("\nTesting batched merging...")
-    merged_batched = merge_loras_batched(lora_matrices, batch_size=3, device=device)
-    batch_diff = torch.norm(merged_matrix - merged_batched)
-    print(f"Difference from batched method: {batch_diff.item():.8f}")
 
-    # Memory usage info
-    if device.type == "cuda":
+def adapt_for_lora_problem(J_matrices, K_matrices, omega=1e-6):
+    """
+    Adapt the analytical solution for LoRA-style problems where you have
+    pairs of matrices (J_i, K_i) and want to find optimal (J*, K*)
+
+    Args:
+        J_matrices: List of J matrices (left factors)
+        K_matrices: List of K matrices (right factors)
+        omega: Regularization parameter
+
+    Returns:
+        J_optimal, K_optimal: Optimal low-rank factors
+    """
+    print("Adapting analytical solution for LoRA problem...")
+
+    solver = AnalyticalSolver(regularization_omega=omega)
+
+    # Apply analytical solution separately to J and K matrices
+    J_optimal = solver.compute_analytical_solution_stable(J_matrices, omega)
+    K_optimal = solver.compute_analytical_solution_stable(K_matrices, omega)
+
+    return J_optimal, K_optimal
+
+
+if __name__ == "__main__":
+    # Run demonstration
+    tau_ml, tau_matrices, metrics = demo_analytical_solution()
+
+    print("\n" + "=" * 50)
+    print("Example usage for LoRA problem:")
+    print("=" * 50)
+
+    # Example for LoRA-style problem
+    torch.manual_seed(123)
+    n_dim, rank = 20, 4
+    n_problems = 3
+
+    # Generate example J and K matrices
+    J_matrices = [torch.randn(n_dim, rank) for _ in range(n_problems)]
+    K_matrices = [torch.randn(n_dim, rank) for _ in range(n_problems)]
+
+    print(f"LoRA problem: {n_problems} matrix pairs of size ({n_dim}, {rank})")
+
+    # Compute optimal factors
+    J_opt, K_opt = adapt_for_lora_problem(J_matrices, K_matrices, omega=1e-4)
+
+    print(f"Optimal J shape: {J_opt.shape}")
+    print(f"Optimal K shape: {K_opt.shape}")
+    print(f"Optimal J Frobenius norm: {torch.linalg.norm(J_opt, 'fro'):.4f}")
+    print(f"Optimal K Frobenius norm: {torch.linalg.norm(K_opt, 'fro'):.4f}")
+
+    # Verify the solution makes sense
+    print("\nVerification:")
+    for i, (J_i, K_i) in enumerate(zip(J_matrices, K_matrices)):
+        residual_J = torch.linalg.norm(J_opt - J_i, "fro")
+        residual_K = torch.linalg.norm(K_opt - K_i, "fro")
         print(
-            f"GPU memory allocated: {torch.cuda.memory_allocated(device) / 1024**2:.1f} MB"
-        )
-        print(
-            f"GPU memory cached: {torch.cuda.memory_reserved(device) / 1024**2:.1f} MB"
+            f"Problem {i}: J residual = {residual_J:.4f}, K residual = {residual_K:.4f}"
         )
