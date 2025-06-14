@@ -30,7 +30,6 @@ from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.lightning.callbacks import LiveCheckpointCallback
 from mttl.models.lightning.loggers import get_pl_loggers
-from mttl.models.modifiers._delta_mod import WDeltaRAConfig
 from mttl.models.modifiers.base import get_target_2_source_param_mapping
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.models.monitors import get_monitors
@@ -494,13 +493,13 @@ class WeightedLinearMerge(LibraryTransform):
 
 @dataclass
 class KnotMergeConfig(WeightedLinearMergeConfig):
-    path: str = None  # path to store SVD components
+    path: str = "knot_ingredients.pt"  # path to store SVD components
 
 
 @LibraryTransform.register("weighted_knot_merge", KnotMergeConfig)
 class KnotMerge(LibraryTransform):
     """
-    Computes a weighted KnoT merge for LoRA ezperts as in https://arxiv.org/pdf/2410.19735
+    Computes a weighted KnoT merge for LoRA experts as in https://arxiv.org/pdf/2410.19735
     """
 
     def __init__(self, config: KnotMergeConfig = None):
@@ -514,7 +513,6 @@ class KnotMerge(LibraryTransform):
         # Current libary.add_auxiliary_data requires that aux data is associated with an expert, this is not associated with any expert.
         if not os.path.exists(self.config.path):
             U, task_Ss, task_sVs, UsV_dict = self.apply_svd(library)
-
             self.ingredients = {
                 "U": U,
                 "task_Ss": task_Ss,
@@ -536,32 +534,20 @@ class KnotMerge(LibraryTransform):
                     list(params[k] for k in params.keys())
                 )
             ]
-
         state_dict = {}
         expert_vectors = torch.stack(expert_vectors, dim=0)
         per_exp_th = expert_vectors.abs().quantile(
             1.0 - ties_mergert.config.top_k, dim=1
         )
         param_names = list(task_sVs[0].keys())
-
         for p_name in param_names:
             expert_weights = torch.stack([expert[p_name] for expert in task_sVs], dim=0)
             TH = per_exp_th.view(-1, *((1,) * (expert_weights.ndim - 1)))
             final_param, _, _ = ties_mergert.merge_param(TH, expert_weights)
             delta_W = U[p_name] @ final_param  # out_features, in_features
-            state_dict[p_name + ".weight"] = delta_W
+            state_dict[p_name] = delta_W
 
-        expert_names = list(library.keys())
-        base_expert = copy.deepcopy(library[expert_names[0]])
-        expert_config = WDeltaRAConfig(
-            modify_modules=base_expert.expert_config.modify_modules,
-            modify_layers=base_expert.expert_config.modify_layers,
-        )
-        expert_info = base_expert.expert_info
-        expert_info.expert_name = "knoted_expert"
-        expert_info.expert_task_name = "+".join(expert_names)
-        expert_info.expert_config = expert_config
-        return Expert(expert_info, state_dict)
+        return state_dict
 
     def apply_svd(self, library):
         """

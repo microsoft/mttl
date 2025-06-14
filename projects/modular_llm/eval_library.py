@@ -27,6 +27,8 @@ from mttl.models.library.library_transforms import (
     WudiMerge,
     WudiMergeConfig,
     WudiMergeAfter,
+    KnotMerge,
+    KnotMergeConfig,
 )
 from mttl.models.lightning.callbacks import LossCallback
 from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
@@ -224,6 +226,15 @@ def run_eval(args: EvaluationConfig):
         cfg = WudiMergeConfig(iter=300, lr=1e-5)
         task_merged_vectors = WudiMergeAfter(cfg).transform(library)
         model.task_vector_apply(task_merged_vectors)
+    elif args.merge_or_route == "knots":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        transform = KnotMerge(KnotMergeConfig())
+        task_merged_vectors = transform.transform(library)
+        model.task_vector_apply(task_merged_vectors)
+
     elif args.merge_or_route == "uniform_lora_after_op":
         # Here we merge the LoRA experts after the outer product we cannot really do it
         # with the lib transform, cause this would require storing large matrices in memory
