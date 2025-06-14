@@ -269,7 +269,7 @@ def run_eval(args: EvaluationConfig):
             MultiExpertModelConfig(base_model=base_model),
             **loading_kwargs,
         )
-        cfg = KnotMergeConfig()
+        cfg = KnotMergeConfig(path=f"{args.library_id}/knot_ingredients.pt")
         task_merged_vectors = KnotMerge(cfg).transform(library)
         model.task_vector_apply(task_merged_vectors)
     elif args.merge_or_route == "analytical_wudi_merge":
