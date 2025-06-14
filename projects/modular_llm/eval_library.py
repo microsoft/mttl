@@ -31,6 +31,8 @@ from mttl.models.library.library_transforms import (
     AnalyticalWudiMergeConfig,
     WuDiMerge2,
     WuDiMerge2Config,
+    KnotMerge,
+    KnotMergeConfig,
 )
 from mttl.models.lightning.callbacks import LossCallback
 from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
@@ -234,6 +236,11 @@ def run_eval(args: EvaluationConfig):
         if args.merge_or_route == "ties":
             cfg = TiesMergeConfig()
             expert = TiesMerge(cfg).transform(library)
+            model = MultiExpertModel(
+                MultiExpertModelConfig(base_model=base_model),
+                **loading_kwargs,
+            )
+            model.add_expert_instance(expert, is_default=True)
         elif args.merge_or_route == "wudi":
             cfg = WudiMergeConfig(iter=300, lr=1e-5)
             task_merged_vectors = WudiMerge(cfg).transform(library)
@@ -257,6 +264,14 @@ def run_eval(args: EvaluationConfig):
         )
         cfg = WuDiMerge2Config(iter=300, lr=1e-5)
         WuDiMerge2(cfg).transform(library, model.model)
+    elif args.merge_or_route == "knots":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = KnotMergeConfig()
+        task_merged_vectors = KnotMerge(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors)
     elif args.merge_or_route == "analytical_wudi_merge":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
@@ -264,6 +279,8 @@ def run_eval(args: EvaluationConfig):
         )
         cfg = AnalyticalWudiMergeConfig()
         task_merged_vectors = AnalyticalWudiMerge(cfg).transform(library)
+        transform = KnotMerge(KnotMergeConfig())
+        task_merged_vectors = transform.transform(library)
         model.task_vector_apply(task_merged_vectors)
 
     elif args.merge_or_route == "uniform_lora_after_op":
