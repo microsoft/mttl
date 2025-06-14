@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 
 import numpy as np
-import tqdm
+from tqdm.auto import tqdm
 
 from mttl.dataloader.ni_metrics import compute_grouped_metrics, compute_metrics
 from mttl.evaluators.base import GenerativeEvaluator, mean_stderr, switch_to_eval_mode
@@ -96,7 +96,7 @@ class NIEvaluator(GenerativeEvaluator):
             path = re.sub(r"/[^/]*$", "", output_path)
             Path(path).mkdir(parents=True, exist_ok=True)
 
-        pbar = tqdm.tqdm(
+        pbar = tqdm(
             enumerate(dataloader),
             total=len(dataloader),
         )

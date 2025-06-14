@@ -8,8 +8,8 @@ from typing import Optional
 
 import numpy as np
 import torch
-import tqdm
 from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
 from transformers import AutoTokenizer
 
 from mttl.datamodule.base import DataModule, DatasetConfig, DefaultCollator
@@ -324,7 +324,7 @@ class NiDataModule(DataModule):
                 eval_instances[instance["id"]] = instance
 
         eval_ids = list(eval_instances.keys())
-        for element in tqdm.tqdm(
+        for element in tqdm(
             self.test_dataset,
             desc="Checking test instances",
             total=len(self.test_dataset),

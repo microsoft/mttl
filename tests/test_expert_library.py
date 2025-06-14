@@ -102,10 +102,9 @@ def test_read_embeddings():
 def test_add_auxiliary_data(mocker, tmp_path):
     from mttl.models.library.expert_library import HFExpertLibrary, LocalExpertLibrary
 
-    library = LocalExpertLibrary.from_expert_library(
-        HFExpertLibrary("sordonia/new-test-library"), tmp_path
+    library = HFExpertLibrary("sordonia/new-test-library").clone(
+        f"virtual://{tmp_path}"
     )
-
     library.add_auxiliary_data(
         data_type="test",
         expert_name="abstract_algebra",
@@ -126,10 +125,9 @@ def test_add_auxiliary_data(mocker, tmp_path):
 def test_virtual_add_auxiliary_data(mocker, tmp_path):
     from mttl.models.library.expert_library import VirtualLocalLibrary
 
-    library = VirtualLocalLibrary.from_expert_library(
-        HFExpertLibrary("sordonia/new-test-library"), "virtual://test_library"
+    library = HFExpertLibrary("sordonia/new-test-library").clone(
+        f"virtual://{tmp_path}"
     )
-
     library.add_auxiliary_data(
         data_type="test",
         expert_name="abstract_algebra",
@@ -435,7 +433,7 @@ def test_copy_library_blob_to_blob(tmp_path, build_meta_ckpt, setup_repo, repo_i
     new_repo_id = f"local://mttldata/{uuid.uuid4()}"
     az_new_repo_id = f"az://{new_repo_id}"
     try:  # Clean up the new repo if the test fails
-        new_lib = BlobExpertLibrary.from_expert_library(library, az_new_repo_id)
+        new_lib = library.clone(az_new_repo_id)
         assert set(new_lib.list_repo_files(new_repo_id)) == set(
             library.list_repo_files(repo_id)
         )
@@ -460,7 +458,7 @@ def test_copy_library_blob_to_local(tmp_path, build_meta_ckpt, setup_repo, repo_
     new_repo_path = tmp_path / "new_repo"
     new_repo_path.mkdir()
     new_repo_id = f"local://{new_repo_path}"
-    new_lib = LocalExpertLibrary.from_expert_library(library, new_repo_id)
+    new_lib = library.clone(new_repo_id)
     # drop the path and keep the filenames
     local_files = {f.split("/")[-1] for f in new_lib.list_repo_files(new_repo_id)}
     assert local_files == set(library.list_repo_files(repo_id))
@@ -469,23 +467,22 @@ def test_copy_library_blob_to_local(tmp_path, build_meta_ckpt, setup_repo, repo_
 def test_copy_library_local_to_local(tmp_path, build_meta_ckpt, setup_repo, repo_id):
     # Create a library with two experts
     local_path = tmp_path / "base_repo"
-    local_path.mkdir()
     engine = LocalFSEngine()
     setup_repo(engine, local_path)
     filenames = build_meta_ckpt(local_path, 2)
-    repo_id = f"local://{local_path}"
+    repo_url = f"local://{local_path}"
 
     # Get the expert library
-    library = ExpertLibrary.get_expert_library(repo_id)
+    library = ExpertLibrary.get_expert_library(repo_url)
 
     # Create a new library from the first one
     new_repo_path = tmp_path / "new_repo"
-    new_repo_path.mkdir()
-    new_repo_id = f"local://{new_repo_path}"
-    new_lib = LocalExpertLibrary.from_expert_library(library, new_repo_id)
+    new_repo_id = "local://" + str(new_repo_path)
+    new_lib = library.clone(new_repo_id)
+
     # drop the path and keep the filenames
-    base_files = {f.split("/")[-1] for f in library.list_repo_files(repo_id)}
-    new_files = {f.split("/")[-1] for f in new_lib.list_repo_files(new_repo_id)}
+    base_files = {f.split("/")[-1] for f in library.list_repo_files(library.repo_id)}
+    new_files = {f.split("/")[-1] for f in new_lib.list_repo_files(new_lib.repo_id)}
     assert base_files == new_files
 
 
@@ -503,11 +500,11 @@ def test_get_expert_library_copy(tmp_path, build_meta_ckpt, setup_repo, repo_id)
 
     # Get the expert library creating a copy of the original
     new_repo_id = f"local://{tmp_path / 'new_repo'}"
-    new_lib = ExpertLibrary.get_expert_library(repo_id, destination_id=new_repo_id)
+    new_lib = library.clone(new_repo_id)
 
     # drop the path and keep the filenames
-    base_files = {f.split("/")[-1] for f in library.list_repo_files(repo_id)}
-    new_files = {f.split("/")[-1] for f in new_lib.list_repo_files(new_repo_id)}
+    base_files = {f.split("/")[-1] for f in library.list_repo_files(library.repo_id)}
+    new_files = {f.split("/")[-1] for f in new_lib.list_repo_files(new_lib.repo_id)}
     assert base_files == new_files
 
 
@@ -515,17 +512,18 @@ def test_virtual_library_is_in_memory(tmp_path, build_meta_ckpt, setup_repo, rep
     # Create a library with two experts
     local_path = tmp_path / "base_repo"
     local_path.mkdir()
+
     engine = LocalFSEngine()
-    setup_repo(engine, local_path)
+    setup_repo(engine, str(local_path))
+
     filenames = build_meta_ckpt(local_path, 2)
     repo_id = f"local://{local_path}"
+
     # Get the expert library
     local_library = ExpertLibrary.get_expert_library(repo_id)
 
     # Create a new library from the first one
-    virtual_lib = VirtualLocalLibrary.from_expert_library(
-        local_library, local_library.repo_id
-    )
+    virtual_lib = local_library.clone("virtual://" + local_library.repo_id)
     assert set(virtual_lib.data.keys()) == {"expert_1", "expert_2"}
 
     virtual_lib.remove_expert("expert_2")

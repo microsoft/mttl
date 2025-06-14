@@ -148,8 +148,8 @@ class ExpertModule(LightningTrainingMixin, LightningEfficientCheckpoint):
             self.training_config
         ).expert_info.asdict()
 
-    def as_expert(self):
-        return self.model.as_expert()
+    def as_expert(self, training_config=None):
+        return self.model.as_expert(training_config)
 
 
 class SPLITExpertModule(ExpertModule):

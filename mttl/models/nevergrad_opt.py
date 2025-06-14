@@ -2,8 +2,8 @@ from functools import partial
 from typing import Callable
 
 import nevergrad as ng
-import wandb
 
+import wandb
 from mttl.logging import logger
 from mttl.models.expert_model import MultiExpertModel
 from mttl.models.library.expert_library import ExpertLibrary

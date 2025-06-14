@@ -1,3 +1,4 @@
+import asyncio
 import glob
 import io
 import os
@@ -15,6 +16,7 @@ from huggingface_hub import (
     CommitOperationCopy,
     CommitOperationDelete,
 )
+
 from huggingface_hub.errors import RepositoryNotFoundError
 
 from mttl.logging import logger
@@ -141,31 +143,49 @@ class ExpertLibrary:
                 logger.error("Repository not found: %s", self.repo_id)
             raise e
 
-        # Function to download and process a single .meta file
-        def download_and_process_meta_file(file):
-            path_or_bytes = self.hf_hub_download(self.repo_id, file)
-
-            metadata_entry = MetadataEntry.fromdict(
-                torch.load(path_or_bytes, map_location="cpu", weights_only=False)
+        if isinstance(self, BlobExpertLibrary):
+            local_filenames = asyncio.run(
+                self.async_download_blobs(
+                    self.repo_id,
+                    meta_files,
+                )
             )
-            return metadata_entry
 
-        # Use ThreadPoolExecutor for multithreading
-        with ThreadPoolExecutor() as executor:
-            # Submit tasks to the executor
-            future_to_file = {
-                executor.submit(download_and_process_meta_file, file): file
-                for file in meta_files
-            }
-
+            # process every meta file in new local directory
             metadata = []
-            for future in as_completed(future_to_file):
-                file = future_to_file[future]
-                try:
-                    data = future.result()
-                    metadata.append(data)
-                except Exception as exc:
-                    logger.error("%r generated an exception: %s" % (file, exc))
+            for file in local_filenames:
+                metadata_entry = MetadataEntry.fromdict(
+                    torch.load(file, map_location="cpu", weights_only=False)
+                )
+                metadata.append(metadata_entry)
+
+        else:
+
+            # Function to download and process a single .meta file
+            def download_and_process_meta_file(file):
+                path_or_bytes = self.hf_hub_download(self.repo_id, file)
+
+                metadata_entry = MetadataEntry.fromdict(
+                    torch.load(path_or_bytes, map_location="cpu", weights_only=False)
+                )
+                return metadata_entry
+
+            # Use ThreadPoolExecutor for multithreading
+            with ThreadPoolExecutor() as executor:
+                # Submit tasks to the executor
+                future_to_file = {
+                    executor.submit(download_and_process_meta_file, file): file
+                    for file in meta_files
+                }
+
+                metadata = []
+                for future in as_completed(future_to_file):
+                    file = future_to_file[future]
+                    try:
+                        data = future.result()
+                        metadata.append(data)
+                    except Exception as exc:
+                        logger.error("%r generated an exception: %s" % (file, exc))
 
         for metadatum in metadata:
             if self.model_name is not None and metadatum.model != self.model_name:
@@ -282,7 +302,11 @@ class ExpertLibrary:
         return len(self.data)
 
     def add_expert(
-        self, expert_dump: Expert, expert_name: str = None, force: bool = False
+        self,
+        expert_dump: Expert,
+        expert_name: str = None,
+        force: bool = False,
+        update_readme: bool = True,
     ):
         if self.sliced:
             raise ValueError("Cannot add expert to sliced library.")
@@ -307,7 +331,9 @@ class ExpertLibrary:
         self._upload_weights(metadata.expert_name, expert_dump)
         self._upload_metadata(metadata)
         self.data[metadata.expert_name] = metadata
-        self._update_readme()
+        # only update readme if requested. This is useful when adding multiple experts in a batch
+        if update_readme:
+            self._update_readme()
 
     def list_auxiliary_data(self) -> Dict[str, Tuple[int, str]]:
         """List auxiliary data in the library, returns a dictionary with the data type, the number of records, and a string representation of the config file."""
@@ -758,36 +784,39 @@ class ExpertLibrary:
             if metadatum.expert_task_name == task
         ]
 
-    @classmethod
-    def from_expert_library(
-        cls,
-        expert_lib: "ExpertLibrary",
-        repo_id,
+    def clone(
+        self,
+        repo_id: str,
         force=False,
         upload_aux_data=False,
         only_tasks=None,
-    ):
-        new_lib = cls(repo_id=repo_id, create=True)
+    ) -> "ExpertLibrary":
+        expert_lib_class = self._get_expert_lib_class(repo_id)
+        new_lib = expert_lib_class(repo_id=repo_id, create=True)
 
-        only_tasks = only_tasks or expert_lib.tasks
+        only_tasks = only_tasks or self.tasks
         with new_lib.batched_commit():
-            for name, expert in expert_lib.items():
+            update_readme = False
+            for name, expert in self.items():
                 if expert.name not in new_lib:
-                    new_lib.add_expert(expert, name, force=force)
+                    new_lib.add_expert(expert, name, force=force, update_readme=False)
+                    update_readme = True
+
+            # only update readme if we added new experts
+            if update_readme:
+                new_lib._update_readme()
 
         # if the new_lib already exists, delete experts that
         # are in this lib but were deleted from the expert_lib
         with new_lib.batched_commit():
             for name, metadatum in list(new_lib.data.items()):
-                if (
-                    name not in expert_lib.keys()
-                    and metadatum.expert_task_name in only_tasks
-                ):
+                if name not in self.keys() and metadatum.expert_task_name in only_tasks:
                     new_lib.remove_expert(name, soft_delete=True)
 
         # also update the scores
         if upload_aux_data:
-            scores = expert_lib.get_auxiliary_data(data_type="scores")
+            scores = self.get_auxiliary_data(data_type="scores")
+
             for expert_name, expert_scores in scores.items():
                 for score in expert_scores.values():
                     try:
@@ -796,7 +825,8 @@ class ExpertLibrary:
                         logger.error(e)
                         continue
 
-            embeddings = expert_lib.get_auxiliary_data(data_type="embeddings")
+            embeddings = self.get_auxiliary_data(data_type="embeddings")
+
             for expert_name, expert_embeddings in embeddings.items():
                 for embedding in expert_embeddings.values():
                     try:
@@ -856,7 +886,7 @@ class ExpertLibrary:
         return new_lib
 
     @staticmethod
-    def _get_expert_lib_class(repo_id, expert_library_type):
+    def _get_expert_lib_class(repo_id, expert_library_type=None):
         """Decide which ExpertLibrary subclass to use based on the repo_id."""
         available_libraries = {
             "local": LocalExpertLibrary,
@@ -872,6 +902,7 @@ class ExpertLibrary:
         else:
             # if repo_id includes "local://", "virtual://", "az://", "hf://"
             prefix = repo_id.split("://")
+
             if prefix[0] in available_libraries:
                 expert_library_type = prefix[0]
                 repo_id = prefix[1]
@@ -919,13 +950,9 @@ class ExpertLibrary:
             create=create,
             ignore_sliced=ignore_sliced,
         )
+
         if destination_id is not None:
-            expert_lib_class_copy = cls._get_expert_lib_class(
-                destination_id, expert_library_type
-            )
-            expert_lib = expert_lib_class_copy.from_expert_library(
-                expert_lib, destination_id, force=True, upload_aux_data=True
-            )
+            expert_lib.clone(destination_id, force=True, upload_aux_data=True)
 
         return expert_lib
 
@@ -934,7 +961,11 @@ class LocalExpertLibrary(ExpertLibrary, LocalFSEngine):
     """A local library stored on disk."""
 
     def add_expert(
-        self, expert_dump: Expert, expert_name: str = None, force: bool = False
+        self,
+        expert_dump: Expert,
+        expert_name: str = None,
+        force: bool = False,
+        update_readme: bool = True,
     ):
         expert_name = expert_name or expert_dump.expert_info.expert_name
         if "/" in expert_name:

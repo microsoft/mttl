@@ -107,6 +107,7 @@ def model_loader_helper(
 
     from transformers import (
         AutoModelForCausalLM,
+        AutoModelForSeq2SeqLM,
         BitsAndBytesConfig,
         LlamaForCausalLM,
         PreTrainedModel,
@@ -145,14 +146,25 @@ def model_loader_helper(
         model_name = os.environ["PHI_PATH"]
         logger.info(f"Loading phi-2 model from {os.environ['PHI_PATH']}")
 
-    model_object = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        device_map=device_map,
-        trust_remote_code=True,
-        attn_implementation=attn_implementation,
-        quantization_config=bnb_config,
-        torch_dtype=torch_dtype,
-    )
+    model_object = None
+    exception = None
+    for klass in [AutoModelForCausalLM, AutoModelForSeq2SeqLM]:
+        try:
+            model_object = klass.from_pretrained(
+                model_name,
+                device_map=device_map,
+                trust_remote_code=True,
+                attn_implementation=attn_implementation,
+                quantization_config=bnb_config,
+                torch_dtype=torch_dtype,
+            )
+            break
+        except Exception as e:
+            logger.warning(f"Couldn't load {model_name}! Exception: {e}")
+            exception = e
+            continue
+    if model_object is None:
+        raise ValueError(f"Couldn't load {model_name}!")
 
     if bnb_config is not None:
         model_object = prepare_model_for_kbit_training(model_object)

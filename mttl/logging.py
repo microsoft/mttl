@@ -5,9 +5,12 @@ from functools import lru_cache
 import numpy as np
 import pandas as pd
 import prettytable
+
 import wandb
 
+# warning if logger is not initialized
 logger = logging.getLogger("mttl")
+logging.getLogger("datasets.arrow_dataset").setLevel(logging.CRITICAL + 1)
 
 
 def maybe_wandb_log(logs: dict):
@@ -18,6 +21,11 @@ def maybe_wandb_log(logs: dict):
 @lru_cache
 def warn_once(msg: str, **kwargs):
     logger.warning(msg, **kwargs)
+
+
+@lru_cache
+def debug_once(msg: str, **kwargs):
+    logger.debug(msg, **kwargs)
 
 
 def setup_logging(log_dir: str = None):

@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-import tqdm
+from tqdm.auto import tqdm
 
 from mttl.evaluators.base import Evaluator, switch_to_eval_mode
 from mttl.logging import logger
@@ -31,7 +31,7 @@ class LogLikeEvaluator(Evaluator):
         if self.use_vllm:
             return self.evaluate_with_vllm(model, dataloader, num_batches, verbose)
 
-        pbar = tqdm.tqdm(
+        pbar = tqdm(
             enumerate(dataloader),
             total=len(dataloader),
         )
@@ -68,7 +68,11 @@ class LogLikeEvaluator(Evaluator):
                 loss_per_option = compute_loglike_loss(
                     logits, batch["labels"], reduction="none"
                 )
-                loss_per_option = loss_per_option.cpu().numpy()
+                loss_per_option = loss_per_option.cpu()
+
+                if loss_per_option.dtype in [torch.bfloat16, torch.float16]:
+                    loss_per_option = loss_per_option.float().numpy()
+
                 loss_per_example = [
                     loss_per_option[
                         int(np.sum(num_options[:i])) : int(np.sum(num_options[: i + 1]))

@@ -28,11 +28,11 @@ def compute_phatgoose_embeddings(
 ) -> str:
     """Computes Phatgoose embeddings for the given library."""
     from mttl.models.library.library_transforms import (
-        PhatgooseConfig,
         PhatgooseTransform,
+        PhatgooseTransformConfig,
     )
 
-    cfg = PhatgooseConfig(
+    cfg = PhatgooseTransformConfig(
         n_steps=n_steps_pg,
         learning_rate=learning_rate_pg,
         name=selector_data_id,
@@ -70,14 +70,9 @@ class PhatgooseSelector(PerTokenSelector):
     @artifacts_cache
     def load_from_library(cls, config):
         """Fetches prototypes from the library."""
-        from mttl.models.library.library_transforms import (
-            PhatgooseConfig,
-            PhatgooseTransform,
-        )
+        from mttl.models.library.library_transforms import PhatgooseTransform
 
-        return PhatgooseTransform(PhatgooseConfig(name=config.selector_data_id)).fetch(
-            config.library_id
-        )
+        return PhatgooseTransform.fetch(config.library_id, config.selector_data_id)
 
 
 @dataclass
@@ -86,9 +81,10 @@ class PhatgooseTrainerSelectorConfig(SelectorConfig):
 
 
 class SigmoidGate(nn.Module):
-    def __init__(self, input_dim, output_dim=1, **kwargs):
+    def __init__(self, input_dim, output_dim=1, device="cpu", **kwargs):
         super().__init__()
-        self.v = nn.Parameter(torch.zeros(output_dim, input_dim))
+
+        self.v = nn.Parameter(torch.zeros(output_dim, input_dim, device=device))
 
     def forward(self, x):
         return torch.sigmoid(torch.nn.functional.linear(x, self.v, bias=None))
@@ -124,13 +120,14 @@ class PhatgooseTrainerSelector(Selector):
         self.routing_gates.append(scores.detach().cpu().float())
 
         return BatchSequenceExpertsAndWeightsSelectorOutput(
-            torch.zeros_like(scores, dtype=torch.long), scores
+            experts=torch.zeros_like(scores, dtype=torch.long),
+            weights=scores,
         )
 
     def on_add_expert(
         self, expert_name: str, expert_info: "ExpertInfo", is_default: bool = False
     ):
-        self.gates[expert_name] = SigmoidGate(self.input_dim)
+        self.gates[expert_name] = SigmoidGate(self.input_dim, device=self.device)
 
     def get_merging_weights(self, **selector_kwargs) -> Dict:
         raise ValueError(

@@ -1,73 +1,83 @@
+import inspect
 import os
-from typing import Type
+import shutil
+import sys
+from tempfile import TemporaryDirectory
 
 import torch
 from pytorch_lightning import Trainer, seed_everything
 
-from mttl.arguments import Args, ExpertConfig
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+from mttl.arguments import ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import logger, setup_logging
-from mttl.models.library.expert_library import ExpertLibrary
+from mttl.models.expert_model import ExpertModel, MoEModel
+from mttl.models.library.expert import Expert, load_expert
+from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 from mttl.models.lightning.callbacks import (
     DownstreamEvalCallback,
     LiveCheckpointCallback,
     NanoMMLUCallback,
     RougeCallback,
 )
-from mttl.models.lightning.expert_module import ExpertModule, MoEModule
+from mttl.models.lightning.expert_module import ExpertModule
 from mttl.models.lightning.loggers import get_pl_loggers
 from mttl.models.monitors import get_monitors
-from mttl.utils import generate_random_string, rank_zero_only_and_wait, remote_login
+from mttl.utils import remote_login
+from projects.modular_llm.compute_transfer_matrix import TransferMatrixConfig
+from projects.modular_llm.compute_transfer_matrix import (
+    run_eval as produce_transfer_matrix,
+)
 
 
-def setup_profiler(args: ExpertConfig):
-    """
-    Creates profiler and re-sets some arguments in args.
-    """
-    from pytorch_lightning.profilers import PyTorchProfiler
+def create_transfer_matrix(args, checkpoint):
+    ########################
+    # create transfer matrix
+    config = TransferMatrixConfig()
+    for k, v in vars(args).items():
+        if k in vars(config):
+            setattr(config, k, v)
+    config.eval_base = False
+    config.eval_metric = "rougeL"
 
-    profiler = PyTorchProfiler(
-        dirpath=args.output_dir + "/profiler",
-        filename="profiler_output",
-        line_count_restriction=2**20,
-        profile_memory=True,
-        schedule=torch.profiler.schedule(skip_first=5, wait=1, warmup=5, active=50),
+    expert: Expert = load_expert(checkpoint)
+    expert.expert_info.expert_name = str(args.finetune_task_name)
+    expert.expert_info.expert_task_name = str(args.finetune_task_name)
+    temp_dir = TemporaryDirectory()
+    destination = temp_dir.name
+    LocalExpertLibrary.from_expert_dict({"checkpoint": expert}, destination=destination)
+    config.library_id = destination
+    config.finetune_task_name = (
+        args.finetune_task_name.split(",")
+        if not isinstance(args.finetune_task_name, list)
+        else args.finetune_task_name
     )
-    args.total_steps = 100
-    args.eval_every = -1
-    args.library_id = None
-    args.eval_before_training = False
-    return profiler
+    if len(config.finetune_task_name) < 50:
+        produce_transfer_matrix(config, debug=False)
+    ########################
+    temp_dir.cleanup()
 
 
-def train_experts(args: Args, model_class: Type[ExpertModule]):
+def run_multitask(args: ExpertConfig):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
+    args.num_train_epochs = int(args.num_train_epochs)  # make sure to convert to int
     setup_logging(args.output_dir)
-
     logger.info("Args: {}".format(args.to_json()))
-
-    profiler = None
-    if args.profile:
-        profiler = setup_profiler(args)
 
     remote_login(args.remote_token)
     expert_library = None
     if args.library_id:
-
-        @rank_zero_only_and_wait(before=False, after=True)
-        def create_library(args):
-            expert_library = ExpertLibrary.get_expert_library(
-                repo_id=args.library_id,
-                create=True,
-                destination_id=args.destination_library_id,
-            )
-            return expert_library
-
-        expert_library = create_library(args)
+        expert_library = ExpertLibrary.get_expert_library(
+            repo_id=args.library_id,
+            create=True,
+            destination_id=args.destination_library_id,
+        )
 
     loggers = get_pl_loggers(args)
+    model_class = ExpertModule
 
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
@@ -84,6 +94,20 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
         monitor = "val/loss"
         mode = "min"
 
+    # -=============== Iterative masking using Callback ====================
+    # NOTE: Don't move this block, it's important we call maskCallBack before others
+    from mttl.models.lightning.callbacks import UpdateSparseMask
+
+    assert len(args.task_names) == 1, print(
+        "sparse mask does not support more than 1 task"
+    )
+    maskCallback = UpdateSparseMask(
+        update_interval=100,
+        task_name=args.task_names[0],
+        parameter_selection_procedure="per_layer",
+    )  # "per_layer"/"model" use "per_layer" for default
+    callbacks.append(maskCallback)
+
     checkpoint_callback = LiveCheckpointCallback(
         dirpath=args.output_dir,
         monitor=monitor,
@@ -91,7 +115,6 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
         mode=mode,
         save_each_epoch=args.save_each_epoch,
     )
-
     callbacks.append(checkpoint_callback)
 
     if args.eval_rouge_flag:
@@ -130,7 +153,7 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
     val_check_interval = args.eval_every
     if val_check_interval == -1 or val_check_interval is None:
         val_check_interval = None
-    elif not (0.0 < val_check_interval < 1.0):
+    else:
         val_check_interval = args.gradient_accumulation_steps * args.eval_every
         if val_check_interval > len(dm.train_dataloader()):
             val_check_interval = len(dm.train_dataloader())
@@ -139,7 +162,6 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
 
     trainer = Trainer(
         devices=-1,
-        profiler=profiler,
         accelerator="gpu",
         logger=loggers,
         num_sanity_val_steps=0,
@@ -159,7 +181,7 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
     )
 
     # initial validation only for a bunch of datasets... ?
-    if args.eval_before_training:
+    if args.compute_strategy != "deepspeed":
         # validating before training fails with deepspeed
         trainer.validate(module, dm)
 
@@ -172,49 +194,24 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
         checkpoint = (
             checkpoint_callback.best_model_path or checkpoint_callback.last_model_path
         )
-        if args.compute_strategy == "deepspeed":
-            from deepspeed.utils.zero_to_fp32 import (
-                convert_zero_checkpoint_to_fp32_state_dict,
-            )
 
-            new_path = checkpoint.replace(".ckpt", "_fp32.ckpt")
-
-            @rank_zero_only_and_wait(before=True, after=True)
-            def convert_ckpt(path, new_path):
-                convert_zero_checkpoint_to_fp32_state_dict(path, new_path)
-
-            convert_ckpt(checkpoint, new_path)
-            checkpoint = torch.load(new_path, weights_only=False)
-        else:
-            checkpoint = torch.load(checkpoint, weights_only=False)["state_dict"]
-
-        module.load_state_dict(checkpoint)
+        module.load_state_dict(torch.load(checkpoint, weights_only=False)["state_dict"])
         trainer.test(module, dm)
 
-        @rank_zero_only_and_wait(before=False, after=True)
-        def upload_library(expert_library, module):
-            if expert_library is not None:
-                # refresh expert library: so we dont overwrite the readme if the remote has changed.
-                expert_library.refresh_from_remote()
+        if expert_library is not None:
+            # refresh expert library: so we dont overwrite the readme if the remote has changed.
+            expert_library.refresh_from_remote()
 
-                if isinstance(module, MoEModule):
-                    with expert_library.batched_commit():
-                        for expert_name in module.experts_names:
-                            expert = module.get_expert_instance(expert_name)
-                            expert_library.add_expert(expert, expert_name, force=True)
-                elif isinstance(module, ExpertModule):
-                    expert = module.as_expert(training_config=args.to_dict())
-                    expert_name = (
-                        args.expert_name
-                        or args.finetune_task_name
-                        or generate_random_string()
-                    )
-                    expert_library.add_expert(expert, expert_name, force=True)
-                else:
-                    raise ValueError("Model class not recognized")
+            if isinstance(module, ExpertModule):
+                expert_name = args.expert_name or args.finetune_task_name
+                expert_library.add_expert_from_ckpt(checkpoint, expert_name, force=True)
+            else:
+                raise ValueError("Model class not recognized")
 
-        upload_library(expert_library, module)
+        if args.create_transfer_matrix:
+            create_transfer_matrix(args, checkpoint)
 
 
 if __name__ == "__main__":
-    train_experts(ExpertConfig.parse(), ExpertModule)
+    args = ExpertConfig.parse()
+    run_multitask(args)

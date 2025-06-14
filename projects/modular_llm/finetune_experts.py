@@ -86,10 +86,8 @@ def prepare_expert_lib(args: FinetuneConfig, lib_location) -> LocalExpertLibrary
     exclude_selection = (
         args.remove_experts.split(",") if args.remove_experts is not None else None
     )
-    library = LocalExpertLibrary.from_expert_library(
-        HFExpertLibrary(args.library_id, exclude_selection=exclude_selection),
-        repo_id=lib_location,
-    )
+    library = HFExpertLibrary(args.library_id, exclude_selection=exclude_selection)
+    library = library.clone(repo_id="local://" + lib_location)
     return library
 
 

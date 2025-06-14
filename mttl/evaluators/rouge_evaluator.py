@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 import numpy as np
-import tqdm
+from tqdm.auto import tqdm
 
 from mttl.evaluators.base import GenerativeEvaluator, switch_to_eval_mode
 from mttl.evaluators.ni_evaluator import compute_metrics
@@ -48,7 +48,7 @@ class RougeEvaluator(GenerativeEvaluator):
         if self.use_vllm:
             return self.evaluate_with_vllm(model, dataloader, num_batches, verbose)
 
-        pbar = tqdm.tqdm(
+        pbar = tqdm(
             enumerate(dataloader),
             total=len(dataloader),
         )

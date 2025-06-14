@@ -16,8 +16,8 @@ def train_with_transform(args: EvaluationConfig):
     seed_everything(args.seed, workers=True)
 
     from mttl.models.library.library_transforms import (
-        PhatgooseConfig,
         PhatgooseTransform,
+        PhatgooseTransformConfig,
     )
 
     library_id, expert_names = parse_libname(args.library_id)
@@ -27,7 +27,9 @@ def train_with_transform(args: EvaluationConfig):
         destination_id=args.destination_library_id,
     )
     phagoose_transform = PhatgooseTransform(
-        PhatgooseConfig(n_steps=args.n_steps_pg, learning_rate=args.learning_rate_pg)
+        PhatgooseTransformConfig(
+            n_steps=args.n_steps_pg, learning_rate=args.learning_rate_pg
+        )
     )
     embeddings = phagoose_transform.transform(
         library, expert_names=expert_names, default_args=args, recompute=True

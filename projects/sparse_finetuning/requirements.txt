@@ -1,4 +1,4 @@
-transformers>=4.44.2
+transformers==4.47.1 # need this specific version to avoid phi3 issues https://github.com/huggingface/transformers/issues/36071
 torch>=2.3.1
 datasets>=2.20.0
 pytorch-lightning>=2.3.3

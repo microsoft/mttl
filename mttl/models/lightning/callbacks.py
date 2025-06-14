@@ -6,13 +6,13 @@ from abc import ABC, abstractmethod
 
 import pytorch_lightning as pl
 import torch
-import tqdm
 import wandb
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning import callbacks as cb
 from pytorch_lightning.callbacks.progress.tqdm_progress import Tqdm
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch.optim import Optimizer
+from tqdm.auto import tqdm
 from transformers.utils import ModelOutput
 
 from mttl.datamodule.base import DataModule
@@ -20,9 +20,48 @@ from mttl.evaluators import MMLUEvaluator
 from mttl.evaluators.base import EvaluatorRunner, setup_evaluators
 from mttl.evaluators.evaluators import Evaluator
 from mttl.logging import logger
+from mttl.models.modifiers.sparse_mask import make_sparse_model_during_training
 from mttl.models.utils import transfer_batch_to_device
 
 DEBUG = False
+
+
+class UpdateSparseMask(pl.Callback):
+    def __init__(
+        self,
+        update_interval=5,
+        dm=None,
+        task_name=None,
+        parameter_selection_procedure="per_layer",
+    ):
+        super().__init__()
+        self.update_interval = update_interval
+        self.update_counter = 0
+        self.dm = dm
+        self.task_name = task_name
+        assert parameter_selection_procedure in [
+            "model",
+            "per_layer",
+        ], "choose the right `parameter_selection_procedure`"
+        self.parameter_selection_procedure = parameter_selection_procedure
+
+    def update_mask(self, pl_module, batch):
+        make_sparse_model_during_training(
+            pl_module,
+            batch,
+            parameter_selection_procedure=self.parameter_selection_procedure,
+        )
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        """
+        only updates the mask on epoch=0
+        """
+        if trainer.current_epoch == 0:
+            self.update_counter += 1
+            if self.update_counter % self.update_interval == 0:
+                # Update mask
+                self.update_mask(pl_module, batch)
+                self.update_counter = 0  # Reset counter for next interval
 
 
 class LiveCheckpointCallback(pl.Callback):
@@ -232,7 +271,7 @@ class LossCallback(cb.Callback):
 
         total_loss, deno = 0.0, 0.0
         with torch.no_grad():
-            for i, batch in tqdm.tqdm(
+            for i, batch in tqdm(
                 enumerate(self.dataloader),
                 total=len(self.dataloader),
                 desc=f"Test {self.name}",

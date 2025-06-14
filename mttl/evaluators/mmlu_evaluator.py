@@ -5,7 +5,7 @@ import os
 import click
 import numpy as np
 import torch
-import tqdm
+from tqdm.auto import tqdm
 
 from mttl.dataloader.ni_metrics import compute_metrics
 from mttl.evaluators.base import (
@@ -117,7 +117,7 @@ class MMLUEvaluator(GenerativeEvaluator):
 
             dataloader = self.get_dataloader(split, subsample, shuffle)
 
-            pbar = tqdm.tqdm(
+            pbar = tqdm(
                 enumerate(dataloader),
                 total=len(dataloader),
             )

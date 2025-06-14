@@ -5,8 +5,8 @@ import time
 
 import numpy as np
 import torch
-import tqdm
 from torch.utils.data import DataLoader
+from tqdm.auto import tqdm
 
 from mttl.logging import logger
 from mttl.models.modifiers.base import MergeableModifierMixin
@@ -137,9 +137,7 @@ class LLMEngineMMLU(LLMEngine):
         }
 
         # we explicitly add requests here, so that we can keep track of the request id
-        for request_id, batch in enumerate(
-            tqdm.tqdm(dataloader, total=len(dataloader))
-        ):
+        for request_id, batch in enumerate(tqdm(dataloader, total=len(dataloader))):
             for context, label, task_name in zip(
                 batch["sources_texts"], batch["labels_texts"], batch["task_names"]
             ):

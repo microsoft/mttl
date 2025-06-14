@@ -251,7 +251,7 @@ class MultiExpertMixin:
     def add_experts_from_library(self, library):
         import concurrent.futures
 
-        import tqdm
+        from tqdm.auto import tqdm
 
         if type(library) == str:
             from mttl.models.library.expert_library import ExpertLibrary
@@ -269,7 +269,7 @@ class MultiExpertMixin:
                 futures.append(executor.submit(partial(add_module, self), element))
 
             # Progress bar setup
-            with tqdm.tqdm(
+            with tqdm(
                 total=len(library), desc="Adding experts...", unit="expert"
             ) as progress_bar:
                 for result in concurrent.futures.as_completed(futures):
@@ -345,7 +345,7 @@ class MultiExpertMixin:
     def _get_selector_config(self, model_modifier: str) -> SelectorConfig:
         if not self.selector_config:
             return None
-        if isinstance(self.selector_config, dict):
+        if isinstance(self.selector_config, MultiSelectorConfig):
             return self.selector_config.get(model_modifier)
         else:
             return self.selector_config
@@ -405,6 +405,7 @@ class MultiExpertMixin:
 
         # refresh current selector config
         self.selector_config = MultiSelectorConfig()
+
         for modifier_name, selectors in self.selectors.items():
             if len(selectors) == 0:
                 continue
@@ -570,7 +571,7 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
             if isinstance(selector_config, LoadableSelectorConfig):
                 selector_config.library_id = repo_id
 
-            elif isinstance(selector_config, dict):
+            elif isinstance(selector_config, MultiSelectorConfig):
                 for modifier_name, cfg in selector_config.items():
                     # inject the library id if it is None
                     if (
@@ -591,6 +592,7 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
         return model
 
     def _clear_library_id_from_selector_config(self) -> SelectorConfig:
+        """When saving the model, we must clear the library id given that the weights are saved in the checkpoint."""
         import copy
 
         selector_config = copy.deepcopy(self.selector_config)
@@ -598,12 +600,32 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
         if selector_config is not None:
             if isinstance(selector_config, MultiSelectorConfig):
                 for key, config in selector_config.items():
+
                     if isinstance(config, LoadableSelectorConfig):
                         config.library_id = None
+
             elif isinstance(selector_config, LoadableSelectorConfig):
                 selector_config.library_id = None
 
         return selector_config
+
+    def task_vector_apply(self, task_merged_vectors):
+        """
+        Apply the task merged vectors to the model
+        """
+        # merge the task vectors to the model
+        for name, param in self.model.named_parameters():
+            name = name.split(".weight")[0]
+            if name in task_merged_vectors.keys():
+                logger.info(f"Merging {name} to the model")
+                ## some times the shape is the reverse the task_merged_vectors
+                if param.shape != task_merged_vectors[name].shape:
+                    print(
+                        f"shape mismatch {param.shape} {task_merged_vectors[name].shape}"
+                    )
+                    task_merged_vectors[name] = task_merged_vectors[name].T
+                res = param + task_merged_vectors[name]
+                param.data.copy_(res)
 
     def merge_and_save_base_model(self, output_dir, expert_name, device="cpu"):
         """

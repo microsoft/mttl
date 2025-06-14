@@ -31,16 +31,13 @@ class Retriever(LibraryTransform):
         self.retriever_include_parent = retriever_include_parent
 
     def prepare_transform(self, expert_lib):
-        expert_lib_copy = VirtualLocalLibrary.from_expert_library(
-            expert_lib, expert_lib.repo_id
-        )
+        expert_lib_copy = expert_lib.clone("virtual://" + expert_lib.repo_id)
         return expert_lib_copy
 
     def finalize_transform(self, expert_lib, task, task_expert, sel_exp_names):
         # create the resulting library
-        resulting_library = VirtualLocalLibrary.from_expert_library(
-            expert_lib, expert_lib.repo_id
-        )
+        resulting_library = expert_lib.clone("virtual://" + expert_lib.repo_id)
+
         if task_expert is not None and self.retriever_include_parent:
             sel_exp_names[-1] = task_expert.name
 

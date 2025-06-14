@@ -43,7 +43,7 @@ class TFIDFRanker(AdapterRanker):
         self.vectorizer = None
 
     def train(self):
-        import tqdm
+        from tqdm.auto import tqdm
 
         self.dataset = (
             DatasetLibrary.pull_dataset(self.dataset_name, split="train")
@@ -54,7 +54,7 @@ class TFIDFRanker(AdapterRanker):
             norm="l2", sublinear_tf=True, stop_words="english"
         )
         self.train_features = self.vectorizer.fit_transform(
-            tqdm.tqdm(self.dataset["source"])
+            tqdm(self.dataset["source"])
         )
         self.task_names = list(self.dataset["task_name"])
 
