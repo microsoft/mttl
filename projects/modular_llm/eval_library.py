@@ -279,8 +279,6 @@ def run_eval(args: EvaluationConfig):
         )
         cfg = AnalyticalWudiMergeConfig()
         task_merged_vectors = AnalyticalWudiMerge(cfg).transform(library)
-        transform = KnotMerge(KnotMergeConfig())
-        task_merged_vectors = transform.transform(library)
         model.task_vector_apply(task_merged_vectors)
 
     elif args.merge_or_route == "uniform_lora_after_op":
