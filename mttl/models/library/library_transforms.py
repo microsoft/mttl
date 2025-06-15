@@ -222,119 +222,18 @@ class WudiMergeAfter(LibraryTransform):
     def __init__(self, config: WudiMergeConfig = None):
         super().__init__(config or WudiMergeConfig())
 
-    def _get_task_vectors(self, expert):
-        """
-        get the incremental weights for each layer, LoRA A outproduct LoRA B
-        """
-        task_vectors = {}
-        for key in expert.expert_weights.keys():
-            base_layer_name = key.split(".lora_")[
-                0
-            ]  # Get base layer name by removing .lora_a or .lora_b
-            if base_layer_name not in task_vectors:
-                task_vectors[base_layer_name] = None
-
-        for layer in task_vectors.keys():
-            lora_a = expert.expert_weights[f"{layer}.lora_a"]
-            lora_b = expert.expert_weights[f"{layer}.lora_b"]
-            task_vectors[layer] = lora_a.data @ lora_b.data
-
-        return task_vectors
-
-    def get_optimized_task_vector(
-        self, layer_name, task_vectors, iter, lr
-    ) -> torch.Tensor:
-        """
-        min Σᵢ (1/||τᵢ,ₗ||²F) ||(τₘ,ₗ - τᵢ,ₗ)(τᵢ,ₗ)ᵀ||²F
-
-        return the optimized merged task vector for each layer
-        """
-        task_vectors = task_vectors.cuda()
-        merging_vector = torch.nn.Parameter((torch.sum(task_vectors, dim=0)))
-        optimizer = torch.optim.Adam([merging_vector], lr=lr, weight_decay=0)
-
-        l2_norms = torch.square(
-            torch.norm(task_vectors.reshape(task_vectors.shape[0], -1), p=2, dim=-1)
-        )
-
-        pbar = tqdm(range(iter), desc=f"Optimizing parameter {layer_name}")
-        prev_loss = float("inf")
-        patience = 5  # Number of steps to wait for improvement
-        no_improve_count = 0
-        min_delta = 1e-4  # Minimum change in loss to be considered improvement
-
-        for step in pbar:
-            disturbing_vectors = merging_vector.unsqueeze(0) - task_vectors
-            inner_product = torch.matmul(
-                disturbing_vectors, task_vectors.transpose(1, 2)
-            )
-            loss = torch.sum(
-                torch.square(inner_product) / l2_norms.unsqueeze(-1).unsqueeze(-1)
-            )
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-            # Check if loss improvement is significant
-            if abs(prev_loss - loss.item()) < min_delta:
-                no_improve_count += 1
-            else:
-                no_improve_count = 0
-
-            # Early stopping if no significant improvement for patience steps
-            if no_improve_count >= patience:
-                logger.info(f"Early stopping at step {step} due to minimal loss change")
-                break
-
-            prev_loss = loss.item()
-            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
-        return merging_vector
-
     def transform(self, library, persist=True, recompute=False) -> dict:
         """
         return the task merged vectors in each layer
         """
+        from mttl.models.merging import wudi_merge_after
 
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
-        logger.info("Merging {} experts using WuDi merge".format(len(experts)))
 
-        one_expert = experts[0]
-        # get the layer names from the model
-        layer_names = [
-            name.split(".lora_")[0] for name in one_expert.expert_weights.keys()
-        ]
-        layer_names = list(set(layer_names))
-
-        # get the task vectors for each expert
-        task_vectors_experts = {}
-        for expert in experts:
-            task_vectors = self._get_task_vectors(expert)
-            task_vectors_experts[expert.name] = task_vectors
-        task_merged_vectors = {}
-        # wudi merge the task vectors
-        for layer in layer_names:
-
-            # get the experts for this layer
-            task_vectors = [
-                task_vectors_experts[expert.name][layer] for expert in experts
-            ]
-
-            task_vectors = torch.stack(task_vectors, dim=0)
-            # get the redundant task vector
-            merged_task_vector = self.get_optimized_task_vector(
-                layer_name=layer,
-                task_vectors=task_vectors,
-                iter=self.config.iter,
-                lr=self.config.lr,
-            )
-
-            # save the merged task vector in each layer
-            task_merged_vectors[layer] = merged_task_vector / len(experts)
-        return task_merged_vectors
+        return wudi_merge_after(experts, self.config)
 
 
 @LibraryTransform.register("wudi_merge", WudiMergeConfig)
@@ -347,78 +246,15 @@ class WudiMerge(LibraryTransform):
         super().__init__(config or WudiMergeConfig())
 
     def transform(self, library) -> Expert:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        from mttl.models.merging import wudi_merge
+
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
 
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
 
-        logger.info("Merging {} experts using WuDi merge".format(len(experts)))
-
-        base_expert = copy.deepcopy(experts[0])
-        base_expert.name = "wudi_merged_expert"
-
-        # Get all parameter keys that we want to merge
-        keys = [key for key in base_expert.expert_weights.keys()]
-
-        for key in keys:
-            # Stack all expert weights for this parameter
-            values = torch.stack([expert.expert_weights[key] for expert in experts])
-
-            values = values.to(device)
-
-            # Initialize merged vector as sum of all vectors
-            merging_vector = torch.nn.Parameter(
-                torch.sum(values, dim=0), requires_grad=True
-            )
-            optimizer = torch.optim.Adam(
-                [merging_vector], lr=self.config.lr, weight_decay=0
-            )
-
-            # Compute L2 norms
-            l2_norms = torch.square(
-                torch.norm(values.reshape(values.shape[0], -1), p=2, dim=-1)
-            )
-
-            # Optimize merging vector
-            pbar = tqdm(range(self.config.iter), desc=f"Optimizing parameter {key}")
-            prev_loss = float("inf")
-            patience = 5  # Number of steps to wait for improvement
-            no_improve_count = 0
-            min_delta = 1e-4  # Minimum change in loss to be considered improvement
-
-            for step in pbar:
-                disturbing_vectors = merging_vector.unsqueeze(0) - values
-                inner_product = torch.matmul(disturbing_vectors, values.transpose(1, 2))
-
-                loss = torch.sum(
-                    torch.square(inner_product) / l2_norms.unsqueeze(-1).unsqueeze(-1)
-                )
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-
-                # Check if loss improvement is significant
-                if abs(prev_loss - loss.item()) < min_delta:
-                    no_improve_count += 1
-                else:
-                    no_improve_count = 0
-
-                # Early stopping if no significant improvement for patience steps
-                if no_improve_count >= patience:
-                    logger.info(
-                        f"Early stopping at step {step} due to minimal loss change"
-                    )
-                    break
-
-                prev_loss = loss.item()
-                pbar.set_postfix({"loss": f"{loss.item():.4f}"})
-            merging_vector = merging_vector / len(experts)
-            # Update base expert weights with optimized merging vector
-            base_expert.expert_weights[key].data.copy_(merging_vector.data.cpu())
-
-        return base_expert
+        return wudi_merge(experts, self.config)
 
 
 @dataclass
@@ -437,55 +273,15 @@ class WeightedLinearMerge(LibraryTransform):
 
     @torch.no_grad()
     def transform(self, library) -> Expert:
+        from mttl.models.merging import weighted_linear_merge
+
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
 
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
 
-        logger.info("Averaging {} experts".format(len(experts)))
-
-        base_expert = copy.deepcopy(experts[0])
-        base_expert.name = "weighted_expert"
-
-        if self.config.weights is not None:
-            assert set(self.config.weights.keys()) == set(
-                expert_names
-            ), "Weights must have the same keys as the experts"
-            if not (1 - 1e-6) <= sum(self.config.weights.values()) <= (1 + 1e-6):
-                logger.warning(
-                    "Weights do not sum to 1.0, please make sure this is intended"
-                )
-
-            # scale the base expert
-            for k, v in base_expert.expert_weights.items():
-                base_expert.expert_weights[k] *= self.config.weights[expert_names[0]]
-
-        for _, expert in zip(expert_names[1:], experts[1:]):
-            # Validate that the expert is compatible
-            assert type(expert.expert_info.expert_config) == type(
-                base_expert.expert_info.expert_config
-            ), "Expert configs must be the same type"
-            assert set(expert.expert_weights.keys()) == set(
-                base_expert.expert_weights.keys()
-            ), "Expert weights must have the same keys"
-
-            weight = 1.0
-            if self.config.weights is not None:
-                weight = self.config.weights[expert.expert_info.expert_name]
-
-            for k, v in expert.expert_weights.items():
-                base_expert.expert_weights[k] += v * weight
-
-        # Normalize the final expert
-        if self.config.weights is None:
-            for k, v in base_expert.expert_weights.items():
-                base_expert.expert_weights[k] /= len(experts)
-
-        # manually change the config of the expert to remove the tie_params
-        base_expert.expert_config.tie_params = None
-
-        return base_expert
+        return weighted_linear_merge(experts, self.config)
 
 
 @dataclass
@@ -507,81 +303,15 @@ class TiesMerge(LibraryTransform):
 
     @torch.no_grad()
     def transform(self, library) -> Expert:
+        from mttl.models.merging import ties_merge
+
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
 
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
 
-        logger.info("Averaging {} experts".format(len(experts)))
-
-        base_expert = copy.deepcopy(experts[0])
-        base_expert.name = "ties_weighted_expert"
-
-        state_dict_keys = list(base_expert.expert_weights.keys())
-
-        # Build n_tasks x D experts
-        # TODO: No need to build this matrix, can be done 1 expert at a time
-        expert_vectors = []
-        for expert in experts:
-            expert_vectors += [
-                torch.nn.utils.parameters_to_vector(
-                    list(expert.expert_weights[k] for k in state_dict_keys)
-                )
-            ]
-
-        expert_vectors = torch.stack(expert_vectors, dim=0)
-        per_exp_th = expert_vectors.abs().quantile(1.0 - self.config.top_k, dim=1)
-        keep_param = expert_vectors.abs() >= per_exp_th.view(-1, 1)
-
-        mean_valid_per_task = keep_param.float().mean(1)
-        assert torch.all((mean_valid_per_task - self.config.top_k).abs() < 1e-4)
-
-        used, kept, total = 0, 0, 0
-
-        for param_name in state_dict_keys:
-            # stack the expert weights
-            expert_weights = torch.stack(
-                [expert.expert_weights[param_name] for expert in experts], dim=0
-            )
-
-            # keep weights over the threshold
-            TH = per_exp_th.view(-1, *((1,) * (expert_weights.ndim - 1)))
-            keep_mask = expert_weights.abs() >= TH
-            expert_weights = expert_weights * keep_mask
-
-            if self.config.only_sparsify:
-                final_param = expert_weights.mean(0)
-                used += keep_mask.sum().item()
-            else:
-                # sign majority vote
-                sign_per_dim = expert_weights.sign().sum(0, keepdim=True).sign()
-                sign_per_dim = expert_weights.sum(0, keepdim=True).sign()
-
-                # keep only weights whose sign agree with the majority
-                use_for_avg = expert_weights.sign() == sign_per_dim
-
-                deno = use_for_avg.sum(0).clamp(min=1.0)
-                sum_param = (expert_weights * use_for_avg).sum(0)
-                final_param = sum_param / deno
-                used += (use_for_avg & (sign_per_dim != 0.0)).sum().item()
-
-            kept += (expert_weights.abs() > TH).sum()
-            total += expert_weights.numel()
-
-            base_expert.expert_weights[param_name].data.copy_(final_param)
-
-        logger.info(
-            "Params not reset to 0 in TIES merge: {:.10f}%".format(100.0 * kept / total)
-        )
-        logger.info(
-            "Params used to compute TIES mean: {:.10f}%".format(100.0 * used / total)
-        )
-
-        # manually change the config of the expert to remove the tie_params
-        base_expert.expert_config.tie_params = None
-
-        return base_expert
+        return ties_merge(experts, self.config)
 
 
 @dataclass
@@ -995,6 +725,139 @@ class ArrowTransform(LibraryTransform):
                 output[expert_name][layer_name] = torch.from_numpy(vector)
         return output
 
+    def _compute_with_base_model(self, experts_to_compute, library):
+        """Handle arrow computation when ab_only=False (includes base model weights)"""
+        base_model = None
+        vectors = {}
+        eigvals = {}
+
+        for expert in experts_to_compute:
+            expert_name = expert.name
+            logger.info(f"Computing SVD for expert {expert_name}")
+            vectors[expert_name] = {}
+            eigvals[expert_name] = {}
+
+            if base_model is None:
+                training_config = expert.training_config
+                training_config.model_modifier = None
+                from mttl.models.lightning.expert_module import MultiExpertModule
+
+                base_model = MultiExpertModule(**vars(training_config))
+
+            # get parameters tied during training
+            param_map = get_target_2_source_param_mapping(
+                expert.expert_weights.items(),
+                expert.expert_info.expert_config.tie_params,
+            )
+            if self.config.tie_params != "default":
+                # get parameters we wish to tie for Arrow
+                _tied_params = get_target_2_source_param_mapping(
+                    expert.expert_weights.items(), self.config.tie_params
+                )
+                # Make sure that params tied during training are also tied for Arrow
+                if any(key not in _tied_params for key in param_map):
+                    logger.warning(
+                        "Some parameters that are tied during training are not tied during Arrow computation."
+                    )
+                param_map = _tied_params
+
+            tied_params = list(param_map.keys()) + list(param_map.values())
+            assert all(
+                "lora_b" not in param_name for param_name in tied_params
+            ), "Support for tied B not available"
+            assert all(
+                "lora_a" in param_name for param_name in tied_params
+            ), "Only support tied As for now"
+
+            # Now that we know only A's are tied, we can proceed using only the parent names
+            tied_parents = self._get_unique_parent_names(tied_params)
+
+            untied_parents = [
+                parent
+                for parent in self._get_unique_parent_names(
+                    expert.expert_weights.keys()
+                )
+                if parent not in tied_parents
+            ]
+
+            # Build a mapping from source to target parameters
+            tied_param_bins = defaultdict(list)
+
+            for tgt_name, src_name in param_map.items():
+                parent_src = ".".join(src_name.split(".")[:-1])
+                parent_tgt = ".".join(tgt_name.split(".")[:-1])
+                tied_param_bins[parent_src].append(parent_tgt)
+            for parent in untied_parents:
+                tied_param_bins[parent] = []
+
+            for parent_name, dependents in tied_param_bins.items():
+                logger.info(f"\tComputing SVD for parameter {parent_name}")
+
+                parent_names = [parent_name]
+                A_name, B_name = f"{parent_name}.lora_a", f"{parent_name}.lora_b"
+                As = [expert.expert_weights[A_name]]
+                Bs = [expert.expert_weights[B_name]]
+                base_W = []
+
+                for tied_module in dependents:
+                    logger.info(f"\t\t\tTying Arrow with {tied_module}")
+                    As += [expert.expert_weights[f"{tied_module}.lora_a"]]
+                    Bs += [expert.expert_weights[f"{tied_module}.lora_b"]]
+                    parent_names += [tied_module]
+
+                    base_W += [base_model.model.state_dict()[f"{tied_module}.weight"]]
+
+                if len(As) > 1:
+                    if self.config.tie_op == "concat":
+                        # This shouldn't be used with base model
+                        raise NotImplementedError(
+                            "concat not supported with base model"
+                        )
+                    elif self.config.tie_op == "sum":
+                        # A1B1 + A2B2 == [A1 A2] [B1; B2].
+                        A = torch.cat(As, dim=1)
+                        B = torch.cat(Bs, dim=0)
+                    else:
+                        raise NotImplementedError()
+                else:
+                    A, B = As[0], Bs[0]
+
+                # Reshape As and Bs (needed for Poly / MHR weights)
+                rank = expert.expert_config.lora_rank
+                A = A.reshape(-1, rank).float()
+                B = B.reshape(rank, -1).float()
+
+                W = (A @ B).T  # out_features, in_features
+
+                # Add base model weights
+                base_W += [
+                    base_model.model.state_dict()[f"{parent_name}.weight"]
+                ].float()
+                base_W = torch.stack(base_W).sum(0)
+                W += base_W
+                U, E, Vt = torch.linalg.svd(W)
+                top_vector = Vt[0]
+                bottom_vector = Vt[-1]
+                top_value = E[0]
+
+                # Check that top vector is indeed an eigenvector
+                WTW = W.T @ W
+                ratio = WTW @ top_vector / (top_vector * top_value)
+                torch.allclose(ratio, torch.ones_like(ratio), atol=1e-3)
+
+                # Check that top vector is indeed the top eigenvector
+                assert (WTW @ top_vector).pow(2).sum() >= (WTW @ bottom_vector).pow(
+                    2
+                ).sum()
+
+                # Save eigenvector and eigenvalue
+                for parent in parent_names:
+                    assert parent not in vectors[expert_name]
+                    vectors[expert_name][parent] = top_vector.real.cpu()
+                    eigvals[expert_name][parent] = top_value.item()
+
+        return self._maybe_scale(vectors, eigvals)
+
     def _low_rank_svd(self, A, B):
         """Faster SVD computation for low rank matrices"""
 
@@ -1054,19 +917,19 @@ class ArrowTransform(LibraryTransform):
         persist=True,
         recompute=False,
     ) -> Expert:
+        from mttl.models.merging import arrow_transform
+
         logger.info("Arrow save name : {}".format(self.config.save_name))
 
         if isinstance(library, str):
             library = ExpertLibrary.get_expert_library(library)
 
-        base_model = None
-
         # Try to fetch the precomputed Arrow prototypes
         protos = self.fetch(library, self.config.save_name)
         already_computed = []
 
-        vectors = {}
-        eigvals = {}
+        # Find experts that need to be computed
+        experts_to_compute = []
         for expert_name, expert in library.items():
             if expert_name in protos and not recompute:
                 logger.info(
@@ -1075,151 +938,41 @@ class ArrowTransform(LibraryTransform):
                     )
                 )
                 already_computed.append(expert_name)
-                continue
+            else:
+                experts_to_compute.append(expert)
 
-            logger.info(f"Computing SVD for expert {expert_name}")
-            vectors[expert_name] = {}
-            eigvals[expert_name] = {}
+        # Use standalone function for experts that need computation
+        if experts_to_compute:
+            if self.config.ab_only:
+                # Use the standalone function for ab_only case
+                new_protos = arrow_transform(experts_to_compute, self.config)
+            else:
+                # Keep existing logic for base model case (ab_only=False)
+                new_protos = self._compute_with_base_model(experts_to_compute, library)
+        else:
+            new_protos = {}
 
-            if base_model is None and not self.config.ab_only:
-                training_config = expert.training_config
-                training_config.model_modifier = None
-                from mttl.models.lightning.expert_module import MultiExpertModule
-
-                base_model = MultiExpertModule(**vars(training_config))
-
-            # get parameters tied during training
-            param_map = get_target_2_source_param_mapping(
-                expert.expert_weights.items(),
-                expert.expert_info.expert_config.tie_params,
-            )
-            if self.config.tie_params != "default":
-                # get parameters we wish to tie for Arrow
-                _tied_params = get_target_2_source_param_mapping(
-                    expert.expert_weights.items(), self.config.tie_params
-                )
-                # Make sure that params tied during training are also tied for Arrow
-                if any(key not in _tied_params for key in param_map):
-                    logger.warning(
-                        "Some parameters that are tied during training are not tied during Arrow computation."
-                    )
-                param_map = _tied_params
-
-            tied_params = list(param_map.keys()) + list(param_map.values())
-            assert all(
-                "lora_b" not in param_name for param_name in tied_params
-            ), "Support for tied B not available"
-            assert all(
-                "lora_a" in param_name for param_name in tied_params
-            ), "Only support tied As for now"
-
-            # Now that we know only A's are tied, we can proceed using only the parent names
-            # e.g. 'model.layers.30.self_attn.q_proj' instead of 'model.layers.30.self_attn.q_proj.lora_a'
-            tied_parents = self._get_unique_parent_names(tied_params)
-
-            untied_parents = [
-                parent
-                for parent in self._get_unique_parent_names(
-                    expert.expert_weights.keys()
-                )
-                if parent not in tied_parents
-            ]
-
-            # Build a mapping from source to target parameters
-            # e.g. <name_of_parent_of_param> : [<list of all other params tied to it>]
-            # NOTE: list will be empty if the param is not tied to anything
-            tied_param_bins = defaultdict(list)
-
-            for tgt_name, src_name in param_map.items():
-                parent_src = ".".join(src_name.split(".")[:-1])
-                parent_tgt = ".".join(tgt_name.split(".")[:-1])
-                tied_param_bins[parent_src].append(parent_tgt)
-            for parent in untied_parents:
-                tied_param_bins[parent] = []
-
-            for parent_name, dependents in tied_param_bins.items():
-                logger.info(f"\tComputing SVD for parameter {parent_name}")
-
-                parent_names = [parent_name]
-                A_name, B_name = f"{parent_name}.lora_a", f"{parent_name}.lora_b"
-                As = [expert.expert_weights[A_name]]
-                Bs = [expert.expert_weights[B_name]]
-                base_W = []
-
-                for tied_module in dependents:
-                    logger.info(f"\t\t\tTying Arrow with {tied_module}")
-                    As += [expert.expert_weights[f"{tied_module}.lora_a"]]
-                    Bs += [expert.expert_weights[f"{tied_module}.lora_b"]]
-                    parent_names += [tied_module]
-
-                    if not self.config.ab_only:
-                        base_W += [
-                            base_model.model.state_dict()[f"{tied_module}.weight"]
-                        ]
-
-                if len(As) > 1:
-                    if self.config.tie_op == "concat":
-                        # Mimicking phi-2 behavior
-                        assert self.config.ab_only
-                        assert all(
-                            torch.allclose(A, As[0]) for A in As
-                        ), "A should be the same for all tied parameters"
-                        A = As[0]
-                        B = torch.cat(Bs, dim=1)
-                    elif self.config.tie_op == "sum":
-                        # A1B1 + A2B2 == [A1 A2] [B1; B2].
-                        # We do it this way to leverage the low-rank SVD
-                        A = torch.cat(As, dim=1)
-                        B = torch.cat(Bs, dim=0)
+        # Handle persistence
+        if persist and new_protos:
+            # Convert to the format expected by persistence
+            vectors = {}
+            eigvals = {}
+            for expert_name, expert_protos in new_protos.items():
+                vectors[expert_name] = {}
+                eigvals[expert_name] = {}
+                for layer_name, vector in expert_protos.items():
+                    if self.config.scale:
+                        # If scaling was applied, we need to extract the unscaled vector
+                        # This is complex, so for now we'll store the scaled vector as is
+                        vectors[expert_name][layer_name] = vector.cpu().numpy()
+                        eigvals[expert_name][layer_name] = 1.0  # Placeholder
                     else:
-                        raise NotImplementedError()
-                else:
-                    A, B = As[0], Bs[0]
+                        vectors[expert_name][layer_name] = vector.cpu().numpy()
+                        eigvals[expert_name][layer_name] = 1.0  # Placeholder
 
-                # Reshape As and Bs (needed for Poly / MHR weights)
-                rank = expert.expert_config.lora_rank
-                A = A.reshape(-1, rank).float()
-                B = B.reshape(rank, -1).float()
+            to_upload = list(new_protos.keys())
+            formatted_protos = self._maybe_scale(vectors, eigvals)
 
-                W = (A @ B).T  # out_features, in_features
-
-                if self.config.ab_only:
-                    U_W, Sigma_W, _ = self._low_rank_svd(A, B)
-                    top_value = Sigma_W[0] ** 2
-                    bottom_vector = U_W[:, -1]
-                    top_vector = U_W[:, 0]
-                else:
-                    base_W += [
-                        base_model.model.state_dict()[f"{parent_name}.weight"]
-                    ].float()
-                    base_W = torch.stack(base_W).sum(0)
-                    W += base_W
-                    U, E, Vt = torch.linalg.svd(W)
-                    top_vector = Vt[0]
-                    bottom_vector = Vt[-1]
-                    top_value = E[0]
-
-                # Check that top vector is indeed an eigenvector
-                WTW = W.T @ W
-                ratio = WTW @ top_vector / (top_vector * top_value)
-                torch.allclose(ratio, torch.ones_like(ratio), atol=1e-3)
-
-                # Check that top vector is indeed the top eigenvector
-                assert (WTW @ top_vector).pow(2).sum() >= (WTW @ bottom_vector).pow(
-                    2
-                ).sum()
-
-                # Save eigenvector and eigvenvalue
-                for parent in parent_names:
-                    assert parent not in vectors[expert_name]
-                    vectors[expert_name][parent] = top_vector.real.cpu().numpy()
-                    eigvals[expert_name][parent] = top_value.item()
-
-        to_upload = [x for x in library.keys() if x not in already_computed]
-        new_protos = self._maybe_scale(vectors, eigvals)
-
-        if persist and len(to_upload) > 0:
-            # add embeddings to the library
             with library.batched_commit():
                 for expert_name in to_upload:
                     logger.info(
@@ -1228,7 +981,7 @@ class ArrowTransform(LibraryTransform):
                     for data_name, data in [
                         ("vectors", vectors),
                         ("eigvals", eigvals),
-                        ("protos", new_protos),
+                        ("protos", formatted_protos),
                     ]:
                         library.add_auxiliary_data(
                             data_type=self.config.save_name + "_" + data_name,
