@@ -444,7 +444,9 @@ class WuDiMerge2(WudiMergeAfter):
         average_vector = task_vectors.mean(dim=0)
         low_rank_list = []
         taskvector_list = []
-        for i in tqdm(range(task_vectors.shape[0]), desc=f"SVDing {layer_name}"):
+        for i in tqdm(
+            range(task_vectors.shape[0]), desc=f"wudi merge 2 for {layer_name}"
+        ):
             vector = task_vectors[i]
             u, s, v = torch.linalg.svd(vector, full_matrices=True)
             u2, s2, v2 = torch.linalg.svd(vector, full_matrices=False)
@@ -520,21 +522,13 @@ class SVDMerge(LibraryTransform):
     def __init__(self, config: SVDMergeConfig = None):
         super().__init__(config or SVDMergeConfig())
 
-    def _get_task_vectors(self, expert):
-        task_vectors = {}
-        for key in expert.expert_weights.keys():
-            base_layer_name = key.split(".lora_")[
-                0
-            ]  # Get base layer name by removing .lora_a or .lora_b
-            if base_layer_name not in task_vectors:
-                task_vectors[base_layer_name] = None
+    def _get_task_vectors(self, expert, layer):
 
-        for layer in task_vectors.keys():
-            lora_a = expert.expert_weights[f"{layer}.lora_a"]
-            lora_b = expert.expert_weights[f"{layer}.lora_b"]
-            task_vectors[layer] = lora_a.data @ lora_b.data
+        lora_a = expert.expert_weights[f"{layer}.lora_a"]
+        lora_b = expert.expert_weights[f"{layer}.lora_b"]
+        task_vector = lora_a.data @ lora_b.data
 
-        return task_vectors
+        return task_vector
 
     def _merge_task_vectors(
         self, task_vectors, layer, device, original_dtype, sv_reduction
@@ -545,7 +539,9 @@ class SVDMerge(LibraryTransform):
         sum_v = None
 
         # Process each task vector
-        for i, vec in tqdm(enumerate(task_vectors), desc=f"SVDing {layer}"):
+        for i, vec in tqdm(
+            enumerate(task_vectors), desc=f"SVD merging compute for {layer}"
+        ):
             # Move parameter to GPU for computation
             vec = vec.to(device).float()
 
@@ -569,7 +565,6 @@ class SVDMerge(LibraryTransform):
             sum_v[i * reduced_index_s : (i + 1) * reduced_index_s, :] = v[
                 :reduced_index_s, :
             ]
-
         # Compute final merged parameter
         u_u, s_u, v_u = torch.linalg.svd(sum_u, full_matrices=False)
         u_v, s_v, v_v = torch.linalg.svd(sum_v, full_matrices=False)
@@ -593,11 +588,6 @@ class SVDMerge(LibraryTransform):
         experts = [library[name] for name in expert_names]
         logger.info("Merging {} experts using SVD merge".format(len(experts)))
 
-        # get the task vectors for each expert
-        task_vectors_experts = {}
-        for expert in experts:
-            task_vectors = self._get_task_vectors(expert)
-            task_vectors_experts[expert.name] = task_vectors
         one_expert = experts[0]
         # get the layer names from the model
         layer_names = [
@@ -613,7 +603,7 @@ class SVDMerge(LibraryTransform):
                 logger.info(f"compute task vector for {layer}")
                 # Get task vectors for this layer from all experts
                 task_vectors = [
-                    task_vectors_experts[expert.name][layer] for expert in experts
+                    self._get_task_vectors(expert, layer) for expert in experts
                 ]
 
                 # Apply SVD merging for this layer
