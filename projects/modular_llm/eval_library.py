@@ -256,7 +256,7 @@ def run_eval(args: EvaluationConfig):
             MultiExpertModelConfig(base_model=base_model),
             **loading_kwargs,
         )
-        cfg = SVDMergeConfig()
+        cfg = SVDMergeConfig(path=f"{args.library_id}/svd_ingredients.pt")
         task_merged_vectors = SVDMerge(cfg).transform(library)
     elif args.merge_or_route == "wudi_merge_after":
         model = MultiExpertModel(
