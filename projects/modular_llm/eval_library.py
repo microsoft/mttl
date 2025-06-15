@@ -33,6 +33,8 @@ from mttl.models.library.library_transforms import (
     WuDiMerge2Config,
     KnotMerge,
     KnotMergeConfig,
+    SVDMerge,
+    SVDMergeConfig,
 )
 from mttl.models.lightning.callbacks import LossCallback
 from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
@@ -249,6 +251,13 @@ def run_eval(args: EvaluationConfig):
                 **loading_kwargs,
             )
             model.task_vector_apply(task_merged_vectors)
+    elif args.merge_or_route == "svd_merge":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = SVDMergeConfig()
+        task_merged_vectors = SVDMerge(cfg).transform(library)
     elif args.merge_or_route == "wudi_merge_after":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),

@@ -507,6 +507,132 @@ class WuDiMerge2(WudiMergeAfter):
 
 
 @dataclass
+class SVDMergeConfig(LibraryTransformConfig):
+    path: str = "svd_ingredients.pt"
+
+
+@LibraryTransform.register("svd_merge", SVDMergeConfig)
+class SVDMerge(LibraryTransform):
+    """
+    merge the task vectors using svd
+    """
+
+    def __init__(self, config: SVDMergeConfig = None):
+        super().__init__(config or SVDMergeConfig())
+
+    def _get_task_vectors(self, expert):
+        task_vectors = {}
+        for key in expert.expert_weights.keys():
+            base_layer_name = key.split(".lora_")[
+                0
+            ]  # Get base layer name by removing .lora_a or .lora_b
+            if base_layer_name not in task_vectors:
+                task_vectors[base_layer_name] = None
+
+        for layer in task_vectors.keys():
+            lora_a = expert.expert_weights[f"{layer}.lora_a"]
+            lora_b = expert.expert_weights[f"{layer}.lora_b"]
+            task_vectors[layer] = lora_a.data @ lora_b.data
+
+        return task_vectors
+
+    def _merge_task_vectors(
+        self, task_vectors, layer, device, original_dtype, sv_reduction
+    ):
+
+        sum_u = None
+        sum_s = None
+        sum_v = None
+
+        # Process each task vector
+        for i, vec in tqdm(enumerate(task_vectors), desc=f"SVDing {layer}"):
+            # Move parameter to GPU for computation
+            vec = vec.to(device).float()
+
+            # Compute SVD
+            u, s, v = torch.linalg.svd(vec, full_matrices=False)
+
+            # Compute reduced index
+            reduced_index_s = int(s.shape[0] * sv_reduction)
+
+            # Initialize storage for the first vector
+            if i == 0:
+                sum_u = torch.zeros_like(u, device=device)
+                sum_s = torch.zeros_like(s, device=device)
+                sum_v = torch.zeros_like(v, device=device)
+
+            # Store important components
+            sum_u[:, i * reduced_index_s : (i + 1) * reduced_index_s] = u[
+                :, :reduced_index_s
+            ]
+            sum_s[i * reduced_index_s : (i + 1) * reduced_index_s] = s[:reduced_index_s]
+            sum_v[i * reduced_index_s : (i + 1) * reduced_index_s, :] = v[
+                :reduced_index_s, :
+            ]
+
+        # Compute final merged parameter
+        u_u, s_u, v_u = torch.linalg.svd(sum_u, full_matrices=False)
+        u_v, s_v, v_v = torch.linalg.svd(sum_v, full_matrices=False)
+
+        # Compute merged result and move back to CPU
+        merged_param = (
+            torch.linalg.multi_dot([u_u, v_u, torch.diag(sum_s), u_v, v_v])
+            .to(original_dtype)
+            .cpu()
+        )
+
+        return merged_param
+
+    @torch.no_grad()
+    def transform(self, library) -> dict:
+        # empty the cache
+        torch.cuda.empty_cache()
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+        expert_names = list(library.keys())
+        experts = [library[name] for name in expert_names]
+        logger.info("Merging {} experts using SVD merge".format(len(experts)))
+
+        # get the task vectors for each expert
+        task_vectors_experts = {}
+        for expert in experts:
+            task_vectors = self._get_task_vectors(expert)
+            task_vectors_experts[expert.name] = task_vectors
+        one_expert = experts[0]
+        # get the layer names from the model
+        layer_names = [
+            name.split(".lora_")[0] for name in one_expert.expert_weights.keys()
+        ]
+        layer_names = sorted(list(set(layer_names)))
+        task_merged_vectors = {}
+        if os.path.exists(self.config.path):
+            logger.info(f"load task vectors from {self.config.path}")
+            task_merged_vectors = torch.load(self.config.path)
+        else:
+            for layer in layer_names:
+                logger.info(f"compute task vector for {layer}")
+                # Get task vectors for this layer from all experts
+                task_vectors = [
+                    task_vectors_experts[expert.name][layer] for expert in experts
+                ]
+
+                # Apply SVD merging for this layer
+                sv_reduction = 1.0 / len(task_vectors)
+                device = (
+                    torch.device("cuda")
+                    if torch.cuda.is_available()
+                    else torch.device("cpu")
+                )
+                original_dtype = task_vectors[0].dtype
+
+                task_merged_vectors[layer] = self._merge_task_vectors(
+                    task_vectors, layer, device, original_dtype, sv_reduction
+                )
+
+        return task_merged_vectors
+
+
+@dataclass
 class AnalyticalWudiMergeConfig(LibraryTransformConfig):
     regularization: float = 1e-6
     pass
