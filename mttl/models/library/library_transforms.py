@@ -880,10 +880,10 @@ class KnotMerge(LibraryTransform):
             # SVD
             device = "cuda" if torch.cuda.is_available() else "cpu"
             W_l = torch.cat(Ws, dim=1).to(device)
-            U, s, Vt = torch.linalg.svd(W_l.to(torch.float64), full_matrices=False)
-            U = U[:, s > 1e-5].type(torch.float32)
-            Vt = Vt[s > 1e-5].type(torch.float32)
-            s = s[s > 1e-5].type(torch.float32)
+            U, s, Vt = torch.linalg.svd(W_l, full_matrices=False)
+            U = U[:, s > 1e-5]
+            Vt = Vt[s > 1e-5]
+            s = s[s > 1e-5]
             UsV_dict[layer] = {"U": deepcopy(U), "s": deepcopy(s), "V": deepcopy(Vt)}
             # Set all s to be the same scale
             s[s <= 1e-5] = 0
