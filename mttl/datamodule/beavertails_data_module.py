@@ -100,12 +100,6 @@ def augment_few_shot(
     return concatenate_datasets([dataset] + augmented_dataset)
 
 
-@dataclass
-class FlatMultiTaskConfig(DatasetConfig):
-    source_template: str = None
-    augment_few_shot: int = 0
-
-
 def apply_source_template_(source_template, example):
     example["source"] = source_template.format(example["source"])
     return example
@@ -122,6 +116,7 @@ def apply_source_template(dataset, source_template):
 
 @dataclass
 class BeavertailsConfig(DatasetConfig):
+    source_template: str = None
     dataset: str = "zhan1993/BeaverTails_filtered_train"
 
 
@@ -144,6 +139,10 @@ class BeavertailsModule(DataModule):
             test_dataset,
         ) = maybe_filter_hf_dataset_by_task(
             self.dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
+        )
+
+        train_dataset = apply_source_template(
+            train_dataset, self.config.source_template
         )
 
         self.train_dataset = train_dataset
