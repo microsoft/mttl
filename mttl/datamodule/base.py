@@ -963,6 +963,10 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         FlatMultiTaskConfig,
         FlatMultiTaskModule,
     )
+    from mttl.datamodule.beavertails_data_module import (
+        BeavertailsConfig,
+        BeavertailsModule,
+    )
     from mttl.datamodule.openbookqa_data_module import (
         OpenbookQADataConfig,
         OpenbookQAMultiChoiceDataModule,
@@ -1059,6 +1063,11 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         assert not for_generation
         config = dataset_to_klass_map[dataset][0]
         dm = dataset_to_klass_map[dataset][1](config)
+    elif "beavertails" in dataset.lower():
+        config = BeavertailsConfig(
+            **common_kwargs,
+        )
+        dm = BeavertailsModule(config)
     elif "flan" in dataset:
         config = FlanConfig(
             **common_kwargs,

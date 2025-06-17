@@ -100,17 +100,25 @@ def augment_few_shot(
     return concatenate_datasets([dataset] + augmented_dataset)
 
 
-def apply_source_template_(source_template, example):
-    example["source"] = source_template.format(example["source"])
+def apply_template_(tokenizer, example):
+    message = [
+        {"role": "user", "content": example["source"]},
+        {"role": "assistant", "content": example["target"]},
+    ]
+
+    tokenized_message = tokenizer.apply_chat_template(message, tokenize=False)
+    # split the message into source and target
+    example["source"] = tokenized_message.split("<|assistant|>")[0]
+    example["target"] = "<|assistant|>" + tokenized_message.split("<|assistant|>")[1]
+
     return example
 
 
-def apply_source_template(dataset, source_template):
-    if source_template is not None:
-        dataset = dataset.map(
-            partial(apply_source_template_, source_template),
-            num_proc=int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16)),
-        )
+def apply_template(dataset, tokenizer):
+    dataset = dataset.map(
+        partial(apply_template_, tokenizer),
+        num_proc=int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16)),
+    )
     return dataset
 
 
@@ -140,11 +148,8 @@ class BeavertailsModule(DataModule):
         ) = maybe_filter_hf_dataset_by_task(
             self.dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
         )
-
-        train_dataset = apply_source_template(
-            train_dataset, self.config.source_template
-        )
-
+        if self.config.source_template is not None:
+            train_dataset = apply_template(train_dataset, self.tokenizer)
         self.train_dataset = train_dataset
         self.dev_dataset = test_dataset
         self.test_dataset = test_dataset
