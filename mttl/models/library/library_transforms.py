@@ -38,6 +38,8 @@ from mttl.models.utils import transfer_batch_to_device
 from mttl.registrable import Registrable
 from mttl.serializable import Serializable
 from mttl.models.library.wudi_closed_form import AnalyticalSolver
+from mttl.logging import TableLogger
+import wandb
 
 
 class LibraryTransform(abc.ABC, Registrable):
@@ -297,7 +299,7 @@ class WudiMergeAfter(LibraryTransform):
         """
         return the task merged vectors in each layer
         """
-
+        rank_table = TableLogger()
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
         expert_names = list(library.keys())
@@ -308,7 +310,7 @@ class WudiMergeAfter(LibraryTransform):
         layer_names = [
             name.split(".lora_")[0] for name in one_expert.expert_weights.keys()
         ]
-        layer_names = list(set(layer_names))
+        layer_names = sorted(list(set(layer_names)))
 
         # get the task vectors for each expert
         task_vectors_experts = {}
@@ -335,6 +337,20 @@ class WudiMergeAfter(LibraryTransform):
 
             # save the merged task vector in each layer
             task_merged_vectors[layer] = merged_task_vector / len(experts)
+
+            # get the rank of the merged task vector
+            rank = torch.linalg.matrix_rank(merged_task_vector)
+            logger.info(
+                f"Rank of the merged task vector for {layer} is {rank}, original rank is {merged_task_vector.shape[0]}"
+            )
+            rank_table.log(
+                {
+                    "layer": layer,
+                    "rank": rank.item(),
+                    "original_rank": merged_task_vector.shape[0],
+                }
+            )
+        rank_table.log_final_table()
         return task_merged_vectors
 
 

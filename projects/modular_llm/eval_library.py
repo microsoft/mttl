@@ -162,6 +162,15 @@ def run_eval(args: EvaluationConfig):
 
     remote_login(args.remote_token)
 
+    if wandb.run is None and os.environ.get("WANDB_API_KEY"):
+        wandb.init(
+            project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
+            config=vars(args),
+            name=os.environ.get("AMLT_JOB_NAME", None),
+        )
+        # update config
+        wandb.config.update({f"cmd_args_{k}": v for k, v in vars(args).items()})
+
     exclude_phi_tasks = [
         "hellaswag_1_1_0",
         "ai2_arc_ARC_Challenge_1_0_0",
@@ -350,15 +359,6 @@ def run_eval(args: EvaluationConfig):
         raise ValueError(f"Unknown merge_or_route {args.merge_or_route}")
 
     metric_logger = Selector.metric_logger
-
-    if wandb.run is None and os.environ.get("WANDB_API_KEY"):
-        wandb.init(
-            project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
-            config=vars(args),
-            name=os.environ.get("AMLT_JOB_NAME", None),
-        )
-        # update config
-        wandb.config.update({f"cmd_args_{k}": v for k, v in vars(args).items()})
 
     if args.pipeline_eval_tasks in [
         "in_distribution",
