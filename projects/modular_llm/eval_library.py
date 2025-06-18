@@ -34,6 +34,8 @@ from mttl.models.modifiers.lora import LoRAConfig
 from mttl.utils import remote_login
 
 from mttl.models.containers.selectors.base import UniformSelectorConfig
+from mttl.evaluators.adv_bench_evaluator import AdvBenchEvaluator
+from mttl.datamodule.adv_bench_data_module import AdvBenchDataModuleConfig
 
 
 def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
@@ -68,6 +70,17 @@ def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
         elif args.eval_metric == "rougeL":
             dm = get_datamodule(args, for_generation=True)
             evaluator = RougeEvaluator(
+                datamodule=dm,
+            )
+            metric = evaluator.evaluate(
+                module,
+                split="test",
+                verbose=False,
+            )
+        elif args.eval_metric == "asr":
+            dm = get_datamodule(args, for_generation=True)
+            evaluator = AdvBenchEvaluator(
+                AdvBenchDataModuleConfig(model=args.model),
                 datamodule=dm,
             )
             metric = evaluator.evaluate(
