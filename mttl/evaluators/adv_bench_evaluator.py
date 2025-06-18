@@ -35,7 +35,6 @@ class AdvBenchEvaluator(GenerativeEvaluator):
         use_vllm=False,
         generation_kwargs=None,
     ):
-        datamodule = AdvBenchDataModule(config, for_generation=True)
         super().__init__(
             datamodule=datamodule,
             config=config,

@@ -35,7 +35,11 @@ from mttl.utils import remote_login
 
 from mttl.models.containers.selectors.base import UniformSelectorConfig
 from mttl.evaluators.adv_bench_evaluator import AdvBenchEvaluator
-from mttl.datamodule.adv_bench_data_module import AdvBenchDataModuleConfig
+from mttl.datamodule.adv_bench_data_module import (
+    AdvBenchDataModule,
+    AdvBenchDataModuleConfig,
+)
+from mttl.evaluators.asr_evaluator import ASREvaluator
 
 
 def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
@@ -79,8 +83,7 @@ def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
             )
         elif args.eval_metric == "asr":
             dm = get_datamodule(args, for_generation=True)
-            evaluator = AdvBenchEvaluator(
-                AdvBenchDataModuleConfig(model=args.model),
+            evaluator = ASREvaluator(
                 datamodule=dm,
             )
             metric = evaluator.evaluate(
@@ -88,6 +91,7 @@ def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
                 split="test",
                 verbose=False,
             )
+            logger.info(f"ASR: {metric}")
         else:
             raise ValueError(f"Unknown eval metric {args.eval_metric}")
         if wandb.run is not None:
@@ -375,6 +379,20 @@ def run_eval(args: EvaluationConfig):
             if rouge is not None:
                 wandb.log({f"downstream/test_rougeL": rouge})
 
+        return
+    elif args.pipeline_eval_tasks == "adv-bench":
+        config = AdvBenchDataModuleConfig(
+            model=base_model,
+        )
+        dm_for_gen = AdvBenchDataModule(config, for_generation=True)
+        adv_bench_evaluator = AdvBenchEvaluator(
+            datamodule=dm_for_gen,
+        )
+        adv_bench = adv_bench_evaluator.evaluate(model, split="test", verbose=False)
+        logger.info(f"Adv-bench: {adv_bench}")
+        if wandb.run is not None:
+            if adv_bench is not None:
+                wandb.log({f"downstream/test_adv-bench": adv_bench})
         return
     else:
         if args.pipeline_eval_tasks == "all":
