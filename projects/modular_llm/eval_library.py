@@ -33,6 +33,8 @@ from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.utils import remote_login
 
+from mttl.models.containers.selectors.base import UniformSelectorConfig
+
 
 def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
     args.include_task_source = "*"
@@ -200,21 +202,42 @@ def run_eval(args: EvaluationConfig):
         raise ValueError("Please specify a valid merge_or_route!")
 
     """ Parameter Merging Approaches """
-    if args.merge_or_route in ["uniform", "ties", "wudi"]:
-        if args.merge_or_route == "uniform":
+    if args.merge_or_route == "uniform":
+        if args.lora_merge_after:
+            model = MultiExpertModel(
+                MultiExpertModelConfig(base_model=base_model),
+                **loading_kwargs,
+            )
+            model.add_experts_from_library(library)
+            model.set_selector(
+                "lora",
+                UniformSelectorConfig(lora_merge_after=args.lora_merge_after),
+            )
+        else:
             expert = WeightedLinearMerge(WeightedLinearMergeConfig()).transform(library)
-        elif args.merge_or_route == "ties":
-            cfg = TiesMergeConfig(top_k=args.transform_sparsity)
+            model = MultiExpertModel(
+                MultiExpertModelConfig(base_model=base_model),
+                **loading_kwargs,
+            )
+            model.add_expert_instance(expert, is_default=True)
+
+    elif args.merge_or_route in ["ties", "wudi"]:
+        if args.merge_or_route == "ties":
+            cfg = TiesMergeConfig()
             expert = TiesMerge(cfg).transform(library)
+            model = MultiExpertModel(
+                MultiExpertModelConfig(base_model=base_model),
+                **loading_kwargs,
+            )
+            model.add_expert_instance(expert, is_default=True)
         elif args.merge_or_route == "wudi":
             cfg = WudiMergeConfig(iter=300, lr=1e-5)
-            expert = WudiMerge(cfg).transform(library)
-
-        model = MultiExpertModel(
-            MultiExpertModelConfig(base_model=base_model),
-            **loading_kwargs,
-        )
-        model.add_expert_instance(expert, is_default=True)
+            task_merged_vectors = WudiMerge(cfg).transform(library)
+            model = MultiExpertModel(
+                MultiExpertModelConfig(base_model=base_model),
+                **loading_kwargs,
+            )
+            model.task_vector_apply(task_merged_vectors)
     elif args.merge_or_route == "wudi_merge_after":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
