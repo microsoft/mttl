@@ -1067,7 +1067,7 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         config = BeavertailsConfig(
             **common_kwargs,
         )
-        dm = BeavertailsModule(config)
+        dm = BeavertailsModule(config, for_generation=for_generation)
     elif "flan" in dataset:
         config = FlanConfig(
             **common_kwargs,
