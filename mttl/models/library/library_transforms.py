@@ -5,8 +5,9 @@ import re
 from abc import abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass
+from os.path import isfile
 from typing import Dict, List, Union
-
+import os
 import numpy as np
 import sklearn.decomposition
 import torch
@@ -209,6 +210,7 @@ class SVDEmbeddingTransform(LibraryTransform):
 class WudiMergeConfig(LibraryTransformConfig):
     iter: int = 300
     lr: float = 1e-5
+    task_vector_checkpoint: str = None
 
 
 @LibraryTransform.register("wudi_merge_after", WudiMergeConfig)
@@ -300,14 +302,18 @@ class WudiMergeAfter(LibraryTransform):
             library = ExpertLibrary.get_expert_library(library)
         expert_names = list(library.keys())
         experts = [library[name] for name in expert_names]
-        logger.info("Merging {} experts using WuDi merge".format(len(experts)))
+        logger.info("Merging {} experts using WuDi merge after".format(len(experts)))
+
+        if isfile(self.config.task_vector_checkpoint):
+            task_vectors = torch.load(self.config.task_vector_checkpoint)
+            return task_vectors
 
         one_expert = experts[0]
         # get the layer names from the model
         layer_names = [
             name.split(".lora_")[0] for name in one_expert.expert_weights.keys()
         ]
-        layer_names = list(set(layer_names))
+        layer_names = sorted(list(set(layer_names)))
 
         # get the task vectors for each expert
         task_vectors_experts = {}
@@ -333,7 +339,10 @@ class WudiMergeAfter(LibraryTransform):
             )
 
             # save the merged task vector in each layer
-            task_merged_vectors[layer] = merged_task_vector / len(experts)
+            task_merged_vectors[layer] = merged_task_vector
+        if not os.path.exists(os.path.dirname(self.config.task_vector_checkpoint)):
+            os.makedirs(os.path.dirname(self.config.task_vector_checkpoint))
+        torch.save(task_merged_vectors, self.config.task_vector_checkpoint)
         return task_merged_vectors
 
 
