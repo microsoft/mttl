@@ -305,6 +305,9 @@ class WudiMergeAfter(LibraryTransform):
         logger.info("Merging {} experts using WuDi merge after".format(len(experts)))
 
         if isfile(self.config.task_vector_checkpoint):
+            logger.info(
+                f"Loading task vectors from {self.config.task_vector_checkpoint}"
+            )
             task_vectors = torch.load(self.config.task_vector_checkpoint)
             return task_vectors
 

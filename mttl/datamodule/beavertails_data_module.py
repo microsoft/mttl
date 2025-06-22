@@ -139,6 +139,9 @@ class BeavertailsModule(DataModule):
             len(self.dataset), int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
         )
 
+        if self.tokenizer.chat_template is not None:
+            self.dataset = apply_template(self.dataset, self.tokenizer)
+
         (
             self._task_names,
             self._task_to_id,
@@ -148,8 +151,7 @@ class BeavertailsModule(DataModule):
         ) = maybe_filter_hf_dataset_by_task(
             self.dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
         )
-        if self.config.source_template is not None:
-            train_dataset = apply_template(train_dataset, self.tokenizer)
+
         self.train_dataset = train_dataset
         self.dev_dataset = test_dataset
         self.test_dataset = test_dataset
