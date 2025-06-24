@@ -591,6 +591,7 @@ class EvaluationConfig(MultiExpertConfig, TransformArgs):
     n_ng_iterations: int = 30  # number of iterations for LoraHub
     recompute_prototypes: bool = False
     expert_scaling: float = 1.0
+    lora_merge_after: bool = False
 
 
 @dataclass
