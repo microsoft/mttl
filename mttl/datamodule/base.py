@@ -967,6 +967,10 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         BeavertailsConfig,
         BeavertailsModule,
     )
+    from mttl.datamodule.coconot_datamodule import (
+        CoconotConfig,
+        CoconotModule,
+    )
     from mttl.datamodule.openbookqa_data_module import (
         OpenbookQADataConfig,
         OpenbookQAMultiChoiceDataModule,
@@ -1063,6 +1067,11 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         assert not for_generation
         config = dataset_to_klass_map[dataset][0]
         dm = dataset_to_klass_map[dataset][1](config)
+    elif "coconot" in dataset.lower():
+        config = CoconotConfig(
+            **common_kwargs,
+        )
+        dm = CoconotModule(config, for_generation=for_generation)
     elif "beavertails" in dataset.lower():
         config = BeavertailsConfig(
             **common_kwargs,
