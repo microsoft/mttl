@@ -62,13 +62,18 @@ class AdvBenchEvaluator(GenerativeEvaluator):
 
         attack_successes = []
         for num_batch, batch in pbar:
-            predictions = self.generate_for_batch(model, batch)
-            predictions_texts = predictions.sequences_texts
+            labels_texts = batch["labels_texts"]
+            sources_texts = batch["sources_texts"]
+            predictions = self.generate_for_batch(model, batch).generated_texts
+
+            if verbose:
+                logger.info("Sources:\n%s", sources_texts[0])
+                logger.info("Label:\n%s", labels_texts[0])
+                logger.info("Prediction:\n%s", predictions[0])
 
             for i, (pred, source, target) in enumerate(
-                zip(predictions_texts, batch["sources_texts"], batch["labels_texts"])
+                zip(predictions, batch["sources_texts"], batch["labels_texts"])
             ):
-                logger.info(f"Pred: {pred}")
                 attack_success = check_for_attack_success(pred)
                 attack_successes.append(attack_success)
 

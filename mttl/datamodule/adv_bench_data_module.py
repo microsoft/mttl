@@ -18,18 +18,19 @@ class AdvBenchDataModule(DataModule):
         dataset = dataset.rename_column("prompt", "source")
 
         def map_example(example):
-            user_prompt = example["source"]
             messages = [
-                {"role": "system", "content": "You are a helpful AI assistant."},
                 {
                     "role": "user",
-                    "content": user_prompt,
+                    "content": example["source"]
                 },
+                {"role": "assistant", "content": example["target"]},
             ]
-            prompt = self.tokenizer.apply_chat_template(
-                messages, tokenize=False, add_generation_prompt=True
+            tokenized_message = self.tokenizer.apply_chat_template(
+                messages, tokenize=False
             )
-            return {"source": prompt, "target": example["target"]}
+            source = tokenized_message.split("<|assistant|>")[0]
+            target = "<|assistant|>" + tokenized_message.split("<|assistant|>")[1]
+            return {"source": source, "target": target}
 
         if self.tokenizer.chat_template is not None:
             dataset = dataset.map(map_example)
