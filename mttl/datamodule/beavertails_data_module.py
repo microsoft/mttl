@@ -123,6 +123,30 @@ def apply_template(dataset, tokenizer):
 
 
 @dataclass
+class BeavertailsSafeDataModuleConfig(DatasetConfig):
+    dataset: str = "zhan1993/BeaverTails_filtered_safe"
+
+
+@DataModule.register("beavertails_safe", config_cls=BeavertailsSafeDataModuleConfig)
+class BeavertailsSafeModule(DataModule):
+    def setup_dataset(self):
+        self.dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
+        self.dataset = self.dataset["30k_test"]
+        self.dataset = self.dataset.rename_column("prompt", "source")
+        self.dataset = self.dataset.rename_column("response", "target")
+
+        n_proc = min(
+            len(self.dataset), int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
+        )
+
+        if self.tokenizer.chat_template is not None:
+            self.dataset = apply_template(self.dataset, self.tokenizer)
+
+        self.train_dataset = self.dataset
+        self.dev_dataset = self.test_dataset = self.dataset
+
+
+@dataclass
 class BeavertailsConfig(DatasetConfig):
     source_template: str = None
     dataset: str = "zhan1993/BeaverTails_filtered_train"
@@ -158,11 +182,17 @@ class BeavertailsModule(DataModule):
 
 
 if __name__ == "__main__":
-    config = BeavertailsConfig(
-        dataset="zhan1993/BeaverTails_filtered_train",
+    # config = BeavertailsConfig(
+    #     dataset="zhan1993/BeaverTails_filtered_train",
+    #     model="microsoft/Phi-3-mini-4k-instruct",
+    # )
+    # data_module = BeavertailsModule(config)
+
+    config = BeavertailsSafeDataModuleConfig(
+        dataset="zhan1993/BeaverTails_filtered_safe",
         model="microsoft/Phi-3-mini-4k-instruct",
     )
-    data_module = BeavertailsModule(config)
+    data_module = BeavertailsSafeModule(config)
     data_module.setup_dataset()
     train_dataloader = data_module.train_dataloader()
     for batch in train_dataloader:

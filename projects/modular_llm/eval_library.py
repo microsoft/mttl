@@ -39,7 +39,12 @@ from mttl.datamodule.adv_bench_data_module import (
     AdvBenchDataModule,
     AdvBenchDataModuleConfig,
 )
+
 from mttl.evaluators.asr_evaluator import ASREvaluator
+from mttl.datamodule.beavertails_data_module import (
+    BeavertailsSafeDataModuleConfig,
+    BeavertailsSafeModule,
+)
 
 
 def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
@@ -403,6 +408,18 @@ def run_eval(args: EvaluationConfig):
         if wandb.run is not None:
             if adv_bench is not None:
                 wandb.log({f"downstream/test_adv-bench": adv_bench})
+        return
+    elif args.pipeline_eval_tasks == "beavertails_safe":
+        config = BeavertailsSafeDataModuleConfig(model=base_model)
+        dm_for_gen = BeavertailsSafeModule(config, for_generation=True)
+        asr_evaluator = ASREvaluator(
+            datamodule=dm_for_gen,
+        )
+        asr = asr_evaluator.evaluate(model, split="test", verbose=False)
+        logger.info(f"ASR: {asr}")
+        if wandb.run is not None:
+            if asr is not None:
+                wandb.log({f"downstream/test_asr": asr})
         return
     else:
         if args.pipeline_eval_tasks == "all":
