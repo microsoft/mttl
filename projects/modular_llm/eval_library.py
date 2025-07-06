@@ -265,7 +265,9 @@ def run_eval(args: EvaluationConfig):
             lr=1e-5,
             task_vector_checkpoint=f"{args.library_id}/task_vectors.pt",
         )
-        task_merged_vectors = WudiMergeAfter(cfg).transform(library)
+        task_merged_vectors = WudiMergeAfter(cfg).transform(
+            library, recompute=args.recompute_prototypes
+        )
         model.task_vector_apply(task_merged_vectors, expert_scaling=args.expert_scaling)
     elif args.merge_or_route == "uniform_lora_after_op":
         # Here we merge the LoRA experts after the outer product we cannot really do it
@@ -341,7 +343,15 @@ def run_eval(args: EvaluationConfig):
     if args.pipeline_eval_tasks in [
         "in_distribution",
     ]:
+
         tasks = [expert.expert_task_name for expert in library.data.values()]
+        tasks = [
+            "requests_with_safety_concerns",
+            "humanizing_requests",
+            "incomplete_requests",
+            "unsupported_requests",
+            "indeterminate_requests",
+        ]
         # sort tasks by name
         tasks = sorted(tasks)
         if tasks[0] is None:

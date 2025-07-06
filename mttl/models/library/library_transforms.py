@@ -304,7 +304,7 @@ class WudiMergeAfter(LibraryTransform):
         experts = [library[name] for name in expert_names]
         logger.info("Merging {} experts using WuDi merge after".format(len(experts)))
 
-        if isfile(self.config.task_vector_checkpoint):
+        if isfile(self.config.task_vector_checkpoint) and not recompute:
             logger.info(
                 f"Loading task vectors from {self.config.task_vector_checkpoint}"
             )
