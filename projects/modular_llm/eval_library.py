@@ -45,6 +45,7 @@ from mttl.datamodule.beavertails_data_module import (
     BeavertailsSafeDataModuleConfig,
     BeavertailsSafeModule,
 )
+from mttl.datamodule.xstest_data_module import XSTestDataModule, XSTestDataModuleConfig
 
 
 def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
@@ -412,6 +413,18 @@ def run_eval(args: EvaluationConfig):
     elif args.pipeline_eval_tasks == "beavertails_safe":
         config = BeavertailsSafeDataModuleConfig(model=base_model)
         dm_for_gen = BeavertailsSafeModule(config, for_generation=True)
+        asr_evaluator = ASREvaluator(
+            datamodule=dm_for_gen,
+        )
+        asr = asr_evaluator.evaluate(model, split="test", verbose=False)
+        logger.info(f"ASR: {asr}")
+        if wandb.run is not None:
+            if asr is not None:
+                wandb.log({f"downstream/test_asr": asr})
+        return
+    elif args.pipeline_eval_tasks == "xstest_safe":
+        config = XSTestDataModuleConfig(model=base_model, is_safe=True)
+        dm_for_gen = XSTestDataModule(config, for_generation=True)
         asr_evaluator = ASREvaluator(
             datamodule=dm_for_gen,
         )
