@@ -8,7 +8,7 @@ class ProgressCallback(cb.TQDMProgressBar):
     @property
     def main_progress_bar(self):
         # fixes pl bug
-        return self._main_progress_bar
+        return None
 
     @main_progress_bar.setter
     def main_progress_bar(self, bar) -> None:
@@ -30,7 +30,6 @@ class ProgressCallback(cb.TQDMProgressBar):
         """Override this to customize the tqdm bar for training."""
         bar = Tqdm(
             desc="Training",
-            initial=self.train_batch_idx,
             position=(2 * self.process_position),
             disable=self.is_disabled,
             leave=True,
@@ -44,7 +43,6 @@ class ProgressCallback(cb.TQDMProgressBar):
         """Override this to customize the tqdm bar for predicting."""
         bar = Tqdm(
             desc="Predicting",
-            initial=self.train_batch_idx,
             position=(2 * self.process_position),
             disable=self.is_disabled,
             leave=True,

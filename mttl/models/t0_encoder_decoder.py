@@ -31,7 +31,9 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         self.config = config = self.hparams
         self.tokenizer = kwargs["tokenizer"]
 
-        self.model = AutoModelForSeq2SeqLM.from_pretrained(config.model, cache_dir="tmp/hf-cache")
+        self.model = AutoModelForSeq2SeqLM.from_pretrained(
+            config.model, cache_dir="tmp/hf-cache"
+        )
         # free up local space after loading in memory
         # os.system("rm -rf tmp/hf-cache")
         # os.system("df")
@@ -46,7 +48,8 @@ class T0EncoderDecoder(EfficientCheckpointModule):
         self.best_val_result = None
         self.test_results = []
         self.loss_plugins = nn.ModuleDict({})
-
+        self.test_predictions = []
+        self.val_predictions = []
         print(self.model.encoder.block[0])
 
     def add_loss_plugin(self, plugin):
@@ -396,12 +399,18 @@ class T0EncoderDecoder(EfficientCheckpointModule):
 
     def validation_step(self, batch, batch_idx):
         if "answer_choices_ids" in batch:
-            return self.inference_step(batch)
+            outputs = self.inference_step(batch)
+            self.val_predictions.append(outputs)
+            return outputs
         else:
-            return self.training_step(batch, batch_idx, split="val"), batch["task_ids"]
+            outputs = self.training_step(batch, batch_idx, split="val")
+            self.val_predictions.append(outputs)
+            return outputs
 
     def test_step(self, batch, batch_idx):
-        return self.inference_step(batch)
+        outputs = self.inference_step(batch)
+        self.test_predictions.append(outputs)
+        return outputs
 
     def inference_epoch_end(self, outputs, split="val"):
         # exchange outputs between processes
@@ -476,7 +485,8 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             metrics = {}
         return metrics
 
-    def validation_epoch_end(self, outputs):
+    def on_validation_epoch_end(self):
+        outputs = self.val_predictions
         try:
             # differentiate between fine-tuning phase / zero-shot phase and
             # validation phase during training. this will raise because
@@ -498,8 +508,8 @@ class T0EncoderDecoder(EfficientCheckpointModule):
                     )
                 f.write(json.dumps(task_losses) + "\n")
 
-    def test_epoch_end(self, outputs):
-        return self.inference_epoch_end(outputs, split="test")
+    def on_test_epoch_end(self):
+        return self.inference_epoch_end(self.test_predictions, split="test")
 
     def configure_optimizers(self):
         config = self.config
@@ -538,5 +548,5 @@ class T0EncoderDecoder(EfficientCheckpointModule):
             },
         }
 
-    def on_before_optimizer_step(self, optimizer, optimizer_idx):
-        pass
+    # def on_before_optimizer_step(self, optimizer, optimizer_idx):
+    #     pass

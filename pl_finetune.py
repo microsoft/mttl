@@ -172,15 +172,14 @@ def finetune(args, use_mlf=True, do_zs=True):
         if mlf_logger and use_mlf:
             loggers.append(mlf_logger)
 
-        loggers.append(pl.loggers.CSVLogger(
-            save_dir=args.output_dir, name="csv_metrics"
-        ))
+        loggers.append(
+            pl.loggers.CSVLogger(save_dir=args.output_dir, name="csv_metrics")
+        )
 
         if args.finetune_skip_es:
             check_val_every_n_epoch = 10000
         else:
-            check_val_every_n_epoch = 10 if args.dataset in ["ni", "xfit"] else 50 
-
+            check_val_every_n_epoch = 10 if args.dataset in ["ni", "xfit"] else 4
         trainer = Trainer(
             enable_checkpointing=not args.finetune_skip_es,
             devices=1,
@@ -196,9 +195,11 @@ def finetune(args, use_mlf=True, do_zs=True):
             strategy=None if not args.compute_strategy else args.compute_strategy,
             limit_val_batches=1.0,
             limit_train_batches=1.0,
-            precision=int(args.precision)
-            if args.precision in ["16", "32"]
-            else args.precision,
+            precision=(
+                int(args.precision)
+                if args.precision in ["16", "32"]
+                else args.precision
+            ),
             callbacks=callbacks,
             accumulate_grad_batches=args.gradient_accumulation_steps,
         )
@@ -213,7 +214,7 @@ def finetune(args, use_mlf=True, do_zs=True):
             trainer.validate(module, dm, ckpt_path=ckpt_path)
         else:
             ckpt_path = "best"
-        trainer.test(module, dm, ckpt_path=ckpt_path) # change by zhan 
+        trainer.test(module, dm, ckpt_path=ckpt_path)  # change by zhan
 
         results = [module.best_val_result] + module.test_results
         return results

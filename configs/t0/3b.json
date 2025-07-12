@@ -1,4 +1,4 @@
 {
     "model": "bigscience/T0_3B",
-    "compute_strategy": "ddp"
+    "compute_strategy": "auto"
 }

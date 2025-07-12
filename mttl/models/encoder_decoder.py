@@ -8,7 +8,11 @@ from transformers import AutoModelForSeq2SeqLM
 from mttl.models.get_optimizer import get_optimizer
 from mttl.models.get_scheduler import get_scheduler
 from mttl.models.modify_model import modify_transformer
-from mttl.models.utils import EfficientCheckpointModule, RoutingInfo, get_global_batch_size
+from mttl.models.utils import (
+    EfficientCheckpointModule,
+    RoutingInfo,
+    get_global_batch_size,
+)
 from mttl.utils import freeze_embeds, label_smoothed_nll_loss
 
 
@@ -23,8 +27,10 @@ class EncoderDecoder(EfficientCheckpointModule):
         self.tokenizer = kwargs["tokenizer"]
         self.pad_token_id = self.tokenizer.pad_token_id
 
-        if kwargs.get('model_object') is None:
-            self.model = AutoModelForSeq2SeqLM.from_pretrained(self.args.model, cache_dir="/tmp/hf-cache")
+        if kwargs.get("model_object") is None:
+            self.model = AutoModelForSeq2SeqLM.from_pretrained(
+                self.args.model, cache_dir="/tmp/hf-cache"
+            )
             # free-up temporary space
             os.system("/bin/rm -rf /tmp/hf-cache")
             os.system("df")
@@ -53,7 +59,7 @@ class EncoderDecoder(EfficientCheckpointModule):
                 print("Freezing embeddings")
                 freeze_embeds(self.model)
         else:
-            self.model = kwargs.get('model_object')
+            self.model = kwargs.get("model_object")
         self.loss_plugins = nn.ModuleDict({})
 
         self.test_results = []
@@ -65,7 +71,7 @@ class EncoderDecoder(EfficientCheckpointModule):
         else:
             self.loss_plugins = nn.ModuleDict({plugin.name: plugin})
 
-    def teacher_force_step(self, batch, reduction='mean'):
+    def teacher_force_step(self, batch, reduction="mean"):
         input_ids, target_ids = batch["input_ids"], batch["target_ids"]
 
         self.model.task_id_container["routing_infos"] = RoutingInfo.from_batch(batch)
@@ -82,7 +88,7 @@ class EncoderDecoder(EfficientCheckpointModule):
             target_ids,
             epsilon=0.1,
             ignore_index=self.pad_token_id,
-            reduction=reduction
+            reduction=reduction,
         )
         return loss
 
@@ -102,17 +108,19 @@ class EncoderDecoder(EfficientCheckpointModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss = self.teacher_force_step(batch, reduction='none')
+        loss = self.teacher_force_step(batch, reduction="none")
         mean_loss = loss.sum() / loss.size(0)
         self.log("val/loss", mean_loss, on_epoch=True, prog_bar=True)
-        return loss, batch['task_ids']
+        return loss, batch["task_ids"]
 
     def validation_epoch_end(self, outputs):
         losses = torch.cat([out[0].sum(-1) for out in outputs], 0)
         task_ids = torch.cat([out[1] for out in outputs], 0)
 
         # compute the loss per task id
-        with open(os.path.join(self.args.output_dir, "val_loss_by_task.txt"), "a+") as f:
+        with open(
+            os.path.join(self.args.output_dir, "val_loss_by_task.txt"), "a+"
+        ) as f:
             task_losses = {}
             for task_id in torch.unique(task_ids):
                 task_losses[task_id.item()] = losses[task_ids == task_id].mean().item()
@@ -125,7 +133,9 @@ class EncoderDecoder(EfficientCheckpointModule):
         optimizer, self.trainable_param_names = get_optimizer(
             self, args, no_decay=["bias", "LayerNorm.weight"]
         )
-        global_bs = get_global_batch_size(args.train_batch_size, args.gradient_accumulation_steps)
+        global_bs = get_global_batch_size(
+            args.train_batch_size, args.gradient_accumulation_steps
+        )
 
         if args.total_steps == -1:
             args.total_steps = (
@@ -149,7 +159,7 @@ class EncoderDecoder(EfficientCheckpointModule):
 
 class Finetuner(EncoderDecoder):
     def add_missing_args(self, args):
-        for (name, value) in args.items():
+        for name, value in args.items():
             if name not in self.hparams or self.hparams[name] in ["", None]:
                 self.hparams[name] = value
                 setattr(self.args, name, value)
@@ -230,10 +240,14 @@ class Finetuner(EncoderDecoder):
         return self.inference_step(batch)
 
     def validation_epoch_end(self, outputs):
-        return self.inference_end(outputs, self.trainer.datamodule.dataset_reader, "val")
+        return self.inference_end(
+            outputs, self.trainer.datamodule.dataset_reader, "val"
+        )
 
-    def test_epoch_end(self, outputs):
-        return self.inference_end(outputs, self.trainer.datamodule.dataset_reader, "test")
+    def on_test_epoch_end(self, outputs):
+        return self.inference_end(
+            outputs, self.trainer.datamodule.dataset_reader, "test"
+        )
 
     def training_epoch_end(self, losses):
         avg_loss = (sum([x["loss"] for x in losses]) / len(losses)).item()
