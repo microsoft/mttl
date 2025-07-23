@@ -212,6 +212,151 @@ class SVDEmbeddingTransform(LibraryTransform):
 
 
 @dataclass
+class TiesMergeAfterConfig(LibraryTransformConfig):
+    mask_rate: float = 0.8
+
+
+@LibraryTransform.register("ties_merge_after", TiesMergeAfterConfig)
+class TiesMergeAfter(LibraryTransform):
+    """
+    implement the ties merge after in the paper
+    """
+
+    def __init__(self, config: TiesMergeAfterConfig = None):
+        super().__init__(config or TiesMergeAfterConfig())
+
+    def mask_smallest_magnitude_param_values(
+        self, param_tensor: torch.Tensor, param_value_mask_rate: float = 0.8
+    ):
+        """
+        Mask the smallest-magnitude parameter values (set to zeros) based on parameter value mask rate.
+        :param param_tensor: Tensor, parameter tensor to mask
+        :param param_value_mask_rate: float, mask rate of the smallest-magnitude parameter values
+        :return:
+        """
+        # Convert to float32 to support kthvalue operation
+        original_dtype = param_tensor.dtype
+        param_tensor = param_tensor.float()
+
+        # Calculate the number of parameters to mask
+        num_mask_params = int(param_tensor.numel() * param_value_mask_rate)
+        # Flatten the parameter for kthvalue calculation
+        flattened = param_tensor.reshape(-1)
+
+        # Calculate the threshold
+        kth_value = flattened.abs().kthvalue(k=num_mask_params).values
+
+        # Create mask and apply
+        mask = param_tensor.abs() >= kth_value
+
+        # Apply mask and convert back to original dtype
+        return (param_tensor * mask).to(original_dtype)
+
+    def get_param_signs(self, param_tensors: list):
+        """
+        get the signs for each parameter, computed over individual models
+        :param param_tensors: list of Tensor, parameters from different models
+        :return:
+        """
+        # Calculate the sum of parameter signs
+        param_sum = sum(param_tensors)
+        param_signs = torch.sign(param_sum)
+
+        # Handle the case where sign is zero
+        if (param_signs == 0).any():
+            # Calculate majority sign
+            majority_sign = torch.sign(param_signs.sum())
+            param_signs[param_signs == 0] = majority_sign
+
+        return param_signs
+
+    def disjoint_merge(self, param_tensors: list, param_signs: torch.Tensor):
+        """
+        disjoint merge for a single parameter across models
+        :param param_tensors: list of Tensor, parameters from different models
+        :param param_signs: Tensor, the signs of parameters
+        :return:
+        """
+        preserved_params = []
+        for param in param_tensors:
+            # Create mask to preserve elements with the same sign as param_signs
+            preserve_mask = ((param_signs > 0) & (param > 0)) | (
+                (param_signs < 0) & (param < 0)
+            )
+            preserved_params.append(param * preserve_mask)
+
+        # Calculate how many models preserve each position
+        num_preserved = sum([(p != 0).float() for p in preserved_params])
+
+        # Calculate the mean, avoid division by zero
+        merged_param = sum(preserved_params) / torch.clamp(num_preserved, min=1.0)
+
+        return merged_param
+
+    def _get_task_vectors(self, expert):
+        """
+        get the incremental weights for each layer, LoRA A outproduct LoRA B
+        """
+        task_vectors = {}
+        for key in expert.expert_weights.keys():
+            base_layer_name = key.split(".lora_")[
+                0
+            ]  # Get base layer name by removing .lora_a or .lora_b
+            if base_layer_name not in task_vectors:
+                task_vectors[base_layer_name] = None
+
+        for layer in task_vectors.keys():
+            lora_a = expert.expert_weights[f"{layer}.lora_a"]
+            lora_b = expert.expert_weights[f"{layer}.lora_b"]
+            task_vectors[layer] = lora_a.data @ lora_b.data
+
+        return task_vectors
+
+    def transform(self, library, persist=True, recompute=False):
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+
+        expert_names = list(library.keys())
+        experts = [library[name] for name in expert_names]
+
+        layer_names = [
+            name.split(".lora_")[0] for name in experts[0].expert_weights.keys()
+        ]
+        layer_names = sorted(list(set(layer_names)))
+
+        task_vectors_experts = {}
+        for expert in experts:
+            task_vectors = self._get_task_vectors(expert)
+            task_vectors_experts[expert.name] = task_vectors
+
+        task_merged_vectors = {}
+        for layer in layer_names:
+            task_vectors = [
+                task_vectors_experts[expert.name][layer] for expert in experts
+            ]
+
+            logger.info(f"Layer {layer} has {len(task_vectors)} task vectors")
+            ## apply mask to each parameter
+            logger.info(f"Applying mask to layer {layer}")
+            masked_task_vectors = [
+                self.mask_smallest_magnitude_param_values(
+                    task_vector, self.config.mask_rate
+                )
+                for task_vector in task_vectors
+            ]
+            ## calculate signs
+            logger.info(f"Calculating signs for layer {layer}")
+            param_signs = self.get_param_signs(masked_task_vectors)
+            ## Apply disjoin merge strategy
+            logger.info(f"Applying disjoint merge strategy for layer {layer}")
+            merged_delta = self.disjoint_merge(masked_task_vectors, param_signs)
+            ## Combine merged delta with original model parameter
+            task_merged_vectors[layer] = merged_delta
+
+        return task_merged_vectors
+
+
+@dataclass
 class WudiMergeConfig(LibraryTransformConfig):
     iter: int = 300
     lr: float = 1e-5
