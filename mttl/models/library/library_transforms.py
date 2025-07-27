@@ -355,6 +355,104 @@ class TiesMergeAfter(LibraryTransform):
 
         return task_merged_vectors
 
+@dataclass
+class TensorDecompositionDirectionConfig(LibraryTransformConfig):
+    strategy: str = "cp"  # or tucker
+    cp_rank: int = 1
+    tucker_rank: int = "1,1,1"
+
+
+class TensorDecompositionCommonDirection(LibraryTransform):
+    """
+    Compute the common direction of all the experts in the library
+
+    """
+
+    def __init__(self, config: TensorDecompositionDirectionConfig = None):
+        super().__init__(config or TensorDecompositionDirectionConfig())
+
+    @torch.no_grad()
+    def transform(self, library) -> Expert:
+        import tensorly as tl
+
+        tl.set_backend("pytorch")
+        from tensorly.decomposition import parafac
+        from tensorly.decomposition import tucker
+
+        expert_names = list(library.keys())
+        experts = [library[name] for name in expert_names]
+
+        logger.info("Computing common direction for {} experts".format(len(experts)))
+
+        base_expert = copy.deepcopy(experts[0])
+        base_expert.name = "td_expert"  # tensor decomposition expert
+
+        layer_names = base_expert.expert_weights.keys()
+
+        for layer_name in tqdm(layer_names):
+            concat_weights = []
+            for expert_name in expert_names:
+                # get the weights for each expert
+                expert_weights = library.get_expert(expert_name).expert_weights[
+                    layer_name
+                ]
+                concat_weights.append(expert_weights)
+
+            try:
+                # concat
+                third_order_tensor = torch.stack(concat_weights).to(
+                    "cuda"
+                )  # [lib_num, input_dim, output_dim]
+                # conduct the tensor decomposition
+
+                if self.config.strategy == "cp":
+                    logger.info(
+                        f"Computing tensor decomposition for layer {layer_name} using cuda with rank {self.config.cp_rank}"
+                    )
+                    factors_cp = parafac(
+                        third_order_tensor,
+                        rank=self.config.cp_rank,
+                        init="svd",
+                        random_state=42,
+                    )
+                    cp_third_order_tensor = tl.cp_tensor.cp_to_tensor(factors_cp)
+                    expert_mean = cp_third_order_tensor.mean(0)
+                elif self.config.strategy == "tucker":
+                    tucker_rank = list(self.config.tucker_rank)
+                    logger.info(
+                        f"Computing tensor decomposition for layer {layer_name} using cuda with rank {self.config.tucker_rank}"
+                    )
+                    core, factors = tucker(third_order_tensor, rank=tucker_rank)
+                    tucker_third_order_tensor = tl.tucker_to_tensor((core, factors))
+                    expert_mean = tucker_third_order_tensor.mean(
+                        0
+                    )  # mean over the experts
+
+            except Exception as e:
+                logger.info(
+                    e,
+                    f"Computing tensor decomposition for layer {layer_name} using cpu with rank {self.config.cp_rank}",
+                )
+
+                third_order_tensor = torch.stack(concat_weights).to("cpu")
+                if self.config.strategy == "cp":
+                    factors_cp = parafac(
+                        third_order_tensor,
+                        rank=self.config.cp_rank,
+                        init="svd",
+                        random_state=42,
+                    )
+                    cp_third_order_tensor = tl.cp_tensor.cp_to_tensor(factors_cp)
+                    expert_mean = cp_third_order_tensor.mean(0)
+                elif self.config.strategy == "tucker":
+                    tucker_rank = list(self.config.tucker_rank)
+                    core, factors = tucker(third_order_tensor, rank=tucker_rank)
+                    cp_third_order_tensor = tl.tucker_to_tensor((core, factors))
+                    expert_mean = cp_third_order_tensor.mean(0)
+
+            base_expert.expert_weights[layer_name] = expert_mean
+        return base_expert
+
 
 @dataclass
 class WudiMergeConfig(LibraryTransformConfig):
@@ -668,20 +766,80 @@ class WuDiMerge2(WudiMergeAfter):
             pbar.set_postfix({"loss": f"{loss.item():.4f}"})
         return merging_vector
 
+@dataclass
+class ISOMergeConfig(LibraryTransformConfig):
+    pass
+
+@LibraryTransform.register("iso_merge", ISOMergeConfig)
+class ISOMerge(LibraryTransform):
+    def __init__(self, config: ISOMergeConfig = None):
+        super().__init__(config or ISOMergeConfig())
+
+    def _get_task_vectors(self, expert):
+        task_vectors = {}
+        for key in expert.expert_weights.keys():
+            base_layer_name = key.split(".lora_")[
+                0
+            ]  # Get base layer name by removing .lora_a or .lora_b
+            if base_layer_name not in task_vectors:
+                task_vectors[base_layer_name] = None
+        for layer in task_vectors.keys():
+            lora_a = expert.expert_weights[f"{layer}.lora_a"]
+            lora_b = expert.expert_weights[f"{layer}.lora_b"]
+            task_vectors[layer] = lora_a.data @ lora_b.data
+        return task_vectors
+
+    def transform(self, library) -> Expert:
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+        expert_names = list(library.keys())
+        experts = [library[name] for name in expert_names]
+        logger.info("Merging {} experts using ISOMerge".format(len(experts)))
+        one_expert = experts[0]
+        layer_names = [
+            name.split(".lora_")[0] for name in one_expert.expert_weights.keys()
+        ]
+        layer_names = sorted(list(set(layer_names)))
+
+        task_vectors_experts = {}
+        for expert in experts:
+            task_vectors = self._get_task_vectors(expert)
+            task_vectors_experts[expert.name] = task_vectors
+
+        task_merged_vectors = {}
+        for layer in layer_names:
+            task_vectors = [
+                task_vectors_experts[expert.name][layer] for expert in experts
+            ]
+            logger.info(f"layer {layer} has {len(task_vectors)} task vectors")
+            original_dtype = task_vectors[0].dtype
+            param_value = sum(task_vectors)
+            u, s, v = torch.linalg.svd(param_value, full_matrices=False)
+            # Compute the average of all singular values (a scalar)
+            avg_singular_value = torch.mean(s)
+            # Create a diagonal matrix where all diagonal elements are this average value
+            avg_s = torch.diag(torch.full_like(s, avg_singular_value))
+
+            merged_param = torch.linalg.multi_dot([
+                u, avg_s, v
+            ]).to(original_dtype)
+            task_merged_vectors[layer] = merged_param
+
+        return task_merged_vectors
 
 @dataclass
-class SVDMergeConfig(LibraryTransformConfig):
-    path: str = "svd_ingredients.pt"
+class TSVMergeConfig(LibraryTransformConfig):
+    path: str = "tsv_ingredients.pt"
 
 
-@LibraryTransform.register("svd_merge", SVDMergeConfig)
-class SVDMerge(LibraryTransform):
+@LibraryTransform.register("tsv_merge", TSVMergeConfig)
+class TSVMerge(LibraryTransform):
     """
     merge the task vectors using svd
     """
 
-    def __init__(self, config: SVDMergeConfig = None):
-        super().__init__(config or SVDMergeConfig())
+    def __init__(self, config: TSVMergeConfig = None):
+        super().__init__(config or TSVMergeConfig())
 
     def _get_task_vectors(self, expert, layer):
 
@@ -701,11 +859,10 @@ class SVDMerge(LibraryTransform):
 
         # Process each task vector
         for i, vec in tqdm(
-            enumerate(task_vectors), desc=f"SVD merging compute for {layer}"
+            enumerate(task_vectors), desc=f"TSV merging compute for {layer}"
         ):
             # Move parameter to GPU for computation
             vec = vec.to(device).float()
-
             # Compute SVD
             u, s, v = torch.linalg.svd(vec, full_matrices=False)
 
@@ -740,7 +897,7 @@ class SVDMerge(LibraryTransform):
         return merged_param
 
     @torch.no_grad()
-    def transform(self, library) -> dict:
+    def transform(self, library, persist=True, recompute=False) -> dict:
         # empty the cache
         torch.cuda.empty_cache()
         if type(library) == str:
@@ -756,9 +913,10 @@ class SVDMerge(LibraryTransform):
         ]
         layer_names = sorted(list(set(layer_names)))
         task_merged_vectors = {}
-        if os.path.exists(self.config.path):
+        if os.path.exists(self.config.path) and not recompute:
             logger.info(f"load task vectors from {self.config.path}")
             task_merged_vectors = torch.load(self.config.path)
+            return task_merged_vectors
         else:
             for layer in layer_names:
                 logger.info(f"compute task vector for {layer}")
@@ -775,10 +933,10 @@ class SVDMerge(LibraryTransform):
                     else torch.device("cpu")
                 )
                 original_dtype = task_vectors[0].dtype
-
                 task_merged_vectors[layer] = self._merge_task_vectors(
                     task_vectors, layer, device, original_dtype, sv_reduction
                 )
+            torch.save(task_merged_vectors, self.config.path)
 
         return task_merged_vectors
 
@@ -914,6 +1072,58 @@ class WeightedLinearMerge(LibraryTransform):
         base_expert.expert_config.tie_params = None
 
         return base_expert
+
+@dataclass
+class UniformMergeAfterConfig(WeightedLinearMergeConfig):
+    pass
+
+@LibraryTransform.register("uniform_merge_after", UniformMergeAfterConfig)
+class UniformMergeAfter(LibraryTransform):
+    def __init__(self, config: UniformMergeAfterConfig = None):
+        super().__init__(config or UniformMergeAfterConfig())
+
+    def _get_task_vectors(self, expert):
+        task_vectors = {}
+        for key in expert.expert_weights.keys():
+            base_layer_name = key.split(".lora_")[
+                0
+            ]  # Get base layer name by removing .lora_a or .lora_b
+            if base_layer_name not in task_vectors:
+                task_vectors[base_layer_name] = None
+
+        for layer in task_vectors.keys():
+            lora_a = expert.expert_weights[f"{layer}.lora_a"]
+            lora_b = expert.expert_weights[f"{layer}.lora_b"]
+            task_vectors[layer] = lora_a.data @ lora_b.data
+
+        return task_vectors
+
+    def transform(self, library) -> Expert:
+        
+
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+
+        expert_names = list(library.keys())
+        experts = [library[name] for name in expert_names]
+
+        layer_names = [
+            name.split(".lora_")[0] for name in experts[0].expert_weights.keys()
+        ]
+        layer_names = sorted(list(set(layer_names)))
+
+        task_vectors_experts = {}
+        for expert in experts:
+            task_vectors = self._get_task_vectors(expert)
+            task_vectors_experts[expert.name] = task_vectors
+
+        task_merged_vectors = {}
+        for layer in layer_names:
+            task_vectors = [
+                task_vectors_experts[expert.name][layer] for expert in experts
+            ]
+            task_merged_vectors[layer] = sum(task_vectors) / len(experts)
+        return task_merged_vectors
 
 
 @dataclass

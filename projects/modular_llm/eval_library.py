@@ -33,10 +33,14 @@ from mttl.models.library.library_transforms import (
     WuDiMerge2Config,
     KnotMerge,
     KnotMergeConfig,
-    SVDMerge,
-    SVDMergeConfig,
+    TSVMerge,
+    TSVMergeConfig,
     TiesMergeAfter,
     TiesMergeAfterConfig,
+    UniformMergeAfter,
+    UniformMergeAfterConfig,
+    ISOMerge,
+    ISOMergeConfig,
 )
 from mttl.models.lightning.callbacks import LossCallback
 from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
@@ -244,6 +248,14 @@ def run_eval(args: EvaluationConfig):
                 **loading_kwargs,
             )
             model.add_expert_instance(expert, is_default=True)
+    elif args.merge_or_route == "uniform_merge_after":
+        cfg = UniformMergeAfterConfig()
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        task_merged_vectors = UniformMergeAfter(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=1)
 
     elif args.merge_or_route in ["ties", "wudi"]:
         if args.merge_or_route == "ties":
@@ -262,21 +274,30 @@ def run_eval(args: EvaluationConfig):
                 **loading_kwargs,
             )
             model.task_vector_apply(task_merged_vectors)
-    elif args.merge_or_route == "svd_merge":
+    elif args.merge_or_route == "tsv_merge":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
             **loading_kwargs,
         )
-        cfg = SVDMergeConfig(path=f"{args.library_id}/svd_ingredients.pt")
-        task_merged_vectors = SVDMerge(cfg).transform(library)
+        cfg = TSVMergeConfig(path=f"{args.library_id}/tsv_ingredients.pt")
+        task_merged_vectors = TSVMerge(cfg).transform(library, recompute=False)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=0.25)
+    elif args.merge_or_route == "iso_merge":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = ISOMergeConfig()
+        task_merged_vectors = ISOMerge(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=1.0)
     elif args.merge_or_route == "ties_merge_after":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
             **loading_kwargs,
         )
-        cfg = TiesMergeAfterConfig()
+        cfg = TiesMergeAfterConfig(mask_rate=0.8)
         task_merged_vectors = TiesMergeAfter(cfg).transform(library)
-        model.task_vector_apply(task_merged_vectors)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=0.5)
     elif args.merge_or_route == "wudi_merge_after":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
