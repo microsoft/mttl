@@ -356,20 +356,21 @@ class TiesMergeAfter(LibraryTransform):
         return task_merged_vectors
 
 @dataclass
-class TensorDecompositionDirectionConfig(LibraryTransformConfig):
+class CPMergeConfig(LibraryTransformConfig):
     strategy: str = "cp"  # or tucker
     cp_rank: int = 1
     tucker_rank: int = "1,1,1"
 
 
-class TensorDecompositionCommonDirection(LibraryTransform):
+@LibraryTransform.register("cp_merge", CPMergeConfig)
+class CPMerge(LibraryTransform):
     """
     Compute the common direction of all the experts in the library
 
     """
 
-    def __init__(self, config: TensorDecompositionDirectionConfig = None):
-        super().__init__(config or TensorDecompositionDirectionConfig())
+    def __init__(self, config: CPMergeConfig = None):
+        super().__init__(config or CPMergeConfig())
 
     @torch.no_grad()
     def transform(self, library) -> Expert:
@@ -453,6 +454,81 @@ class TensorDecompositionCommonDirection(LibraryTransform):
             base_expert.expert_weights[layer_name] = expert_mean
         return base_expert
 
+@dataclass
+class CPMergeAfterConfig(LibraryTransformConfig):
+    cp_rank: int = 4
+
+@LibraryTransform.register("cp_merge_after", CPMergeAfterConfig)
+class CPMergeAfter(LibraryTransform):
+    def __init__(self, config: CPMergeAfterConfig = None):
+        super().__init__(config or CPMergeAfterConfig())
+
+    def _get_task_vectors(self, expert):
+        task_vectors = {}
+        for key in expert.expert_weights.keys():
+            base_layer_name = key.split(".lora_")[
+                0
+            ]  # Get base layer name by removing .lora_a or .lora_b
+            if base_layer_name not in task_vectors:
+                task_vectors[base_layer_name] = None    
+        for layer in task_vectors.keys():
+            lora_a = expert.expert_weights[f"{layer}.lora_a"]
+            lora_b = expert.expert_weights[f"{layer}.lora_b"]
+            task_vectors[layer] = lora_a.data @ lora_b.data
+
+        return task_vectors
+    @torch.no_grad()
+    def transform(self, library) -> Expert:
+        import tensorly as tl
+
+        tl.set_backend("pytorch")
+        from tensorly.decomposition import parafac
+
+        expert_names = list(library.keys())
+        experts = [library[name] for name in expert_names]
+        logger.info("Merging {} experts using CPMergeAfter".format(len(experts)))
+        one_expert = experts[0]
+        layer_names = [
+            name.split(".lora_")[0] for name in one_expert.expert_weights.keys()
+        ]
+        layer_names = sorted(list(set(layer_names)))
+
+        task_vectors_experts = {}
+        for expert in experts:
+            task_vectors = self._get_task_vectors(expert)
+            task_vectors_experts[expert.name] = task_vectors
+        task_merged_vectors = {}
+        for layer in layer_names:
+            task_vectors = [
+                task_vectors_experts[expert.name][layer] for expert in experts
+            ]
+            logger.info(f"Layer {layer} merged with CP decomposition")
+            try:
+                task_vectors_stack = torch.stack(task_vectors, dim=0).to("cuda")
+                factors_cp = parafac(
+                            task_vectors_stack,
+                            rank=self.config.cp_rank,
+                            init="random",
+                            random_state=42,
+                        )
+                # cp_third_order_tensor = tl.cp_tensor.cp_to_tensor(factors_cp)
+                # merged_param = cp_third_order_tensor.mean(0)
+                merged_param = factors_cp.factors[1] @ factors_cp.factors[2].T
+                task_merged_vectors[layer] = merged_param
+            except Exception as e:
+                logger.info(e)               
+                task_vectors_stack = torch.stack(task_vectors, dim=0).to("cpu")
+                factors_cp = parafac(
+                    task_vectors_stack,
+                    rank=self.config.cp_rank,
+                    init="random",
+                    random_state=42,
+                )
+                cp_third_order_tensor = tl.cp_tensor.cp_to_tensor(factors_cp)
+                merged_param = cp_third_order_tensor.mean(0)
+                task_merged_vectors[layer] = merged_param
+        logger.info(f"Merged {len(task_merged_vectors)} layers")
+        return task_merged_vectors
 
 @dataclass
 class WudiMergeConfig(LibraryTransformConfig):
@@ -821,7 +897,7 @@ class ISOMerge(LibraryTransform):
             avg_s = torch.diag(torch.full_like(s, avg_singular_value))
 
             merged_param = torch.linalg.multi_dot([
-                u, avg_s, v
+                u,avg_s, v
             ]).to(original_dtype)
             task_merged_vectors[layer] = merged_param
 
