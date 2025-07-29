@@ -4,7 +4,7 @@ from functools import partial
 
 import numpy
 from datasets import Dataset, concatenate_datasets
-
+from tqdm import tqdm
 from mttl.datamodule.base import DataModule, DatasetConfig
 from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from mttl.models.library.dataset_library import DatasetLibrary
@@ -133,6 +133,10 @@ class CoconotConfig(DatasetConfig):
 class CoconotModule(DataModule):
     def setup_dataset(self):
         self.dataset = load_dataset(self.config.dataset)
+
+        # filter out the examples with source length == 0
+        self.dataset = self.dataset.filter(lambda x: len(x["prompt"]) > 0)
+
         self.dataset = self.dataset.rename_column("prompt", "source")
         self.dataset = self.dataset.rename_column("response", "target")
 
@@ -162,10 +166,12 @@ if __name__ == "__main__":
     config = CoconotConfig(
         dataset="zhan1993/coconot_experts_train",
         model="microsoft/Phi-3-mini-4k-instruct",
+        train_batch_size=1,
+        finetune_task_name="requests_with_safety_concerns",
     )
     data_module = CoconotModule(config)
     data_module.setup_dataset()
-    train_dataloader = data_module.train_dataloader()
-    for batch in train_dataloader:
+    count = 0
+    for batch in tqdm(data_module.train_dataloader()):
         print(batch)
-        break
+        breakpoint()
