@@ -41,6 +41,10 @@ from mttl.models.library.library_transforms import (
     UniformMergeAfterConfig,
     ISOMerge,
     ISOMergeConfig,
+    CPMerge,
+    CPMergeConfig,
+    CPMergeAfter,
+    CPMergeAfterConfig,
 )
 from mttl.models.lightning.callbacks import LossCallback
 from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
@@ -289,6 +293,22 @@ def run_eval(args: EvaluationConfig):
         )
         cfg = ISOMergeConfig()
         task_merged_vectors = ISOMerge(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=1.0)
+    elif args.merge_or_route == "cp_merge":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = CPMergeConfig()
+        task_merged_vectors = CPMerge(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=1.0)
+    elif args.merge_or_route == "cp_merge_after":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = CPMergeAfterConfig()
+        task_merged_vectors = CPMergeAfter(cfg).transform(library)
         model.task_vector_apply(task_merged_vectors, scaling_coefficient=1.0)
     elif args.merge_or_route == "ties_merge_after":
         model = MultiExpertModel(
