@@ -271,6 +271,7 @@ class DefaultCollator(PackedMixin):
                 padding=self.padding,
                 return_tensors=self.return_tensors,
                 truncation=True,
+                add_special_tokens=False,
             )
             tokenized_sources = self.tokenizer(
                 sources,
@@ -279,16 +280,21 @@ class DefaultCollator(PackedMixin):
                 return_tensors=self.return_tensors,
                 truncation=True,
                 pad_to_multiple_of=self.pad_to_multiple_of,
+                add_special_tokens=False,
             )
         else:
             tokenized_labels = self.tokenizer(
-                labels, padding="longest", return_tensors=self.return_tensors
+                labels,
+                padding="longest",
+                return_tensors=self.return_tensors,
+                add_special_tokens=False,
             )
             tokenized_sources = self.tokenizer(
                 sources,
                 padding="longest",
                 return_tensors=self.return_tensors,
                 pad_to_multiple_of=self.pad_to_multiple_of,
+                add_special_tokens=False,
             )
         label_mask = tokenized_labels["attention_mask"].bool()
         masked_labels = tokenized_labels["input_ids"].masked_fill(
@@ -326,6 +332,7 @@ class DefaultCollator(PackedMixin):
             return output_batch
 
         if self.max_input_length > 0:
+            # make sure we truncate sources...labels if needed
             if self.tokenizer.truncation_side == "left":
                 tokenized_labels = self.tokenizer(
                     labels,
@@ -333,6 +340,7 @@ class DefaultCollator(PackedMixin):
                     padding=self.padding,
                     return_tensors=self.return_tensors,
                     truncation=True,
+                    add_special_tokens=False,
                 )
             else:
                 tokenized_sources = self.tokenizer(
@@ -341,6 +349,7 @@ class DefaultCollator(PackedMixin):
                     padding=self.padding,
                     return_tensors=self.return_tensors,
                     truncation=True,
+                    add_special_tokens=False,
                 )
 
             tok_sources_plus_labels = self.tokenizer(
@@ -350,18 +359,21 @@ class DefaultCollator(PackedMixin):
                 return_tensors=self.return_tensors,
                 truncation=True,
                 pad_to_multiple_of=self.pad_to_multiple_of,
+                add_special_tokens=False,
             )
         else:
             tokenized_sources = self.tokenizer(
                 sources,
                 padding="longest",
                 return_tensors=self.return_tensors,
+                add_special_tokens=False,
             )
             tok_sources_plus_labels = self.tokenizer(
                 [i + t for i, t in zip(sources, labels)],
                 padding="longest",
                 return_tensors=self.return_tensors,
                 pad_to_multiple_of=self.pad_to_multiple_of,
+                add_special_tokens=False,
             )
 
         targets = tok_sources_plus_labels["input_ids"].clone()
@@ -954,7 +966,9 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
     from mttl.datamodule.alpaca_data_module import (
         AlpacaCodeDataModule,
         MathQaAlpacaCodeDataModule,
+        MathQallamaDataModule,
     )
+    from mttl.datamodule.math200k_data_module import Math200kDataModule
     from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
     from mttl.datamodule.mt_seq_to_seq_module import (
         FlanConfig,
@@ -1082,13 +1096,17 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
             **common_kwargs,
         )
         dm = MathQADataModule(config, for_generation=for_generation)
-    elif dataset == "gsm":
-        config = GsmDataConfig(
+    elif dataset == "mathqa_llama":
+        common_kwargs["train_on_inputs"] = True
+        config = DatasetConfig(
             **common_kwargs,
-            gsm_template=args.gsm_template,
         )
-        dm = GsmDataModule(config, for_generation=for_generation)
-
+        dm = MathQallamaDataModule(config, for_generation=for_generation)
+    elif dataset == "math200":
+        config = DatasetConfig(
+            **common_kwargs,
+        )
+        dm = Math200kDataModule(config, for_generation=for_generation)
     elif dataset == "alpaca_code":
         config = DatasetConfig(
             **common_kwargs,

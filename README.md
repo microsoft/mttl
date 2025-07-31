@@ -1,66 +1,49 @@
 [![Tests](https://github.com/microsoft/mttl/actions/workflows/tests.yml/badge.svg)](https://github.com/microsoft/mttl/actions/workflows/tests.yml)
 
-# MTTL - Multi-Task Transfer Learning
-
-MTTL is a repository focusing on building LLMs that focus on model reusability, model recombination, and parameter-efficient fine-tuning (PEFT) techniques, particularly in the context of few-shot and zero-shot learning.
-
-Check out our papers on ArXiv:
-
-:point_right: [Arrow + MBC](https://arxiv.org/abs/2405.11157) \
-:point_right: [MHR](https://arxiv.org/abs/2211.03831) \
-:point_right: [Polytropon](https://arxiv.org/abs/2202.13914)
-
-## Tutorial
-
-:point_right: Navigate [here](https://github.com/sordonia/pg_mbc_arrow_tutorial) for a quick tutorial on how to use MTTL to route and merge adapters with [Arrow](https://arxiv.org/abs/2405.11157) or [PhatGOOSE](https://arxiv.org/abs/2402.05859)! We also support different adapter merging methods and we welcome contributions!
-
-## About the papers
-
-:point_right: Towards Modular LLMs by Building and Reusing a Library of LoRAs (aka Arrow & MBC)
-
-For the code that accompanies the paper _Towards Modular LLMs by Building and Reusing a Library of LoRAs_, please refer to the [Expert Library README](projects/modular_llm/README.md). This contains details on training and evaluating experts with Arrow.
-
-:point_right: Multi-Head Adapter Routing for Cross-Task Generalization (aka MHR)
-
-For the code that accompanies the paper _Multi-Head Adapter Routing for Cross-Task Generalization_, please refer to [MHR-camera-ready](https://github.com/microsoft/mttl/tree/mhr-camera-ready).
+# LoRA Soup for GSM-8k 
 
 
-## Transparency Notes
+## train the math skill and code skill. 
 
-#### Intended uses
+For example, we train the code skill based on gptneo model 
 
-MTTL is intended for research use as described in the paper [Toward Modular LLMs by Building and Reusing a Library of LoRAs](https://arxiv.org/abs/2405.11157). MTTL performance in production environments has not been tested. Considerable testing and verification are needed before the concepts and code shared are used in production environments.
+```
+python train_experts.py -c configs/models/gptneo_125m.json -k dataset=alpaca_code_train_epochs=3 output_dir=debug_alpaca_code
+```
 
-#### Evaluations
 
-MTTL was evaluated on a selected set of standard NLP tasks, mostly on English data. Among these tasks are common-sense reasoning, question answering, and coding. The evaluation focused on zero-shot performance, supervised adaptation, and the effectiveness of different routing strategies and library constructions using models such as Phi-2 and Mistral. Complete details on evaluations can be found in the paper.
 
-#### Limitations
 
-MTTL is built on top of existing language models and LoRAs. MTTL is likely to inherit any biases, risks, or limitations of the constituent parts. For example, LLMs may inadvertently propagate biases present in their training data or produce harmful or inaccurate content. MTTL has been tested for English tasks and has not yet evaluated performance multilingual scenarios. Performance for multilingual or non-English tasks is not yet known. Since MTTL was evaluated on a selected set of standard NLP tasks, performance on tasks outside of evaluated tasks covered in the paper is not yet known
 
-#### Safe and responsible use
+## Evaluate the model on GSM
 
-Given that MTTL is used with LoRAs chosen or built by the user, it’s important for users to fully understand the behavior and safety of the LoRAs that they use. Users should verify both the accuracy and the safety for their specific configuration and scenario.
+- eval the dense model
 
-#### Contributing
+1) we generate the python code first:
 
-This project welcomes contributions and suggestions.  Most contributions require you to agree to a
-Contributor License Agreement (CLA) declaring that you have the right to, and actually do, grant us
-the rights to use your contribution. For details, visit https://cla.opensource.microsoft.com.
+```
+python gsm_evaluator_with_lora_soup.py -k model=EleutherAI/gpt-neo-125m dataset=gsm gsm_template=python max_input_length=2048 max_output_length=128 output_dir=gpt_125m_dense
+```
+there is a json file in the "gpt_125m_dense" dir. 
 
-When you submit a pull request, a CLA bot will automatically determine whether you need to provide
-a CLA and decorate the PR appropriately (e.g., status check, comment). Simply follow the instructions
-provided by the bot. You will only need to do this once across all repos using our CLA.
+2) eval the accuracy of gsm8k
 
-This project has adopted the [Microsoft Open Source Code of Conduct](https://opensource.microsoft.com/codeofconduct/).
-For more information see the [Code of Conduct FAQ](https://opensource.microsoft.com/codeofconduct/faq/) or
-contact [opencode@microsoft.com](mailto:opencode@microsoft.com) with any additional questions or comments.
+```
+python eval_gsm_mttl.py --file=gpt_125m_dense/predict_python_code.jsonl
+```
 
-#### Trademarks
+then we got 0.0015
 
-This project may contain trademarks or logos for projects, products, or services. Authorized use of Microsoft
-trademarks or logos is subject to and must follow
-[Microsoft's Trademark & Brand Guidelines](https://www.microsoft.com/en-us/legal/intellectualproperty/trademarks/usage/general).
-Use of Microsoft trademarks or logos in modified versions of this project must not cause confusion or imply Microsoft sponsorship.
-Any use of third-party trademarks or logos are subject to those third-party's policies.
+
+- eval the alpaca_code skill
+
+1) generate the python code
+
+```
+python gsm_evaluator_with_lora_soup.py -k model=EleutherAI/gpt-neo-125m dataset=gsm gsm_template=python max_input_length=2048 max_output_length=128 output_dir=gpt_125m_alpaca_code checkpoint=projects/modular_llm
+/debug_alpaca_code/best_mode_min_metric_val-loss_value_1.1037_step_1239.ckpt
+```
+
+2) eval the gsm8k-hard
+
+we got the same score. It seems the alpaca-code does not help the gpt125m

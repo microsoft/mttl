@@ -3,7 +3,17 @@ from dataclasses import dataclass
 
 from mttl.datamodule.base import DataModule, DatasetConfig
 from mttl.models.library.dataset_library import DatasetLibrary
+from functools import partial
 import json
+from datasets import load_dataset
+
+ANSWER_TRIGGER = "####"
+import re
+
+INVALID_ANS = "[invalid]"
+
+with open("mttl/datamodule/math.json", "r") as f:
+    cot_data = json.load(f)
 
 
 @dataclass
@@ -14,21 +24,63 @@ class GsmDataConfig(DatasetConfig):
 
 
 # code refer to https://github.com/aksh555/LoRA-Soups/blob/main/evaluate.py#L208
-def generate_math_prompt_with_python(instruction, input=None):
-    with open("mttl/datamodule/math.json", "r") as f:
-        cot_data = json.load(f)
+def generate_math_prompt_with_python(instruction):
+
     prompt = """Let's use Python to solve math problems step by step. Below are a few Instruction-Response pairs on how to do it."""
     prompt += "\n\n"
     for data in cot_data:
         prompt += f"### Instruction:\n{data['instruction']}\n\n### Response:\n{data['output']}\n\n"
     prompt += "Now write a function 'solution' encolsed in ``` in Python to solve this Instruction. Write only a code block. Write only valid Python code without using any units with the numerical values and any invalid symbols.\n\n"
-    prompt += f"### Instruction:\n{instruction}\n\n### Response:\n"
+    prompt += f"### Instruction:\n{instruction}\n\n### Response:"
     return prompt
 
 
 def instruct_template_python(example):
     example["source"] = generate_math_prompt_with_python(example["input"])
     example["target"] = str(example["answer"])
+    return example
+
+
+def clean_answer(model_pred):
+    model_pred = model_pred.lower()
+    preds = model_pred.split(ANSWER_TRIGGER.lower())
+    answer_flag = True if len(preds) > 1 else False
+    if answer_flag:
+        # Pick first answer with flag
+        pred = preds[1]
+    else:
+        # Pick last number without flag
+        pred = preds[-1]
+
+    pred = pred.replace(",", "")
+    pred = [s for s in re.findall(r"-?\d+\.?\d*", pred)]
+
+    if len(pred) == 0:
+        return INVALID_ANS
+
+    if answer_flag:
+        # choose the first element in list
+        pred = pred[0]
+    else:
+        # choose the last element in list
+        pred = pred[-1]
+
+    # (For arithmetic tasks) if a word ends with period, it will be omitted ...
+    if pred[-1] == ".":
+        pred = pred[:-1]
+
+    return pred
+
+
+def extract_answer(example):
+    example["answer"] = example["answer"].split("####")[-1].strip()
+    example["input"] = example["question"]
+    return example
+
+
+def extract_answer_for_perturb(example):
+    example["answer"] = example["answer"].split("<Answer>")[-1].split("</Answer>")[0]
+    example["input"] = example["question"]
     return example
 
 
@@ -71,10 +123,58 @@ def instruct_template_cot(example):
     return example
 
 
-@DataModule.register("gsm", config_cls=GsmDataConfig)
-class GsmDataModule(DataModule):
+@DataModule.register("gsm-8k", config_cls=GsmDataConfig)
+class Gsm8kDataModule(DataModule):
     def setup_dataset(self):
-        n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 4))
+        n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 1))
+        dataset = load_dataset("openai/gsm8k", "main")
+        dataset = dataset["test"]
+        dataset = dataset.map(extract_answer, num_proc=n_proc)
+        if self.config.gsm_template == "cot":
+            dataset = dataset.map(instruct_template_cot, num_proc=n_proc)
+        elif self.config.gsm_template == "python":
+            dataset = dataset.map(
+                instruct_template_python,
+                num_proc=n_proc,
+            )
+        self.train_dataset = dataset
+        self.dev_dataset = self.test_dataset = dataset
+
+
+def extract_number_str(text):
+    match = re.search(r"[\d.,]+", text)
+    if match:
+        return match.group().replace(",", "")
+    return None
+
+
+@DataModule.register("gsm-8k-perturb", config_cls=GsmDataConfig)
+class Gsm8kPerturbDataModule(DataModule):
+
+    def setup_dataset(self):
+        n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 1))
+        dataset = load_dataset("zhan1993/gsm-8k-perturb")
+        dataset = dataset["train"]
+        dataset = dataset.map(extract_answer_for_perturb, num_proc=n_proc)
+        dataset = dataset.map(
+            lambda x: {"answer": extract_number_str(x["answer"])}, num_proc=n_proc
+        )
+        dataset = dataset.map(instruct_template_cot, num_proc=n_proc)
+        if self.config.gsm_template == "cot":
+            dataset = dataset.map(instruct_template_cot, num_proc=n_proc)
+        elif self.config.gsm_template == "python":
+            dataset = dataset.map(
+                instruct_template_python,
+                num_proc=n_proc,
+            )
+        self.train_dataset = dataset
+        self.dev_dataset = self.test_dataset = dataset
+
+
+@DataModule.register("gsm-8k-hard", config_cls=GsmDataConfig)
+class Gsm8kHardDataModule(DataModule):
+    def setup_dataset(self):
+        n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 1))
         dataset = DatasetLibrary.pull_dataset("reasoning-machines/gsm-hard")
         dataset = dataset.rename_column("target", "answer")
         if self.config.gsm_template == "cot":
@@ -86,11 +186,12 @@ class GsmDataModule(DataModule):
 
 
 if __name__ == "__main__":
-    config = GsmDataConfig(model="microsoft/Phi-3-mini-4k-instruct", gsm_template="cot")
+    config = GsmDataConfig(
+        model="microsoft/Phi-3-mini-4k-instruct", gsm_template="python"
+    )
 
-    datamodule = GsmDataModule(config, for_generation=True)
+    datamodule = Gsm8kPerturbDataModule(config, for_generation=True)
     train_dataloader = datamodule.train_dataloader()
     val_dataloder = datamodule.val_dataloader()
     for batch in val_dataloder:
-        print(batch)
-        breakpoint()
+        print(batch["labels_texts"])

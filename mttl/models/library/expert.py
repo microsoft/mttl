@@ -197,8 +197,6 @@ def load_expert_from_pl_checkpoint(
 
     if os.path.isfile(expert_path) or os.path.isdir(expert_path):
         expert_checkpoint = get_checkpoint_path(expert_path)
-    else:
-        expert_checkpoint = download_from_hub(expert_path)
 
     logger.info(f"Loading expert from {expert_checkpoint}...")
     expert_checkpoint = torch.load(
@@ -215,12 +213,6 @@ def load_expert_from_pl_checkpoint(
         # fix bug in checkpoints
         if "tokenizer" in expert_checkpoint["hyper_parameters"]:
             expert_checkpoint["hyper_parameters"].pop("tokenizer")
-
-        if not expert_info_data.get("expert_config", None):
-            expert_info_data["expert_config"] = expert_checkpoint["hyper_parameters"]
-        else:
-            if "tokenizer" in expert_info_data["expert_config"]:
-                expert_info_data["expert_config"].pop("tokenizer")
 
         if not expert_info_data.get("expert_name", None):
             expert_info_data["expert_name"] = expert_checkpoint["hyper_parameters"][

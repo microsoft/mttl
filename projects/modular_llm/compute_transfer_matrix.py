@@ -5,10 +5,10 @@ from tempfile import TemporaryDirectory
 from typing import Callable, Union
 
 import seaborn as sns
+import wandb
 from matplotlib import pyplot as plt
 from pytorch_lightning import seed_everything
 
-import wandb
 from mttl.arguments import Args, EvaluationConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.evaluators.evaluators import (
@@ -16,10 +16,11 @@ from mttl.evaluators.evaluators import (
     ExtendedMMLUEvaluator,
     ExtendedRougeEvaluator,
 )
-from mttl.logging import TableLogger, init_wandb_logger, logger
+from mttl.logging import TableLogger, logger  # init_wandb_logger
 from mttl.models.library.expert import Expert, load_expert
 from mttl.models.library.expert_library import ExpertLibrary, LocalExpertLibrary
 from mttl.models.lightning.expert_module import ExpertModule
+from mttl.models.lightning.loggers import init_wandb_logger
 from mttl.utils import remote_login
 from mttl.vllm_engines.engines import free_memory
 

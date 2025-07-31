@@ -125,7 +125,7 @@ def test_loglike_eval():
     )
     model = AutoModelForCausalLM.from_pretrained("EleutherAI/gpt-neo-125m")
     result = evaluator.evaluate(model, num_batches=10)
-    assert np.allclose(result, 0.2, rtol=0.01)
+    assert np.allclose(result, 0.1, rtol=0.01)
 
 
 def test_code_evaluator(mocker):

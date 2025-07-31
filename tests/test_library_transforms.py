@@ -11,13 +11,20 @@ from pytorch_lightning import seed_everything
 from mttl.arguments import ExpertConfig
 from mttl.logging import logger
 from mttl.models.containers.selectors import PhatgooseSelector, PhatgooseSelectorConfig
-from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
+from mttl.models.expert_model import (
+    ExpertModel,
+    ExpertModelConfig,
+    MultiExpertModel,
+    MultiExpertModelConfig,
+)
 from mttl.models.library.expert_library import HFExpertLibrary, LocalExpertLibrary
 from mttl.models.library.library_transforms import (
     ArrowTransform,
     ArrowTransformConfig,
     HiddenStateComputer,
     HiddenStateComputerConfig,
+    KnotMerge,
+    KnotMergeConfig,
     MBClusteringTransformConfig,
     MBCWithCosSimTransform,
     PhatgooseTransform,
@@ -26,6 +33,8 @@ from mttl.models.library.library_transforms import (
     TiesMergeConfig,
     WeightedLinearMerge,
     WeightedLinearMergeConfig,
+    WudiMerge,
+    WudiMergeConfig,
 )
 
 
@@ -36,6 +45,55 @@ def test_config():
 
     cfg3 = ArrowTransformConfig(ab_only=True, scale=False)
     assert cfg3.save_name == cfg.save_name
+
+
+def test_knot_merge(tmp_path, create_dummy_expert):
+    config = ExpertConfig(
+        **{
+            "model_modifier": "lora",
+            "lora_rank": 8,
+            "lora_alpha": 16,
+            "warmup_steps": 0,
+            "modify_layers": "c_fc",
+            "trainable_param_names": ".*lora_[ab].*",
+            "output_dir": tmp_path,
+            "precision": "32",
+            "model": "EleutherAI/gpt-neo-125m",
+            "device_map": "cpu",
+            "dataset_type": "flan",
+            "lora_init_b_random": True,  # this is important otw phatgoose gates are 0 given that the experts are not trained
+        }
+    )
+    model = ExpertModel(ExpertModelConfig(base_model="EleutherAI/gpt-neo-125m"))
+
+    config.finetune_task_name = "cot_creak"
+    expert1 = create_dummy_expert(config, "cot_creak")
+
+    config.finetune_task_name = "cot_creak_ii"
+    expert2 = create_dummy_expert(config, "cot_creak_ii")
+    # only leave 1 layer to speed up things.
+    expert1.expert_weights = {
+        k: v for k, v in expert1.expert_weights.items() if "8.mlp" in k
+    }
+    expert2.expert_weights = {
+        k: v for k, v in expert2.expert_weights.items() if "8.mlp" in k
+    }
+
+    library = LocalExpertLibrary(tmp_path)
+    library.add_expert(expert1)
+    library.add_expert(expert2)
+
+    transform = KnotMerge(KnotMergeConfig(path=f"{tmp_path}/knot_ingredients.pt"))
+    exp = transform.transform(library)
+    state_dict = model.model.state_dict()
+
+    # TODO: this can be implemented as a seperate modifier maybe or utils func.
+    merged_layers = []
+    for p_name, value in exp.expert_weights.items():
+        if p_name in state_dict:
+            merged_layers.append(p_name)
+            state_dict[p_name] += value
+    assert len(merged_layers) == len(exp.expert_weights.keys()) == 1
 
 
 def test_arrow():
@@ -259,6 +317,23 @@ def test_mbc_clustering(tmp_path):
     transform = MBCWithCosSimTransform(cfg)
     clusters = transform.transform(library, recompute=True)
     assert len(clusters) == k
+
+
+def test_wudi_merge():
+    logger.setLevel(logging.DEBUG)
+    library = HFExpertLibrary("sordonia/new-test-library")
+
+    # Test with custom config
+    custom_config = WudiMergeConfig(iter=1, lr=1e-4)
+    transform = WudiMerge(custom_config)
+    merged_expert = transform.transform(library)
+
+    # Verify merged expert name is set correctly
+    assert merged_expert.name == "wudi_merged_expert"
+
+    # Verify merged weights are not None and have correct device
+    for key, param in merged_expert.expert_weights.items():
+        assert param is not None
 
 
 def test_weighted_merge():

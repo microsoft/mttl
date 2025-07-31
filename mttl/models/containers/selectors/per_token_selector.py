@@ -195,11 +195,12 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
         # log angle between input and prototypes
         angle = router_logits / input.norm(p=2, dim=-1, keepdim=True).clamp(min=EPS)
         angle = angle / prototypes.norm(p=2, dim=-1).view(1, 1, -1).clamp(min=EPS)
-
-        task_names = self.routing_infos.task_names
-        in_dist = task_names is not None and all(
-            [t in self.task_to_expert_name for t in task_names]
-        )
+        in_dist = None
+        if self.routing_infos is not None:
+            task_names = self.routing_infos.task_names
+            in_dist = task_names is not None and all(
+                [t in self.task_to_expert_name for t in task_names]
+            )
 
         # control entropy of distribution
         router_logits /= temp
@@ -219,8 +220,8 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
             experts = ALL_EXPERTS
             router_probs = F.softmax(router_logits, dim=-1, dtype=torch.float)
 
-        self._log_entropy(router_logits)
         if in_dist:
+            self._log_entropy(router_logits)
             self._log_angle(angle)
             self._log_in_dist(router_logits)
 
