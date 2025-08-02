@@ -47,7 +47,7 @@ class DataCollatorForAbstention(DefaultCollator):
         output_batch["sources_texts"] = sources
         output_batch["labels_texts"] = labels
         output_batch["task_sources"] = task_sources
-        output_batch['ids'] = ids
+        # output_batch['ids'] = ids
 
         # integrate extra fields in the batch if required
         if self.collate_extra_fields:
