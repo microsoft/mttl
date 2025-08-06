@@ -597,6 +597,7 @@ class EvaluationConfig(MultiExpertConfig, TransformArgs):
     gsm_dataset: str = "gsm-hard"
     save_merged_model: str = None
     expert_weights: str = None
+    scaling_coefficient: float = 1.0
 
 
 @dataclass

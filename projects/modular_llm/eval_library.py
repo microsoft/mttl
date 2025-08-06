@@ -259,7 +259,7 @@ def run_eval(args: EvaluationConfig):
             **loading_kwargs,
         )
         task_merged_vectors = UniformMergeAfter(cfg).transform(library)
-        model.task_vector_apply(task_merged_vectors, scaling_coefficient=1)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
 
     elif args.merge_or_route in ["ties", "wudi"]:
         if args.merge_or_route == "ties":
@@ -293,7 +293,7 @@ def run_eval(args: EvaluationConfig):
         )
         cfg = ISOMergeConfig()
         task_merged_vectors = ISOMerge(cfg).transform(library)
-        model.task_vector_apply(task_merged_vectors, scaling_coefficient=1.0)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
     elif args.merge_or_route == "cp_merge":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
@@ -317,7 +317,7 @@ def run_eval(args: EvaluationConfig):
         )
         cfg = TiesMergeAfterConfig(mask_rate=0.8)
         task_merged_vectors = TiesMergeAfter(cfg).transform(library)
-        model.task_vector_apply(task_merged_vectors, scaling_coefficient=0.5)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
     elif args.merge_or_route == "wudi_merge_after":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
@@ -325,7 +325,7 @@ def run_eval(args: EvaluationConfig):
         )
         cfg = WudiMergeConfig(iter=300, lr=1e-5)
         task_merged_vectors = WudiMergeAfter(cfg).transform(library)
-        model.task_vector_apply(task_merged_vectors)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
     elif args.merge_or_route == "wudi_merge_2":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
@@ -333,6 +333,7 @@ def run_eval(args: EvaluationConfig):
         )
         cfg = WuDiMerge2Config(iter=300, lr=1e-5)
         WuDiMerge2(cfg).transform(library, model.model)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
     elif args.merge_or_route == "knots":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
@@ -340,7 +341,7 @@ def run_eval(args: EvaluationConfig):
         )
         cfg = KnotMergeConfig(path=f"{args.library_id}/knot_ingredients.pt")
         task_merged_vectors = KnotMerge(cfg).transform(library)
-        model.task_vector_apply(task_merged_vectors)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
     elif args.merge_or_route == "analytical_wudi_merge":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
@@ -348,7 +349,7 @@ def run_eval(args: EvaluationConfig):
         )
         cfg = AnalyticalWudiMergeConfig()
         task_merged_vectors = AnalyticalWudiMerge(cfg).transform(library)
-        model.task_vector_apply(task_merged_vectors)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
 
     elif args.merge_or_route == "uniform_lora_after_op":
         # Here we merge the LoRA experts after the outer product we cannot really do it
