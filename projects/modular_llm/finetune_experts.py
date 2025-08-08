@@ -38,8 +38,9 @@ from mttl.models.lightning.loggers import get_pl_loggers
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.monitors import get_monitors
 from mttl.utils import get_checkpoint_path, remote_login, retry
-
+from mttl.models.containers.selectors.lora_soup_selector import VariationalLoRSelectorConfig
 from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
+
 
 FINETUNE_FUNCTIONS: dict[str, Callable] = {}
 
@@ -301,8 +302,14 @@ def finetune_lib_variational_lora_router(args: FinetuneConfig, dm):
     args.router_selector = "variational_lora_router"
 
     args.trainable_param_names = "|.*module_logits_dict.*|.*selector.*"
-
-    module = MultiExpertModule(**vars(args)).to("cuda")
+    selector_config = VariationalLoRSelectorConfig(
+        encoder_hidden_dim=256,
+        encoder_latent_dim=64,
+        top_k=args.sk,
+        rkhs_dim=512,
+        emb_dim=128,
+    )
+    module = MultiExpertModule(selector_config=selector_config, **vars(args)).to("cuda")
     module.add_experts_from_library(args.library_id)
 
     return train_module(args, module, dm)
