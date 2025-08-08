@@ -957,7 +957,6 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         HellaswagMultiChoiceDataModule,
     )
     from mttl.datamodule.mathqa_data_module import MathQADataConfig, MathQADataModule
-    from mttl.datamodule.gsm_data_module import GsmDataConfig, GsmDataModule
     from mttl.datamodule.abstention_data_module import (
         AbstentionDataConfig,
         AbstentionDataModule,
