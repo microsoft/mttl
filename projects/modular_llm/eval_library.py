@@ -285,7 +285,7 @@ def run_eval(args: EvaluationConfig):
         )
         cfg = TSVMergeConfig(path=f"{args.library_id}/tsv_ingredients.pt")
         task_merged_vectors = TSVMerge(cfg).transform(library, recompute=False)
-        model.task_vector_apply(task_merged_vectors, scaling_coefficient=0.25)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
     elif args.merge_or_route == "iso_merge":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
