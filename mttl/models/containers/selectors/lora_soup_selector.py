@@ -14,7 +14,9 @@ import torch
 from mttl.models.containers.selectors.lora_merge_eign_input_analysis import (
     AdaptiveLoRAMerger,
 )
-from typing import Tuple
+import torch.nn.functional as F
+from mttl.models.library.expert import ExpertInfo
+
 
 
 @dataclass
@@ -115,7 +117,10 @@ class Encoder(nn.Module):
 class VariationalLoRSelectorConfig(SelectorConfig):
     encoder_hidden_dim: int = 256
     encoder_latent_dim: int = 64
-    num_experts: int = 3
+
+    top_k: int = -1
+    rkhs_dim: int = 512
+    emb_dim: int = 128
 
 
 @Selector.register("variational_lora_router", VariationalLoRSelectorConfig)
@@ -130,15 +135,28 @@ class VariationalLoRASelector(Selector):
         self.latent_dim = self.config.encoder_latent_dim
         # Encoder network for inferring latent variable distribution
         self.encoder = Encoder(self.input_dim, self.hidden_dim, self.latent_dim)
-        # Adapter selector network
-        self.adapter_selector = nn.Sequential(
-            nn.Linear(self.latent_dim, self.hidden_dim),
-            nn.ReLU(),
-            nn.Linear(self.hidden_dim, self.config.num_experts),
-            nn.Sigmoid(),  # Output weights for each adapter
+        # moe adapter selector
+        self.top_k = self.config.top_k
+        self.rkhs_dim = self.config.rkhs_dim
+        self.emb_dim = self.config.emb_dim
+
+        device = kwargs["layer"].weight.device
+        # an expert level selector for each expert
+        self.rkhs_exp = nn.Linear(self.emb_dim, self.rkhs_dim, device=device)
+        self.rkhs_hid = nn.Linear(self.latent_dim, self.rkhs_dim, device=device)
+        self.rkhs_embeddings = nn.Parameter(
+            torch.empty((0, self.emb_dim), device=device)
         )
 
+    def _get_weights(self, input):
+        input_view = input.view(-1, input.shape[-1])
+        return self.rkhs_hid(input_view).reshape(input.shape[0], input.shape[1], -1)
+
+    @forward_with_cache
     def forward(self, input, **kwargs) -> ExpertsAndWeightsSelectorOutput:
+        # do routing business on fp32
+        input = input.to(dtype=self.rkhs_exp.weight.dtype)
+
         # Encode to get latent distribution
         u_plus, delta_plus, u_minus, delta_minus = self.encoder(input)
         z_plus = u_plus + torch.randn_like(u_plus) * torch.exp(delta_plus)
@@ -147,8 +165,25 @@ class VariationalLoRASelector(Selector):
         z = z_plus + z_minus
         u_z = u_plus + u_minus
         delta_z = delta_plus + delta_minus
+        
         # Get adapter weights based on latent variable
-        weights = self.adapter_selector(z)
+        rkhs_enc = self._get_weights(z)
+        rkhs_emb = self.rkhs_exp(self.rkhs_embeddings)
+        router_logits = torch.matmul(rkhs_enc, rkhs_emb.T)
+        routing_weights = F.softmax(router_logits, dim=-1, dtype=torch.float)
+
+        if self.top_k > 0:
+            routing_weights, selected_experts = torch.topk(
+                routing_weights, self.top_k, dim=-1
+            )
+            # we cast back to the input dtype
+            routing_weights = routing_weights.to(input.dtype)
+        else:
+            # soft routing
+            selected_experts = ALL_EXPERTS
+
+        g = self.info_container.routing_gates
+        g.append(router_logits)
 
         kl_zp = self.kl_divergence(u_plus, delta_plus, u_z, delta_z)
         kl_zm = self.kl_divergence(u_minus, delta_minus, u_z, delta_z)
@@ -159,8 +194,9 @@ class VariationalLoRASelector(Selector):
         aug_losses = self.info_container.routing_infos.aux_losses
         aug_losses[self.layer_name] = kl_loss
 
-        experts = ALL_EXPERTS
-        return BatchSequenceExpertsAndWeightsSelectorOutput(experts, weights)
+        return BatchSequenceExpertsAndWeightsSelectorOutput(
+            experts=selected_experts, weights=routing_weights
+        )
 
     # -----------------------------
 
@@ -180,6 +216,20 @@ class VariationalLoRASelector(Selector):
         """Compute KL divergence between Gaussian and standard normal distribution"""
         kl = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp(), dim=1)
         return torch.mean(kl)
+
+    def on_add_expert(
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+    ):
+        # just initialize the expert embeddings
+        self.rkhs_embeddings.data = torch.cat(
+            [
+                self.rkhs_embeddings.data,
+                torch.zeros(
+                    1, self.emb_dim, device=self.rkhs_embeddings.device
+                ).uniform_(-0.02, 0.02),
+            ],
+            dim=0,
+        )
 
 
 @dataclass
