@@ -161,7 +161,6 @@ class VariationalLoRASelector(Selector):
         u_plus, delta_plus, u_minus, delta_minus = self.encoder(input)
         z_plus = u_plus + torch.randn_like(u_plus) * torch.exp(delta_plus)
         z_minus = u_minus + torch.randn_like(u_minus) * torch.exp(delta_minus)
-
         z = z_plus + z_minus
         u_z = u_plus + u_minus
         delta_z = delta_plus + delta_minus
@@ -182,8 +181,9 @@ class VariationalLoRASelector(Selector):
             # soft routing
             selected_experts = ALL_EXPERTS
 
-        g = self.info_container.routing_gates
-        g.append(router_logits)
+        if self.info_container is not None:
+            g = self.info_container.routing_gates
+            g.append(router_logits)
 
         kl_zp = self.kl_divergence(u_plus, delta_plus, u_z, delta_z)
         kl_zm = self.kl_divergence(u_minus, delta_minus, u_z, delta_z)
@@ -191,8 +191,9 @@ class VariationalLoRASelector(Selector):
         kl_loss = kl_zp + kl_zm
 
         # Store auxiliary losses
-        aug_losses = self.info_container.routing_infos.aux_losses
-        aug_losses[self.layer_name] = kl_loss
+        if self.info_container is not None:
+            aug_losses = self.info_container.routing_infos.aux_losses
+            aug_losses[self.layer_name] = kl_loss
 
         return BatchSequenceExpertsAndWeightsSelectorOutput(
             experts=selected_experts, weights=routing_weights
@@ -225,11 +226,12 @@ class VariationalLoRASelector(Selector):
             [
                 self.rkhs_embeddings.data,
                 torch.zeros(
-                    1, self.emb_dim, device=self.rkhs_embeddings.device
+                    1, self.emb_dim, device=self.device
                 ).uniform_(-0.02, 0.02),
             ],
             dim=0,
         )
+        self.encoder.to(self.device)
 
 
 @dataclass

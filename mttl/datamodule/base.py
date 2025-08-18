@@ -1083,6 +1083,9 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         assert not for_generation
         config = dataset_to_klass_map[dataset][0]
         dm = dataset_to_klass_map[dataset][1](config)
+    elif "routing" in dataset.lower():
+        config = AbstentionDataConfig(**common_kwargs)
+        dm = AbstentionDataModule(config, for_generation=for_generation)
     elif "coconot" in dataset.lower():
         config = CoconotConfig(
             **common_kwargs,
