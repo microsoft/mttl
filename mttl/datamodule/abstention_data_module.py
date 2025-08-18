@@ -3,8 +3,8 @@ from mttl.datamodule.base import DefaultCollator
 from dataclasses import dataclass
 import os
 from mttl.models.library.dataset_library import DatasetLibrary
-
-
+from functools import partial
+import torch
 @dataclass
 class AbstentionDataConfig(DatasetConfig):
     predict_output_dir: str = "./"
@@ -47,7 +47,7 @@ class DataCollatorForAbstention(DefaultCollator):
         output_batch["sources_texts"] = sources
         output_batch["labels_texts"] = labels
         output_batch["task_sources"] = task_sources
-        output_batch['ids'] = ids
+        # output_batch['ids'] = ids
 
         # integrate extra fields in the batch if required
         if self.collate_extra_fields:
@@ -56,6 +56,40 @@ class DataCollatorForAbstention(DefaultCollator):
 
         return output_batch
 
+def apply_template_phi3(tokenizer, example):
+    message = [
+        {"role": "user", "content": example["source"]},
+        {"role": "assistant", "content": example["target"]},
+    ]
+
+    tokenized_message = tokenizer.apply_chat_template(message, tokenize=False)
+    # split the message into source and target
+    example["source"] = tokenized_message.split("<|assistant|>")[0]
+    example["target"] = "<|assistant|>" + tokenized_message.split("<|assistant|>")[1]
+
+    return example
+
+def apply_template_mistral(tokenizer, example):
+    message = [
+        {"role": "user", "content": example["source"]},
+        {"role": "assistant", "content": example["target"]},
+    ]
+    tokenized_message = tokenizer.apply_chat_template(message, tokenize=False)
+    example["source"] = tokenized_message.split("[/INST]")[0]
+    example["target"] = "[/INST]" + tokenized_message.split("[/INST]")[1]
+    return example
+def apply_template(dataset, tokenizer, model_name):
+    if "Phi-3-mini-4k-instruct" in model_name:
+        dataset = dataset.map(
+            partial(apply_template_phi3, tokenizer),
+        num_proc=int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16)),
+        )
+    elif "Mistral-7B-Instruct-v0.3" in model_name:
+        dataset = dataset.map(
+            partial(apply_template_mistral, tokenizer),
+        num_proc=int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16)),
+        )
+    return dataset
 
 DataModule.register("abstention", config_cls=AbstentionDataConfig)
 class AbstentionDataModule(DataModule):
@@ -64,7 +98,10 @@ class AbstentionDataModule(DataModule):
         dataset = DatasetLibrary.pull_dataset(self.config.dataset)
         dataset = dataset.rename_column("question", "source")
         dataset = dataset.rename_column("answer", "target")
+
+        dataset = apply_template(dataset, self.tokenizer, self.config.model)
         self.train_dataset = dataset["train"]
+
         self.dev_dataset = self.test_dataset = dataset["train"]
 
     @property
