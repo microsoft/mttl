@@ -268,7 +268,7 @@ class MultiExpertModule(LightningTrainingMixin, LightningEfficientCheckpoint):
         return model
 
 
-class MoEModule(LightningEfficientCheckpoint, LightningTrainingMixin):
+class MoEModule(LightningTrainingMixin, LightningEfficientCheckpoint):
     def __init__(
         self,
         model_object: PreTrainedModel = None,
@@ -278,7 +278,6 @@ class MoEModule(LightningEfficientCheckpoint, LightningTrainingMixin):
         LightningEfficientCheckpoint.__init__(self, model_object=model_object, **kwargs)
 
         self.training_config = MoEExpertConfig.fromdict(kwargs)
-
         config = MoEModelConfig(
             base_model=self.training_config.model,
             moe_num_experts=self.training_config.moe_num_experts,

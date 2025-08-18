@@ -7,15 +7,18 @@ from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.library.library_transforms import (
     MBClusteringTransformConfig,
     MBCWithCosSimTransform,
-    RandomClustersConfig,
-    RandomClustersTransform,
+    # RandomClustersConfig,
+    # RandomClustersTransform,
 )
+from dataclasses import dataclass
 
 
+@dataclass
 class ClusteringConfig(Args):
     cluster_mode: str = "mbc"  # clustering mode: mbc, random
     output_file: str = None
     num_clusters: int = 10
+    library_id: str = None
 
 
 def main(args: ClusteringConfig):
@@ -40,7 +43,7 @@ def main(args: ClusteringConfig):
     else:
         raise ValueError(f"Unknown cluster mode {args.cluster_mode}")
 
-    os.makedirs(os.path.basedir(args.output_file), exist_ok=True)
+    # os.makedirs(os.path.dirname(args.output_file), exist_ok=True)
 
     cluster_dict = {}
     for c, l in clusters.items():

@@ -96,3 +96,26 @@ class AlpacaDataset(torch.utils.data.dataset.Dataset):
         for data in self.dataset:
             all_instructions.append(data["instruction"])
         return all_instructions
+
+class MathQallamaDataset(AlpacaDataset):
+    def __init__(self):
+        super().__init__()
+        self.dataset = DatasetLibrary.pull_dataset(
+            "zhan1993/mathqa_lora_soup_repo", split="train"
+        )  
+        
+
+class AlpacaCodeDataset(AlpacaDataset):
+    def __init__(self):
+        super().__init__()
+        self.dataset = DatasetLibrary.pull_dataset(
+            "zhan1993/code_alpaca_20k", split="train"
+        )
+
+
+class MathQaAlpacaCodeDataset(AlpacaDataset):
+    def __init__(self):
+        super().__init__()
+        self.dataset = DatasetLibrary.pull_dataset(
+            "zhan1993/metamath_code_alpaca_10k", split="train"
+        )

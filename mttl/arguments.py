@@ -556,8 +556,10 @@ class FinetuneConfig(MultiExpertConfig):
     sk: int = 5  # number of experts to retrieve from a library
     finetune_regime: str = None  # polylib_full, lib_mu, polylib_selector
     tasksets_path: str = None
+    es_metric: str = "loss"
 
     def __post_init__(self):
+        super().__post_init__()
         if self.finetune_task_name is not None and isinstance(
             self.finetune_task_name, str
         ):
@@ -592,6 +594,12 @@ class EvaluationConfig(MultiExpertConfig, TransformArgs):
     recompute_prototypes: bool = False
     expert_scaling: float = 1.0
     lora_merge_after: bool = False
+    gsm_template: str = "cot"
+    lora_merge_after: bool = False
+    gsm_dataset: str = "gsm-hard"
+    save_merged_model: str = None
+    expert_weights: str = None
+    scaling_coefficient: float = 1.0
 
 
 @dataclass

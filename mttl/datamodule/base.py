@@ -256,7 +256,7 @@ class DefaultCollator(PackedMixin):
 
         # adds the eos token
         labels_ = [
-            l + ((self.tokenizer.eos_token) if self.add_eos_to_targets else "")
+            l + ((" " + self.tokenizer.eos_token) if self.add_eos_to_targets else "")
             for l in labels_
         ]
         return sources_, labels_
@@ -956,6 +956,14 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         HellaswagDataConfig,
         HellaswagMultiChoiceDataModule,
     )
+    from mttl.datamodule.mathqa_data_module import MathQADataConfig, MathQADataModule
+    from mttl.datamodule.base import DatasetConfig
+    from mttl.datamodule.alpaca_data_module import (
+        AlpacaCodeDataModule,
+        MathQaAlpacaCodeDataModule,
+        MathQallamaDataModule,
+    )
+    from mttl.datamodule.math200k_data_module import Math200kDataModule
     from mttl.datamodule.mmlu_data_module import MMLUDataConfig, MMLUDataModule
     from mttl.datamodule.mt_seq_to_seq_module import (
         FlanConfig,
@@ -1103,6 +1111,32 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
             pack_sequences=args.pack_sequences,
         )
         dm = FlatMultiTaskModule(config, for_generation=for_generation)
+    elif dataset == "mathqa":
+        config = MathQADataConfig(
+            **common_kwargs,
+        )
+        dm = MathQADataModule(config, for_generation=for_generation)
+    elif dataset == "mathqa_llama":
+        common_kwargs["train_on_inputs"] = True
+        config = DatasetConfig(
+            **common_kwargs,
+        )
+        dm = MathQallamaDataModule(config, for_generation=for_generation)
+    elif dataset == "math200":
+        config = DatasetConfig(
+            **common_kwargs,
+        )
+        dm = Math200kDataModule(config, for_generation=for_generation)
+    elif dataset == "alpaca_code":
+        config = DatasetConfig(
+            **common_kwargs,
+        )
+        dm = AlpacaCodeDataModule(config, for_generation=for_generation)
+    elif "mix_mathqa_alpaca" in dataset:
+        config = DatasetConfig(
+            **common_kwargs,
+        )
+        dm = MathQaAlpacaCodeDataModule(config, for_generation=for_generation)
     elif "mmlu" in dataset:
         config = MMLUDataConfig(
             **common_kwargs,

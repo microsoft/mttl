@@ -32,11 +32,14 @@ from mttl.models.lightning.callbacks import (
     RougeCallback,
 )
 from mttl.models.lightning.expert_module import ExpertModule as ExpertModule
+from mttl.models.lightning.expert_module import MultiExpertModule
 from mttl.models.lightning.expert_module import MoEModule
 from mttl.models.lightning.loggers import get_pl_loggers
 from mttl.models.modifiers.base import ModifierConfig
 from mttl.models.monitors import get_monitors
 from mttl.utils import get_checkpoint_path, remote_login, retry
+
+from mttl.models.expert_model import MultiExpertModel, MultiExpertModelConfig
 
 FINETUNE_FUNCTIONS: dict[str, Callable] = {}
 
@@ -252,8 +255,7 @@ def finetune_lib_mu(args: FinetuneConfig, dm):
     mean_expert: Expert = create_mean_expert(args)
     if args.finetune_task_name:
         mean_expert.name = args.finetune_task_name
-
-    module = MultiExpertModel(**vars(args)).to("cuda")
+    module = MultiExpertModule(**vars(args)).to("cuda")
     module.add_expert_instance(mean_expert, is_default=True)
 
     return (train_module(args, module, dm),)
@@ -274,8 +276,21 @@ def finetune_lib_mu_with_rand_retrieval(args: FinetuneConfig, dm):
 
     mean_expert: Expert = create_mean_expert(args, library)
 
-    module = MultiExpertModel(**vars(args)).to("cuda")
+    module = MultiExpertModule(**vars(args)).to("cuda")
     module.add_expert_instance(mean_expert, is_default=True)
+
+    return train_module(args, module, dm)
+
+
+@register_finetune_func("lib_lora_soup")
+def finetune_lib_lora_soup(args: FinetuneConfig, dm):
+    """ """
+    args.router_selector = "lora_soup_router"
+
+    args.trainable_param_names = "|.*module_logits_dict.*|.*selector.*"
+
+    module = MultiExpertModule(**vars(args)).to("cuda")
+    module.add_experts_from_library(args.library_id)
 
     return train_module(args, module, dm)
 
@@ -315,7 +330,7 @@ def finetune_polylib_full(args: FinetuneConfig, dm):
     )
     # args.router_selector = "poly_router"
     assert args.router_selector is not None
-    module = MoEModule(**vars(args), device_map="auto")
+    module = MoEModule(**vars(args))
 
     for n, p in module.named_parameters():
         if "selector" in n:
@@ -347,7 +362,7 @@ def finetune_polylib_sel(args: FinetuneConfig, dm):
     args.trainable_param_names = "|.*module_logits.*|.*selector.*"
     assert args.router_selector is not None
 
-    module = MoEModule(**vars(args), device_map="auto")
+    module = MoEModule(**vars(args))
 
     for n, p in module.named_parameters():
         if "selector" in n:
@@ -458,7 +473,7 @@ def run_multitask(args: FinetuneConfig):
     seed_everything(args.seed, workers=True)
 
     # get directory of the current file
-    setup_logging(args.output_dir)
+    setup_logging()
     logger.info("Args: {}".format(args.to_json()))
 
     remote_login(args.remote_token)
@@ -466,7 +481,6 @@ def run_multitask(args: FinetuneConfig):
     # select dataloader
     dm = get_datamodule(args)
     args.n_tasks = len(dm._task_names)
-
     if args.checkpoint is not None:
         # Passing a checkpoint assumes the use of `ExpertModule`
         # e.g. for poly-μ and MHR-μ
@@ -504,7 +518,7 @@ def finetune_polylib_full(args: FinetuneConfig, dm):
         args.trainable_param_names += "|.*module_logits.*|.*selector.*"
     assert args.library_id is None
     args.router_selector = "poly_router"
-    module = MoEModule(**vars(args), device_map="auto")
+    module = MoEModule(**vars(args))
     module.to("cuda")
     return train_module(args, module, dm)
 

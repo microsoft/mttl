@@ -164,7 +164,7 @@ def load_expert(
         os.path.join(expert_path, WEIGHTS_NAME)
     ):
         return load_expert_from_hf_checkpoint(expert_path, expert_name)
-    elif os.path.isdir(expert_path) or os.path.isfile(expert_path):
+    elif os.path.isfile(expert_path):
         return load_expert_from_pl_checkpoint(expert_path, expert_name)
 
     # this is not a local path, try to download from hub
@@ -193,12 +193,8 @@ def load_expert_from_pl_checkpoint(
 ):
     import os
 
-    from mttl.models.lightning.base_module import download_from_hub
-
     if os.path.isfile(expert_path) or os.path.isdir(expert_path):
         expert_checkpoint = get_checkpoint_path(expert_path)
-    else:
-        expert_checkpoint = download_from_hub(expert_path)
 
     logger.info(f"Loading expert from {expert_checkpoint}...")
     expert_checkpoint = torch.load(

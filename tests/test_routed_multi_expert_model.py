@@ -16,6 +16,7 @@ from mttl.models.containers.selectors.poly_selector import (
     PolySelector,
     PolySelectorDirect,
 )
+from mttl.models.containers.selectors.lora_soup_selector import LoraSoupSelector
 from mttl.models.containers.selectors.selector_output import (
     ALL_EXPERTS,
     BatchSequenceExpertsAndWeightsSelectorOutput,
@@ -252,6 +253,42 @@ def test_expert_selector_with_task_name_routing(tmp_multi_exp_config):
 
     # Test Base Llama model
     output = module(**batch)
+
+
+def test_expert_selector_with_lora_soup_routing(tmp_multi_exp_config):
+    seed_everything(0)
+    config: MultiExpertConfig = tmp_multi_exp_config
+    config.router_selector = "lora_soup_router"
+    exp1_dest = create_dummy_expert(config, "exp1")
+    exp2_dest = create_dummy_expert(config, "exp2")
+    module_dict = {"mod1": exp1_dest, "mod2": exp2_dest}
+
+    module = create_expert_model_from_args(config)
+    module.add_experts_from_dict(module_dict, action="route")
+
+    assert isinstance(
+        module.model.transformer.h[0].attn.attention.k_proj, LoRAExpertContainer
+    )
+
+    generator = torch.Generator()
+    generator.manual_seed(0)
+    batch = {
+        "input_ids": torch.randint(10, 400, (bs, max_seq_len), generator=generator),
+        "labels": torch.randint(10, 400, (bs, max_seq_len), generator=generator),
+    }
+    seq_len = torch.randint(0, max_seq_len, (bs,), generator=generator)
+    attn_mask = torch.zeros(bs, max_seq_len, dtype=torch.int32)
+    attn_mask[torch.arange(bs), seq_len] = 1
+    attn_mask = 1 - attn_mask.cumsum(dim=-1)
+    batch["attention_mask"] = attn_mask
+
+    # Test Base Llama model
+    output = module(**batch)
+    assert np.allclose(output.loss.item(), 12.3125, atol=0.1)
+    assert isinstance(
+        module.model.transformer.h[0].attn.attention.k_proj.selector,
+        LoraSoupSelector,
+    )
 
 
 def test_expert_selector_with_poly_routing(tmp_multi_exp_config):

@@ -27,11 +27,31 @@ from mttl.models.library.library_transforms import (
     WudiMerge,
     WudiMergeConfig,
     WudiMergeAfter,
+    AnalyticalWudiMerge,
+    AnalyticalWudiMergeConfig,
+    WuDiMerge2,
+    WuDiMerge2Config,
+    KnotMerge,
+    KnotMergeConfig,
+    TSVMerge,
+    TSVMergeConfig,
+    TiesMergeAfter,
+    TiesMergeAfterConfig,
+    UniformMergeAfter,
+    UniformMergeAfterConfig,
+    ISOMerge,
+    ISOMergeConfig,
+    CPMerge,
+    CPMergeConfig,
+    CPMergeAfter,
+    CPMergeAfterConfig,
 )
 from mttl.models.lightning.callbacks import LossCallback
 from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
 from mttl.models.modifiers.lora import LoRAConfig
 from mttl.utils import remote_login
+from mttl.models.containers.selectors.base import UniformSelectorConfig
+from mttl.models.containers.selectors import TaskNameSelectorConfig
 
 from mttl.models.containers.selectors.base import UniformSelectorConfig
 from mttl.evaluators.adv_bench_evaluator import AdvBenchEvaluator
@@ -80,6 +100,8 @@ def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
                 verbose=False,
             )
         elif args.eval_metric == "rougeL":
+            if isinstance(module.selector_config, TaskNameSelectorConfig):
+                module.set_default_expert(task)
             dm = get_datamodule(args, for_generation=True)
             evaluator = RougeEvaluator(
                 datamodule=dm,
@@ -177,6 +199,15 @@ def run_eval(args: EvaluationConfig):
 
     remote_login(args.remote_token)
 
+    if wandb.run is None and os.environ.get("WANDB_API_KEY"):
+        wandb.init(
+            project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
+            config=vars(args),
+            name=os.environ.get("AMLT_JOB_NAME", None),
+        )
+        # update config
+        wandb.config.update({f"cmd_args_{k}": v for k, v in vars(args).items()})
+
     exclude_phi_tasks = [
         "hellaswag_1_1_0",
         "ai2_arc_ARC_Challenge_1_0_0",
@@ -236,7 +267,10 @@ def run_eval(args: EvaluationConfig):
             model.add_experts_from_library(library)
             model.set_selector(
                 "lora",
-                UniformSelectorConfig(lora_merge_after=args.lora_merge_after),
+                UniformSelectorConfig(
+                    lora_merge_after=args.lora_merge_after,
+                    experts_weight_list=args.expert_weights,
+                ),
             )
         else:
             expert = WeightedLinearMerge(WeightedLinearMergeConfig()).transform(library)
@@ -245,6 +279,14 @@ def run_eval(args: EvaluationConfig):
                 **loading_kwargs,
             )
             model.add_expert_instance(expert, is_default=True)
+    elif args.merge_or_route == "uniform_merge_after":
+        cfg = UniformMergeAfterConfig()
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        task_merged_vectors = UniformMergeAfter(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
 
     elif args.merge_or_route in ["ties", "wudi"]:
         if args.merge_or_route == "ties":
@@ -263,20 +305,79 @@ def run_eval(args: EvaluationConfig):
                 **loading_kwargs,
             )
             model.task_vector_apply(task_merged_vectors)
+    elif args.merge_or_route == "tsv_merge":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = TSVMergeConfig(path=f"{args.library_id}/tsv_ingredients.pt")
+        task_merged_vectors = TSVMerge(cfg).transform(library, recompute=False)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
+    elif args.merge_or_route == "iso_merge":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = ISOMergeConfig()
+        task_merged_vectors = ISOMerge(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
+    elif args.merge_or_route == "cp_merge":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = CPMergeConfig()
+        task_merged_vectors = CPMerge(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=1.0)
+    elif args.merge_or_route == "cp_merge_after":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = CPMergeAfterConfig()
+        task_merged_vectors = CPMergeAfter(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=1.0)
+    elif args.merge_or_route == "ties_merge_after":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = TiesMergeAfterConfig(mask_rate=0.8)
+        task_merged_vectors = TiesMergeAfter(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
     elif args.merge_or_route == "wudi_merge_after":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
             **loading_kwargs,
         )
-        cfg = WudiMergeConfig(
-            iter=300,
-            lr=1e-5,
-            task_vector_checkpoint=f"{args.library_id}/task_vectors.pt",
+        cfg = WudiMergeConfig(iter=300, lr=1e-5)
+        task_merged_vectors = WudiMergeAfter(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
+    elif args.merge_or_route == "wudi_merge_2":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
         )
-        task_merged_vectors = WudiMergeAfter(cfg).transform(
-            library, recompute=args.recompute_prototypes
+        cfg = WuDiMerge2Config(iter=300, lr=1e-5)
+        WuDiMerge2(cfg).transform(library, model.model)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
+    elif args.merge_or_route == "knots":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
         )
-        model.task_vector_apply(task_merged_vectors, expert_scaling=args.expert_scaling)
+        cfg = KnotMergeConfig(path=f"{args.library_id}/knot_ingredients.pt")
+        task_merged_vectors = KnotMerge(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
+    elif args.merge_or_route == "analytical_wudi_merge":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = AnalyticalWudiMergeConfig()
+        task_merged_vectors = AnalyticalWudiMerge(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
+
     elif args.merge_or_route == "uniform_lora_after_op":
         # Here we merge the LoRA experts after the outer product we cannot really do it
         # with the lib transform, cause this would require storing large matrices in memory
@@ -295,7 +396,6 @@ def run_eval(args: EvaluationConfig):
             ExpertModelConfig(base_model=base_model),
             **loading_kwargs,
         )
-
     elif args.merge_or_route in ["phatgoose", "arrow", "avg_act"]:
         """Routing Approaches"""
         from mttl.models.containers.selectors import (
@@ -325,7 +425,6 @@ def run_eval(args: EvaluationConfig):
 
     elif args.merge_or_route == "oracle":
         """TaskNameSelector"""
-        from mttl.models.containers.selectors import TaskNameSelectorConfig
 
         selector_config = TaskNameSelectorConfig.from_training_config(args)
 
@@ -334,55 +433,22 @@ def run_eval(args: EvaluationConfig):
             selector_config=selector_config,
             **loading_kwargs,
         )
+        # model.set_default_expert(args.finetune_task_name)
     else:
         raise ValueError(f"Unknown merge_or_route {args.merge_or_route}")
 
     metric_logger = Selector.metric_logger
 
-    if wandb.run is None and os.environ.get("WANDB_API_KEY"):
-        wandb.init(
-            project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
-            config=vars(args),
-            name=os.environ.get("AMLT_JOB_NAME", None),
-        )
-        # update config
-        wandb.config.update({f"cmd_args_{k}": v for k, v in vars(args).items()})
-
     if args.pipeline_eval_tasks in [
         "in_distribution",
     ]:
-
-        tasks = [expert.expert_task_name for expert in library.data.values()]
-        tasks = [
-            "requests_with_safety_concerns",
-            "humanizing_requests",
-            "incomplete_requests",
-            "unsupported_requests",
-            "indeterminate_requests",
-        ]
-        # sort tasks by name
-        tasks = sorted(tasks)
-        if tasks[0] is None:
-            # for some older version of lib (in case of joint experts) no expert_task_name was set
-            tasks = json.load(open(args.flan_tasks_path))["flan256"]
-
-        # make sure we evaluate each task seperately (so the mean is over tasks at the end)
-        tasks = ",".join(tasks).split(",")
+        tasks = args.expert_selection.split(",")
         train_cfg.eval_metric = args.eval_metric
         scores = eval_in_distribution(model, train_cfg, tasks)
-    elif args.pipeline_eval_tasks == "task_adapter":
-        config = TaskAdapterConfig(model=base_model, finetune_task_name=args.finetune_task_name, max_output_length=args.max_output_length,)
-        dm_for_gen = TaskAdapterModule(config, for_generation=True)
-        abstainqa_evaluator = AbstainQAEvaluator(
-            datamodule=dm_for_gen
-        )
-        abstain_scores = abstainqa_evaluator.evaluate(model, split="test", verbose=False)
-        if wandb.run is not None:
-            if abstain_scores is not None:
-                wandb.log({f"downstream/test_task_adapter": abstain_scores})
-        return
     elif args.finetune_task_name is not None:
+
         task = args.finetune_task_name
+        logger.info(f"Evaluating Rouge on: {task}")
 
         train_cfg.finetune_task_name = task
         dm_for_gen = get_datamodule(train_cfg, for_generation=True)
@@ -475,13 +541,13 @@ def run_eval(args: EvaluationConfig):
         print(expert_p)
         print(angle)
 
-    if wandb.run is not None:
-        if scores is not None:
-            wandb.log({f"downstream/{k}": v for k, v in scores.items()})
-        if len(metric_logger) > 0:
-            wandb.log({k: v.avg for k, v in metric_logger.meters.items()})
+    # if wandb.run is not None:
+    #     if scores is not None:
+    #         wandb.log({f"downstream/{k}": v for k, v in scores.items()})
+    #     if len(metric_logger) > 0:
+    #         wandb.log({k: v.avg for k, v in metric_logger.meters.items()})
 
-        wandb.finish()
+    #     wandb.finish()
 
 
 if __name__ == "__main__":

@@ -4,7 +4,9 @@ import re
 def filter_expert_weights(layer_name, expert_weights):
     # subset the relevant expert weights starting w __layer_name__
     keys = list(expert_weights.keys())
-
+    weights = {}
+    if "model.model" in keys[0]:
+        layer_name = "model." + layer_name
     if "transformer.h" in keys[0] and "layers." in layer_name:
         # phi-huggingface to phi-private
         weights = {}
@@ -16,7 +18,6 @@ def filter_expert_weights(layer_name, expert_weights):
             weights[k] = v
     else:
         weights = expert_weights
-
     weights = {
         k.replace(layer_name + ".", ""): v
         for k, v in weights.items()
