@@ -1,10 +1,6 @@
-import os
-
 from tqdm.auto import tqdm
 from mttl.evaluators.base import GenerativeEvaluator, switch_to_eval_mode
-import re
 from mttl.logging import logger
-import json
 from mttl.evaluators.metrics import compute_metrics
 
 
@@ -83,19 +79,24 @@ class AbstainQAEvaluator(GenerativeEvaluator):
                 break
 
             predictions = self.generate_for_batch(model, batch).generated_texts
-            for i, (pred, source, target) in enumerate(
+            for i, (pred_raw, source, target_raw) in enumerate(
                 zip(predictions, batch["sources_texts"], batch["labels_texts"])
             ):
-                logger.info(f"Pred: {pred}")
-                pred = answer_parsing(pred)
+                pred = answer_parsing(pred_raw)
+                if "[/INST]" in target_raw:
+                    target = answer_parsing(target_raw.split("[/INST]")[1].split("</s>")[0])
+                else:
+                    target = target_raw
                 if "sorry" in pred.lower():
                     abstain_flags.append(1)
                 else:
                     abstain_flags.append(0)
+                logger.info(f"Pred: {pred}, Target: {target}")
                 if pred == target:
                     correct_flags.append(1)
                 else:
                     correct_flags.append(0)
 
         metrics = compute_metrics(correct_flags, abstain_flags, abstain_scores)
+        print(metrics)
         return metrics
