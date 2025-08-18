@@ -452,6 +452,8 @@ def setup_evaluators(
     from mttl.evaluators.piqa_evaluator import PiqaEvaluator
     from mttl.evaluators.superglue_evaluators import BoolQEvaluator
     from mttl.evaluators.winogrande_evaluator import WinograndeEvaluator
+    from mttl.evaluators.adv_bench_evaluator import AdvBenchEvaluator
+    from mttl.datamodule.adv_bench_data_module import AdvBenchDataModuleConfig
 
     evaluators = {}
     common_kwargs_ = {
@@ -607,6 +609,11 @@ def setup_evaluators(
         elif task == "mmlu-fast":
             evaluators["mmlu-fast"] = MMLUEvaluatorFast(
                 MMLUDataConfig(**common_kwargs),
+                generation_kwargs=generation_kwargs,
+            )
+        elif task == "adv-bench":
+            evaluators["adv-bench"] = AdvBenchEvaluator(
+                AdvBenchDataModuleConfig(**common_kwargs),
                 generation_kwargs=generation_kwargs,
             )
         else:

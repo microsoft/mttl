@@ -975,6 +975,18 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         FlatMultiTaskConfig,
         FlatMultiTaskModule,
     )
+    from mttl.datamodule.beavertails_data_module import (
+        BeavertailsConfig,
+        BeavertailsModule,
+    )
+    from mttl.datamodule.coconot_datamodule import (
+        CoconotConfig,
+        CoconotModule,
+    )
+    from mttl.datamodule.task_adapter_data_module import (
+        TaskAdapterConfig,
+        TaskAdapterModule,
+    )
     from mttl.datamodule.openbookqa_data_module import (
         OpenbookQADataConfig,
         OpenbookQAMultiChoiceDataModule,
@@ -1071,9 +1083,22 @@ def get_datamodule(args, for_generation=False, dataset_override=None):
         assert not for_generation
         config = dataset_to_klass_map[dataset][0]
         dm = dataset_to_klass_map[dataset][1](config)
-    elif "coconot" in dataset:
-        config = AbstentionDataConfig(**common_kwargs)
-        dm = AbstentionDataModule(config, for_generation=for_generation)
+    elif "coconot" in dataset.lower():
+        config = CoconotConfig(
+            **common_kwargs,
+        )
+        dm = CoconotModule(config, for_generation=for_generation)
+    elif "task_adapter" in dataset.lower():
+        config = TaskAdapterConfig(
+            **common_kwargs,
+        )
+        dm = TaskAdapterModule(config, for_generation=for_generation)
+        
+    elif "beavertails" in dataset.lower():
+        config = BeavertailsConfig(
+            **common_kwargs,
+        )
+        dm = BeavertailsModule(config, for_generation=for_generation)
     elif "flan" in dataset:
         config = FlanConfig(
             **common_kwargs,

@@ -609,6 +609,41 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
 
         return selector_config
 
+    def task_vector_apply(self, task_merged_vectors, scaling_coefficient=1.0):
+        """
+        Apply the task merged vectors to the model
+        """
+
+        # convert the task_merged vectors to the same name if it is lora a or b
+        lora_merged_vectors = {}
+        for name, param in task_merged_vectors.items():
+            layer_name = name.split(".lora_")[0]
+            if layer_name + ".lora_a" in task_merged_vectors.keys():
+                weight = (
+                    task_merged_vectors[layer_name + ".lora_a"]
+                    @ task_merged_vectors[layer_name + ".lora_b"]
+                )
+                lora_merged_vectors[layer_name] = weight
+        if len(lora_merged_vectors) > 0:
+            logger.info("Merging LoRA vectors")
+            task_merged_vectors = lora_merged_vectors
+
+        # merge the task vectors to the model
+        for name, param in self.model.named_parameters():
+            name = name.split(".weight")[0]
+            if name in task_merged_vectors.keys():
+                logger.info(f"Merging {name} to the model")
+                ## some times the shape is the reverse the task_merged_vectors
+                if param.shape != task_merged_vectors[name].shape:
+                    print(
+                        f"shape mismatch {param.shape} {task_merged_vectors[name].shape}"
+                    )
+                    task_merged_vectors[name] = task_merged_vectors[name].T
+                res = param + scaling_coefficient * task_merged_vectors[name].to(
+                    param.device
+                )
+                param.data.copy_(res)
+
     def merge_and_save_base_model(self, output_dir, expert_name, device="cpu"):
         """
         Merge the specific expert and save the base model in the huggingface format

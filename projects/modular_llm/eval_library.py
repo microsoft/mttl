@@ -31,6 +31,20 @@ from mttl.models.library.library_transforms import (
     AnalyticalWudiMergeConfig,
     WuDiMerge2,
     WuDiMerge2Config,
+    KnotMerge,
+    KnotMergeConfig,
+    TSVMerge,
+    TSVMergeConfig,
+    TiesMergeAfter,
+    TiesMergeAfterConfig,
+    UniformMergeAfter,
+    UniformMergeAfterConfig,
+    ISOMerge,
+    ISOMergeConfig,
+    CPMerge,
+    CPMergeConfig,
+    CPMergeAfter,
+    CPMergeAfterConfig,
 )
 from mttl.models.lightning.callbacks import LossCallback
 from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
@@ -38,6 +52,22 @@ from mttl.models.modifiers.lora import LoRAConfig
 from mttl.utils import remote_login
 from mttl.models.containers.selectors.base import UniformSelectorConfig
 from mttl.models.containers.selectors import TaskNameSelectorConfig
+
+from mttl.models.containers.selectors.base import UniformSelectorConfig
+from mttl.evaluators.adv_bench_evaluator import AdvBenchEvaluator
+from mttl.datamodule.adv_bench_data_module import (
+    AdvBenchDataModule,
+    AdvBenchDataModuleConfig,
+)
+from mttl.datamodule.task_adapter_data_module import TaskAdapterModule, TaskAdapterConfig
+from mttl.evaluators.abstain_evaluator import AbstainQAEvaluator
+
+from mttl.evaluators.asr_evaluator import ASREvaluator
+from mttl.datamodule.beavertails_data_module import (
+    BeavertailsSafeDataModuleConfig,
+    BeavertailsSafeModule,
+)
+from mttl.datamodule.xstest_data_module import XSTestDataModule, XSTestDataModuleConfig
 
 
 def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
@@ -81,6 +111,17 @@ def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
                 split="test",
                 verbose=False,
             )
+        elif args.eval_metric == "asr":
+            dm = get_datamodule(args, for_generation=True)
+            evaluator = ASREvaluator(
+                datamodule=dm,
+            )
+            metric = evaluator.evaluate(
+                module,
+                split="test",
+                verbose=False,
+            )
+            logger.info(f"ASR: {metric}")
         else:
             raise ValueError(f"Unknown eval metric {args.eval_metric}")
         if wandb.run is not None:
@@ -158,6 +199,15 @@ def run_eval(args: EvaluationConfig):
 
     remote_login(args.remote_token)
 
+    if wandb.run is None and os.environ.get("WANDB_API_KEY"):
+        wandb.init(
+            project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
+            config=vars(args),
+            name=os.environ.get("AMLT_JOB_NAME", None),
+        )
+        # update config
+        wandb.config.update({f"cmd_args_{k}": v for k, v in vars(args).items()})
+
     exclude_phi_tasks = [
         "hellaswag_1_1_0",
         "ai2_arc_ARC_Challenge_1_0_0",
@@ -229,26 +279,80 @@ def run_eval(args: EvaluationConfig):
                 **loading_kwargs,
             )
             model.add_expert_instance(expert, is_default=True)
+    elif args.merge_or_route == "uniform_merge_after":
+        cfg = UniformMergeAfterConfig()
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        task_merged_vectors = UniformMergeAfter(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
 
     elif args.merge_or_route in ["ties", "wudi"]:
         if args.merge_or_route == "ties":
             cfg = TiesMergeConfig()
             expert = TiesMerge(cfg).transform(library)
+            model = MultiExpertModel(
+                MultiExpertModelConfig(base_model=base_model),
+                **loading_kwargs,
+            )
+            model.add_expert_instance(expert, is_default=True)
         elif args.merge_or_route == "wudi":
-            cfg = WudiMergeConfig(iter=1000, lr=1e-5)
-            expert = WudiMerge(cfg).transform(library)
+            cfg = WudiMergeConfig(iter=300, lr=1e-5)
+            task_merged_vectors = WudiMerge(cfg).transform(library)
+            model = MultiExpertModel(
+                MultiExpertModelConfig(base_model=base_model),
+                **loading_kwargs,
+            )
+            model.task_vector_apply(task_merged_vectors)
+    elif args.merge_or_route == "tsv_merge":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
             **loading_kwargs,
         )
-        model.add_expert_instance(expert, is_default=True)
+        cfg = TSVMergeConfig(path=f"{args.library_id}/tsv_ingredients.pt")
+        task_merged_vectors = TSVMerge(cfg).transform(library, recompute=False)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
+    elif args.merge_or_route == "iso_merge":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = ISOMergeConfig()
+        task_merged_vectors = ISOMerge(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
+    elif args.merge_or_route == "cp_merge":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = CPMergeConfig()
+        task_merged_vectors = CPMerge(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=1.0)
+    elif args.merge_or_route == "cp_merge_after":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = CPMergeAfterConfig()
+        task_merged_vectors = CPMergeAfter(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=1.0)
+    elif args.merge_or_route == "ties_merge_after":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = TiesMergeAfterConfig(mask_rate=0.8)
+        task_merged_vectors = TiesMergeAfter(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
     elif args.merge_or_route == "wudi_merge_after":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
             **loading_kwargs,
         )
         cfg = WudiMergeConfig(iter=300, lr=1e-5)
-        WudiMergeAfter(cfg).transform(library, model.model)
+        task_merged_vectors = WudiMergeAfter(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
     elif args.merge_or_route == "wudi_merge_2":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
@@ -256,13 +360,23 @@ def run_eval(args: EvaluationConfig):
         )
         cfg = WuDiMerge2Config(iter=300, lr=1e-5)
         WuDiMerge2(cfg).transform(library, model.model)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
+    elif args.merge_or_route == "knots":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        cfg = KnotMergeConfig(path=f"{args.library_id}/knot_ingredients.pt")
+        task_merged_vectors = KnotMerge(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
     elif args.merge_or_route == "analytical_wudi_merge":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
             **loading_kwargs,
         )
         cfg = AnalyticalWudiMergeConfig()
-        AnalyticalWudiMerge(cfg).transform(library, model.model)
+        task_merged_vectors = AnalyticalWudiMerge(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
 
     elif args.merge_or_route == "uniform_lora_after_op":
         # Here we merge the LoRA experts after the outer product we cannot really do it
@@ -325,21 +439,23 @@ def run_eval(args: EvaluationConfig):
 
     metric_logger = Selector.metric_logger
 
-    if wandb.run is None and os.environ.get("WANDB_API_KEY"):
-        wandb.init(
-            project=os.environ.get("WANDB_PROJECT", "0shot_routing"),
-            config=vars(args),
-            name=os.environ.get("AMLT_JOB_NAME", None),
-        )
-        # update config
-        wandb.config.update({f"cmd_args_{k}": v for k, v in vars(args).items()})
-
     if args.pipeline_eval_tasks in [
         "in_distribution",
     ]:
         tasks = args.expert_selection.split(",")
         train_cfg.eval_metric = args.eval_metric
         scores = eval_in_distribution(model, train_cfg, tasks)
+    elif args.pipeline_eval_tasks == "task_adapter":
+        config = TaskAdapterConfig(model=base_model, finetune_task_name=args.finetune_task_name, max_output_length=args.max_output_length,)
+        dm_for_gen = TaskAdapterModule(config, for_generation=True)
+        abstainqa_evaluator = AbstainQAEvaluator(
+            datamodule=dm_for_gen
+        )
+        abstain_scores = abstainqa_evaluator.evaluate(model, split="test", verbose=False)
+        if wandb.run is not None:
+            if abstain_scores is not None:
+                wandb.log({f"downstream/test_task_adapter": abstain_scores})
+        return
     elif args.finetune_task_name is not None:
 
         task = args.finetune_task_name
@@ -348,13 +464,66 @@ def run_eval(args: EvaluationConfig):
         train_cfg.finetune_task_name = task
         dm_for_gen = get_datamodule(train_cfg, for_generation=True)
 
-        rouge_evaluator = RougeEvaluator(dm_for_gen)
-        rouge = rouge_evaluator.evaluate(model, split="test", verbose=False)
+        if args.eval_metric == "rougeL":
+            logger.info(f"Evaluating Rouge on: {task}")
 
-        logger.info(f"RougeL: {rouge}")
+            rouge_evaluator = RougeEvaluator(datamodule=dm_for_gen)
+            rouge = rouge_evaluator.evaluate(model, split="test", verbose=True)
+
+            logger.info(f"RougeL: {rouge}")
+            if wandb.run is not None:
+                if rouge is not None:
+                    wandb.log({f"downstream/test_rougeL": rouge})
+        elif args.eval_metric == "asr":
+            logger.info(f"Evaluating ASR on: {task}")
+            asr_evaluator = ASREvaluator(datamodule=dm_for_gen)
+            asr = asr_evaluator.evaluate(model, split="test", verbose=True)
+            logger.info(f"ASR: {asr}")
+            if wandb.run is not None:
+                if asr is not None:
+                    wandb.log({f"downstream/test_asr": asr})
+        else:
+            raise ValueError(f"Unknown eval metric {args.eval_metric}")
+
+        return
+    elif args.pipeline_eval_tasks == "adv-bench":
+        config = AdvBenchDataModuleConfig(
+            model=base_model,
+        )
+        dm_for_gen = AdvBenchDataModule(config, for_generation=True)
+        adv_bench_evaluator = AdvBenchEvaluator(
+            datamodule=dm_for_gen,
+        )
+        adv_bench = adv_bench_evaluator.evaluate(model, split="test", verbose=False)
+        logger.info(f"Adv-bench: {adv_bench}")
         if wandb.run is not None:
-            if rouge is not None:
-                wandb.log({f"downstream/test_rougeL": rouge})
+            if adv_bench is not None:
+                wandb.log({f"downstream/test_adv-bench": adv_bench})
+        return
+    elif args.pipeline_eval_tasks == "beavertails_safe":
+        config = BeavertailsSafeDataModuleConfig(model=base_model)
+        dm_for_gen = BeavertailsSafeModule(config, for_generation=True)
+        asr_evaluator = ASREvaluator(
+            datamodule=dm_for_gen,
+        )
+        asr = asr_evaluator.evaluate(model, split="test", verbose=False)
+        logger.info(f"ASR: {asr}")
+        if wandb.run is not None:
+            if asr is not None:
+                wandb.log({f"downstream/test_asr": asr})
+        return
+    elif args.pipeline_eval_tasks == "xstest_safe":
+        config = XSTestDataModuleConfig(model=base_model, is_safe=True)
+        dm_for_gen = XSTestDataModule(config, for_generation=True)
+        asr_evaluator = ASREvaluator(
+            datamodule=dm_for_gen,
+        )
+        asr = asr_evaluator.evaluate(model, split="test", verbose=False)
+        logger.info(f"ASR: {asr}")
+        if wandb.run is not None:
+            if asr is not None:
+                wandb.log({f"downstream/test_asr": asr})
+        return
     else:
         if args.pipeline_eval_tasks == "all":
             args.pipeline_eval_tasks = "arc-challenge,arc-easy,boolq,hellaswag,humaneval,mbpp,openbookqa,piqa,bbh-fast,winogrande"

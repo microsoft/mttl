@@ -593,11 +593,14 @@ class EvaluationConfig(MultiExpertConfig, TransformArgs):
     es_metric: str = "loss"
     n_ng_iterations: int = 30  # number of iterations for LoraHub
     recompute_prototypes: bool = False
+    expert_scaling: float = 1.0
+    lora_merge_after: bool = False
     gsm_template: str = "cot"
     lora_merge_after: bool = False
     gsm_dataset: str = "gsm-hard"
     save_merged_model: str = None
     expert_weights: str = None
+    scaling_coefficient: float = 1.0
 
 
 @dataclass
