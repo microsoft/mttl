@@ -445,6 +445,17 @@ def run_eval(args: EvaluationConfig):
         tasks = args.expert_selection.split(",")
         train_cfg.eval_metric = args.eval_metric
         scores = eval_in_distribution(model, train_cfg, tasks)
+    elif args.pipeline_eval_tasks == "task_adapter":
+        config = TaskAdapterConfig(model=base_model, finetune_task_name=args.finetune_task_name, max_output_length=args.max_output_length,)
+        dm_for_gen = TaskAdapterModule(config, for_generation=True)
+        abstainqa_evaluator = AbstainQAEvaluator(
+            datamodule=dm_for_gen
+        )
+        abstain_scores = abstainqa_evaluator.evaluate(model, split="test", verbose=False)
+        if wandb.run is not None:
+            if abstain_scores is not None:
+                wandb.log({f"downstream/test_task_adapter": abstain_scores})
+        return
     elif args.finetune_task_name is not None:
 
         task = args.finetune_task_name
