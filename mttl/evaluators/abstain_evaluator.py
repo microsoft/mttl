@@ -85,6 +85,8 @@ class AbstainQAEvaluator(GenerativeEvaluator):
                 pred = answer_parsing(pred_raw)
                 if "[/INST]" in target_raw:
                     target = answer_parsing(target_raw.split("[/INST]")[1].split("</s>")[0])
+                elif "<|assistant|>" in target_raw:
+                    target = answer_parsing(target_raw.split("<|assistant|>")[1].split("<|end|>")[0])
                 else:
                     target = target_raw
                 if "sorry" in pred.lower():
