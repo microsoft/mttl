@@ -371,7 +371,6 @@ def run_eval(args: EvaluationConfig):
         train_cfg.eval_metric = args.eval_metric
         scores = eval_in_distribution(model, train_cfg, tasks)
     elif args.pipeline_eval_tasks == "task_adapter":
-        base_model = "mistralai/Mistral-7B-Instruct-v0.3"
         config = TaskAdapterConfig(model=base_model, finetune_task_name=args.finetune_task_name, max_output_length=args.max_output_length,)
         dm_for_gen = TaskAdapterModule(config, for_generation=True)
         abstainqa_evaluator = AbstainQAEvaluator(
