@@ -10,7 +10,7 @@ from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
 from mttl.models.library.dataset_library import DatasetLibrary
 from datasets import load_dataset
 
-def apply_template_(tokenizer, example):
+def apply_template_phi3(tokenizer, example):
     message = [
         {"role": "user", "content": example["source"]},
         {"role": "assistant", "content": example["target"]},
@@ -24,11 +24,26 @@ def apply_template_(tokenizer, example):
     return example
 
 
-def apply_template(dataset, tokenizer):
-    dataset = dataset.map(
-        partial(apply_template_, tokenizer),
+def apply_template_mistral(tokenizer, example):
+    message = [
+        {"role": "user", "content": example["source"]},
+        {"role": "assistant", "content": example["target"]},
+    ]
+    tokenized_message = tokenizer.apply_chat_template(message, tokenize=False)
+    example["source"] = tokenized_message.split("[/INST]")[0]
+    example["target"] = "[/INST]" + tokenized_message.split("[/INST]")[1]
+    return example
+def apply_template(dataset, tokenizer, model_name):
+    if "Phi-3-mini-4k-instruct" in model_name:
+        dataset = dataset.map(
+            partial(apply_template_phi3, tokenizer),
         num_proc=int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16)),
-    )
+        )
+    elif "Mistral-7B-Instruct-v0.3" in model_name:
+        dataset = dataset.map(
+            partial(apply_template_mistral, tokenizer),
+        num_proc=int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16)),
+        )
     return dataset
 
 
@@ -49,9 +64,7 @@ class TaskAdapterModule(DataModule):
         n_proc = min(
             len(self.dataset), int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
         )
-
-        if self.tokenizer.chat_template is not None:
-            self.dataset = apply_template(self.dataset, self.tokenizer)
+        self.dataset = apply_template(self.dataset, self.tokenizer, self.config.model)
 
         (
             self._task_names,
@@ -73,13 +86,20 @@ class TaskAdapterModule(DataModule):
 
 
 if __name__ == "__main__":
+    from transformers import AutoTokenizer
     config = TaskAdapterConfig(
         dataset="zhan1993/task_adapter_dataset",
-        model="microsoft/Phi-3-mini-4k-instruct",
+        model="mistralai/Mistral-7B-Instruct-v0.3",
         train_batch_size=1,
         finetune_task_name="mmlu",
     )
     data_module = TaskAdapterModule(config)
+
+    # conversation = [{"role": "user", "content": "What's the weather like in Paris?"}, {"role": "assistant", "content": "The weather in Paris is sunny."}]
+    # tokenizer = AutoTokenizer.from_pretrained(config.model)
+    # tokenized_message = tokenizer.apply_chat_template(conversation, tokenize=False)
+    # print(tokenized_message)
+    # breakpoint()
     data_module.setup_dataset()
     count = 0
     for batch in tqdm(data_module.test_dataloader()):
