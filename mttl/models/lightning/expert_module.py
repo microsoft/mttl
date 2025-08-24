@@ -55,21 +55,13 @@ class LightningTrainingMixin:
         outputs, context = self.forward(**batch, return_context=True)
         loss = outputs.loss
         total_loss = loss
-        aug_losses = []
-        for name, module in self.model.model.named_modules():
-            if "selector" in name and hasattr(module, "aug_loss"):
-                aug_losses.append(module.aug_loss)
+        aux_losses_dict = context["routing_infos"].aux_losses
+        aux_losses = torch.stack([aux_losses_dict[k] for k in aux_losses_dict.keys()])
+        aux_losses = aux_losses.mean()
+        total_loss += aux_losses
 
-        if aug_losses:
-            total_aug_loss = sum(aug_losses)
-            total_loss += total_aug_loss
-            self.log(
-                f"{self._log_pref}train/total_aug_loss",
-                total_aug_loss,
-                on_step=True,
-                prog_bar=True,
-            )
-
+        self.log(f"{self._log_pref}train/aux_losses", aux_losses, on_step=True, prog_bar=True)
+        
         self.log(f"{self._log_pref}train/loss", loss, on_step=True, prog_bar=True)
         self.log(
             f"{self._log_pref}train/total_loss", total_loss, on_step=True, prog_bar=True
