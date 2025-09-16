@@ -52,8 +52,8 @@ class LoraSoupSelector(Selector):
     def forward(self, input, **kwargs) -> ExpertsAndWeightsSelectorOutput:
         # Get base weights from learned routing
         weights = self._get_weights()
-        aug_losses = self.info_container.routing_infos.aux_losses
-        aug_losses[self.layer_name] = self.aug_loss
+        # aug_losses = self.info_container.routing_infos.aux_losses
+        # aug_losses[self.layer_name] = self.aug_loss
         # Get expert adapters
         experts = list(self.module_logits_dict.keys())
         # print(self.layer_name, proj_coeffs)
