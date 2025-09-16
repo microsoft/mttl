@@ -89,7 +89,8 @@ class ASREvaluator(GenerativeEvaluator):
             for i, (pred, source, target) in enumerate(
                 zip(predictions, batch["sources_texts"], batch["labels_texts"])
             ):
-                logger.info(f"Pred: {pred}")
+                if verbose:
+                    logger.info(f"Pred: {pred}")
                 attack_success = check_for_attack_success(pred)
                 attack_successes.append(attack_success)
 

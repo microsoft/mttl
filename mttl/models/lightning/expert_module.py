@@ -55,9 +55,15 @@ class LightningTrainingMixin:
         outputs, context = self.forward(**batch, return_context=True)
         loss = outputs.loss
         total_loss = loss
-        aux_losses_dict = context["routing_infos"].aux_losses
-        aux_losses = torch.stack([aux_losses_dict[k] for k in aux_losses_dict.keys()])
-        aux_losses = aux_losses.mean()
+        if context["routing_infos"] is not None:
+            aux_losses_dict = context["routing_infos"].aux_losses
+            if len(aux_losses_dict) > 0:
+                aux_losses = torch.stack([aux_losses_dict[k] for k in aux_losses_dict.keys()])
+                aux_losses = aux_losses.mean()
+            else:
+                aux_losses = 0.0
+        else:
+            aux_losses = 0.0
         total_loss += aux_losses
 
         self.log(f"{self._log_pref}train/aux_losses", aux_losses, on_step=True, prog_bar=True)
