@@ -11,11 +11,11 @@ from mttl.models.library.dataset_library import DatasetLibrary
 from datasets import load_dataset
 
 def apply_template_phi3(tokenizer, example):
+    instruction = "Please answer the following question, but if you are unsure, please answer 'I don't know'."
     message = [
-        {"role": "user", "content": example["source"]},
+        {"role": "user", "content": instruction + "\n" + example["source"]},
         {"role": "assistant", "content": example["target"]},
     ]
-
     tokenized_message = tokenizer.apply_chat_template(message, tokenize=False)
     # split the message into source and target
     example["source"] = tokenized_message.split("<|assistant|>")[0]
@@ -37,7 +37,7 @@ def apply_template(dataset, tokenizer, model_name):
     if "Phi-3-mini-4k-instruct" in model_name:
         dataset = dataset.map(
             partial(apply_template_phi3, tokenizer),
-        num_proc=int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16)),
+            num_proc=int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16)),
         )
     elif "Mistral-7B-Instruct-v0.3" in model_name:
         dataset = dataset.map(
@@ -62,7 +62,7 @@ class TaskAdapterModule(DataModule):
         self.dataset = self.dataset.filter(lambda x: len(x["source"]) > 0)
 
         n_proc = min(
-            len(self.dataset), int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
+            len(self.dataset), int(os.environ.get("MTTL_NUM_PROC_DATASETS", 4))
         )
         self.dataset = apply_template(self.dataset, self.tokenizer, self.config.model)
 
