@@ -8,7 +8,6 @@ from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
 import torch
 from tqdm import tqdm
 from mttl.logging import setup_logging
-from mttl.models.modifiers.lora import spectral_distance, spectral_energy_ratio
 import numpy as np
 import matplotlib.pyplot as plt
 import json
@@ -17,6 +16,7 @@ from mttl.datamodule.base import get_datamodule
 from mttl.datamodule.abstention_data_module import AbstentionDataModule
 from mttl.datamodule.task_adapter_data_module import TaskAdapterModule, TaskAdapterConfig
 from mttl.evaluators.abstain_evaluator import AbstainQAEvaluator
+from mttl.evaluators.asr_evaluator import ASREvaluator
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 setup_logging()
@@ -41,10 +41,22 @@ if args.checkpoint is not None:
     module.load_state_dict(checkpoint)
 
 
-config = TaskAdapterConfig(model=args.model, finetune_task_name=args.finetune_task_name, max_output_length=args.max_output_length,)
-dm_for_gen = TaskAdapterModule(config, for_generation=True)
-abstainqa_evaluator = AbstainQAEvaluator(
-    datamodule=dm_for_gen
+# config = TaskAdapterConfig(model=args.model, finetune_task_name=args.finetune_task_name, max_output_length=args.max_output_length,)
+# dm_for_gen = TaskAdapterModule(config, for_generation=True)
+
+# abstainqa_evaluator = AbstainQAEvaluator(
+#     datamodule=dm_for_gen
+# )
+# abstain_scores = abstainqa_evaluator.evaluate(module.model, split="test", verbose=False)
+
+dm = get_datamodule(args, for_generation=True)
+asr_evaluator = ASREvaluator(
+    datamodule=dm
 )
-abstain_scores = abstainqa_evaluator.evaluate(module.model, split="test", verbose=False)
+asr_scores = asr_evaluator.evaluate(module.model, split="test", verbose=False)
+print(f"ASR: {asr_scores}")
+
+
+
+
 
