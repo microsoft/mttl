@@ -84,7 +84,7 @@ def eval_in_distribution(module, args: EvaluationConfig, tasks: list):
                 verbose=False,
             )
         elif args.eval_metric == "rougeL":
-            if isinstance(module.selector_config, TaskNameSelectorConfig):
+            if isinstance(module, MultiExpertModel) and isinstance(module.selector_config, TaskNameSelectorConfig):
                 module.set_default_expert(task)
             dm = get_datamodule(args, for_generation=True)
             evaluator = RougeEvaluator(
@@ -284,7 +284,7 @@ def run_eval(args: EvaluationConfig):
             **loading_kwargs,
         )
         cfg = TSVMergeConfig(path=f"{args.library_id}/tsv_ingredients.pt")
-        task_merged_vectors = TSVMerge(cfg).transform(library, recompute=False)
+        task_merged_vectors = TSVMerge(cfg).transform(library, recompute=args.recompute_prototypes)
         model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
     elif args.merge_or_route == "iso_merge":
         model = MultiExpertModel(
@@ -340,7 +340,7 @@ def run_eval(args: EvaluationConfig):
             **loading_kwargs,
         )
         cfg = KnotMergeConfig(path=f"{args.library_id}/knot_ingredients.pt")
-        task_merged_vectors = KnotMerge(cfg).transform(library)
+        task_merged_vectors = KnotMerge(cfg).transform(library, recompute=args.recompute_prototypes)
         model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
     elif args.merge_or_route == "analytical_wudi_merge":
         model = MultiExpertModel(
