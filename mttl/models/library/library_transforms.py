@@ -1217,12 +1217,12 @@ class KnotMerge(LibraryTransform):
         super().__init__(config or KnotMergeConfig())
         self.ingredients = None
 
-    def transform(self, library) -> Expert:
+    def transform(self, library, recompute=False) -> Expert:
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
         # TODO: this should probably be stored in the library instead of the local path.
         # Current libary.add_auxiliary_data requires that aux data is associated with an expert, this is not associated with any expert.
-        if not os.path.exists(self.config.path):
+        if not os.path.exists(self.config.path) or recompute:
             U, task_Ss, task_sVs, UsV_dict = self.apply_svd(library)
             self.ingredients = {
                 "U": U,
