@@ -457,6 +457,7 @@ class CPMerge(LibraryTransform):
 @dataclass
 class CPMergeAfterConfig(LibraryTransformConfig):
     cp_rank: int = 4
+    path: str = "cp_merge_after_ingredients.pt"
 
 @LibraryTransform.register("cp_merge_after", CPMergeAfterConfig)
 class CPMergeAfter(LibraryTransform):
@@ -478,7 +479,7 @@ class CPMergeAfter(LibraryTransform):
 
         return task_vectors
     @torch.no_grad()
-    def transform(self, library) -> Expert:
+    def transform(self, library, recompute=False) -> Expert:
         import tensorly as tl
 
         tl.set_backend("pytorch")
@@ -494,39 +495,49 @@ class CPMergeAfter(LibraryTransform):
         layer_names = sorted(list(set(layer_names)))
 
         task_vectors_experts = {}
-        for expert in experts:
-            task_vectors = self._get_task_vectors(expert)
-            task_vectors_experts[expert.name] = task_vectors
-        task_merged_vectors = {}
-        for layer in layer_names:
-            task_vectors = [
-                task_vectors_experts[expert.name][layer] for expert in experts
-            ]
-            logger.info(f"Layer {layer} merged with CP decomposition")
-            try:
-                task_vectors_stack = torch.stack(task_vectors, dim=0).to("cuda")
-                factors_cp = parafac(
-                            task_vectors_stack,
-                            rank=self.config.cp_rank,
-                            init="random",
-                            random_state=42,
-                        )
-                # cp_third_order_tensor = tl.cp_tensor.cp_to_tensor(factors_cp)
-                # merged_param = cp_third_order_tensor.mean(0)
-                merged_param = factors_cp.factors[1] @ factors_cp.factors[2].T
-                task_merged_vectors[layer] = merged_param
-            except Exception as e:
-                logger.info(e)               
-                task_vectors_stack = torch.stack(task_vectors, dim=0).to("cpu")
-                factors_cp = parafac(
-                    task_vectors_stack,
-                    rank=self.config.cp_rank,
-                    init="random",
-                    random_state=42,
-                )
-                cp_third_order_tensor = tl.cp_tensor.cp_to_tensor(factors_cp)
-                merged_param = cp_third_order_tensor.mean(0)
-                task_merged_vectors[layer] = merged_param
+        if not os.path.exists(self.config.path) or recompute:
+            for expert in experts:
+                task_vectors = self._get_task_vectors(expert)
+                task_vectors_experts[expert.name] = task_vectors
+            task_merged_vectors = {}
+            for layer in layer_names:
+                task_vectors = [
+                    task_vectors_experts[expert.name][layer] for expert in experts
+                ]
+                logger.info(f"Layer {layer} merged with CP decomposition")
+                try:
+                    task_vectors_stack = torch.stack(task_vectors, dim=0).to("cuda")
+                    factors_cp = parafac(
+                                task_vectors_stack,
+                                rank=self.config.cp_rank,
+                                init="random",
+                                random_state=42,
+                            )
+                    # cp_third_order_tensor = tl.cp_tensor.cp_to_tensor(factors_cp)
+                    # merged_param = cp_third_order_tensor.mean(0)
+                    ar = factors_cp.factors[0] #[n_experts, rank]
+                    br = factors_cp.factors[1] #[input_dim, rank]
+                    cr = factors_cp.factors[2] #[output_dim, rank]
+
+                    ar_sum = torch.sum(ar, dim=0)
+                    delta = (br * ar_sum.unsqueeze(0)) @ cr.T
+                    task_merged_vectors[layer] = delta
+                    
+                except Exception as e:
+                    logger.info(e)               
+                    task_vectors_stack = torch.stack(task_vectors, dim=0).to("cpu")
+                    factors_cp = parafac(
+                        task_vectors_stack,
+                        rank=self.config.cp_rank,
+                        init="random",
+                        random_state=42,
+                    )
+                    cp_third_order_tensor = tl.cp_tensor.cp_to_tensor(factors_cp)
+                    merged_param = cp_third_order_tensor.mean(0)
+                    task_merged_vectors[layer] = merged_param
+            torch.save(task_merged_vectors, self.config.path)
+        else:
+            task_merged_vectors = torch.load(self.config.path)
         logger.info(f"Merged {len(task_merged_vectors)} layers")
         return task_merged_vectors
 
@@ -865,7 +876,7 @@ class ISOMerge(LibraryTransform):
             task_vectors[layer] = lora_a.data @ lora_b.data
         return task_vectors
 
-    def transform(self, library) -> Expert:
+    def transform(self, library, recompute=False) -> Expert:
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
         expert_names = list(library.keys())
