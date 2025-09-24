@@ -292,7 +292,7 @@ def run_eval(args: EvaluationConfig):
             **loading_kwargs,
         )
         cfg = ISOMergeConfig()
-        task_merged_vectors = ISOMerge(cfg).transform(library)
+        task_merged_vectors = ISOMerge(cfg).transform(library, recompute=args.recompute_prototypes)
         model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
     elif args.merge_or_route == "cp_merge":
         model = MultiExpertModel(
@@ -308,8 +308,8 @@ def run_eval(args: EvaluationConfig):
             **loading_kwargs,
         )
         cfg = CPMergeAfterConfig()
-        task_merged_vectors = CPMergeAfter(cfg).transform(library)
-        model.task_vector_apply(task_merged_vectors, scaling_coefficient=1.0)
+        task_merged_vectors = CPMergeAfter(cfg).transform(library, recompute=args.recompute_prototypes)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
     elif args.merge_or_route == "ties_merge_after":
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
