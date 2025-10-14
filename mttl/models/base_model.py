@@ -86,14 +86,28 @@ class BaseExpertModel(torch.nn.Module, Registrable, PushToHubMixin):
                 n for n, p in self.named_parameters() if p.requires_grad
             ]
 
+        if not hasattr(self, "_non_trainable_params_to_keep"):
+            self._non_trainable_params_to_keep = []
+            if hasattr(self.config, "modifier_config") and hasattr(
+                self.config.modifier_config, "non_trainable_param_patterns"
+            ):
+                self._non_trainable_params_to_keep = [
+                    n
+                    for n, p in self.named_parameters()
+                    if n.endswith(
+                        self.config.modifier_config.non_trainable_param_patterns
+                    )
+                ]
         keys = [k for k in state_dict.keys()]
 
         deleted = []
         for key in keys:
             # we can safely avoid dumping this parameter if it is both
             # not in the trainable parameters and was not loaded from checkpoint
-            if not (key in self.trainable_param_names) and not (
-                key in self._params_from_checkpoint
+            if (
+                not (key in self.trainable_param_names)
+                and not (key in self._params_from_checkpoint)
+                and not (key in self._non_trainable_params_to_keep)
             ):
                 del state_dict[key]
                 deleted.append(key)

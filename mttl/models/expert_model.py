@@ -635,6 +635,24 @@ class MultiExpertModel(BaseExpertModel, MultiExpertMixin):
 
         return selector_config
 
+    def task_vector_apply(self, task_merged_vectors):
+        """
+        Apply the task merged vectors to the model
+        """
+        # merge the task vectors to the model
+        for name, param in self.model.named_parameters():
+            name = name.split(".weight")[0]
+            if name in task_merged_vectors.keys():
+                logger.info(f"Merging {name} to the model")
+                ## some times the shape is the reverse the task_merged_vectors
+                if param.shape != task_merged_vectors[name].shape:
+                    print(
+                        f"shape mismatch {param.shape} {task_merged_vectors[name].shape}"
+                    )
+                    task_merged_vectors[name] = task_merged_vectors[name].T
+                res = param + task_merged_vectors[name]
+                param.data.copy_(res)
+
     def merge_and_save_base_model(self, output_dir, expert_name, device="cpu"):
         """
         Merge the specific expert and save the base model in the huggingface format

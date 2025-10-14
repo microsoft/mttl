@@ -267,7 +267,7 @@ class DefaultCollator(PackedMixin):
 
         # adds the eos token
         labels_ = [
-            l + (self.tokenizer.eos_token if self.add_eos_to_targets else "")
+            l + ((self.tokenizer.eos_token) if self.add_eos_to_targets else "")
             for l in labels_
         ]
         return sources_, labels_
@@ -282,6 +282,7 @@ class DefaultCollator(PackedMixin):
                 padding=self.padding,
                 return_tensors=self.return_tensors,
                 truncation=True,
+                add_special_tokens=False,
             )
             tokenized_sources = self.tokenizer(
                 sources,
@@ -290,16 +291,21 @@ class DefaultCollator(PackedMixin):
                 return_tensors=self.return_tensors,
                 truncation=True,
                 pad_to_multiple_of=self.pad_to_multiple_of,
+                add_special_tokens=False,
             )
         else:
             tokenized_labels = self.tokenizer(
-                labels, padding="longest", return_tensors=self.return_tensors
+                labels,
+                padding="longest",
+                return_tensors=self.return_tensors,
+                add_special_tokens=False,
             )
             tokenized_sources = self.tokenizer(
                 sources,
                 padding="longest",
                 return_tensors=self.return_tensors,
                 pad_to_multiple_of=self.pad_to_multiple_of,
+                add_special_tokens=False,
             )
 
         label_mask = tokenized_labels["attention_mask"].bool()
@@ -354,6 +360,7 @@ class DefaultCollator(PackedMixin):
             return output_batch
 
         if self.max_input_length > 0:
+            # make sure we truncate sources...labels if needed
             if self.tokenizer.truncation_side == "left":
                 tokenized_labels = self.tokenizer(
                     labels,

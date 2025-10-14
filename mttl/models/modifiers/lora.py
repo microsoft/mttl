@@ -137,10 +137,10 @@ class LoRA(Modifier, MergeableModifierMixin):
 
     def create_for_layer(self, layer):
         self.lora_a = nn.Parameter(
-            torch.empty(layer.in_features, self.rank).to(device=layer.weight.device),
+            torch.empty(layer.in_features, self.rank, device=layer.weight.device),
         )
         self.lora_b = nn.Parameter(
-            torch.empty(self.rank, layer.out_features).to(device=layer.weight.device),
+            torch.empty(self.rank, layer.out_features, device=layer.weight.device),
         )
 
     def forward(self, input, **kwargs):
