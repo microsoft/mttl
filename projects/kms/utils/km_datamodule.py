@@ -173,8 +173,12 @@ class KMDatasetModule(DataModule):
                         output_str = output
 
                     context_source, no_context_source = create_dcd_pairs(
-                        self.tokenizer, input, output_str, prompt_str,
-                        apply_chat_template=self.config.use_chat_template and self.tokenizer.chat_template is not None,
+                        self.tokenizer,
+                        input,
+                        output_str,
+                        prompt_str,
+                        apply_chat_template=self.config.use_chat_template
+                        and self.tokenizer.chat_template is not None,
                     )
                     return_dict["source"].append(context_source)
                     return_dict["nc_source"].append(no_context_source)
@@ -516,8 +520,12 @@ class ConcatDatasetModule(KMDatasetModule):
                     join_str = "\n\n\n\n"
                     concat_data = join_str.join(synthetic_data)
                     context_source, no_context_source = create_dcd_pairs(
-                        self.tokenizer, input, concat_data, prompt_str,
-                        apply_chat_template=self.config.use_chat_template and self.tokenizer.chat_template is not None,
+                        self.tokenizer,
+                        input,
+                        concat_data,
+                        prompt_str,
+                        apply_chat_template=self.config.use_chat_template
+                        and self.tokenizer.chat_template is not None,
                     )
                     return_dict["source"].append(context_source)
                     return_dict["nc_source"].append(no_context_source)
@@ -566,7 +574,10 @@ class FullDocKMDatasetModule(DataModule):
                 prompt = f"You are given a partial document. You must predict the next token in the document. Start predicting as soon as the document starts.\n\nDocument : {doc}"
 
                 # Apply chat template
-                if self.config.use_chat_template and self.tokenizer.chat_template is not None:
+                if (
+                    self.config.use_chat_template
+                    and self.tokenizer.chat_template is not None
+                ):
                     formatted_text = self.tokenizer.apply_chat_template(
                         [{"role": "user", "content": prompt}],
                         tokenize=False,

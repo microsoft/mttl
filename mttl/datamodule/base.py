@@ -807,7 +807,9 @@ class DataModule(LightningDataModule, Registrable):
                             if value == task_name
                         ]
                     )
-                    idxs = get_dst_idxs_sampled(n_samples // len(task_names), len(task_idxs))
+                    idxs = get_dst_idxs_sampled(
+                        n_samples // len(task_names), len(task_idxs)
+                    )
                     task_idxs = task_idxs[idxs]
                     task_dataset = dataset.select(task_idxs)
                     subsampled_dataset.append(task_dataset)
