@@ -104,6 +104,10 @@ We use the script `train_km_simple.py` to train the knowledge modules. In the `m
 python train_km_simple.py -c train/llama-nqa-sdcd-fp-fixed-right -k finetune_task_name=350c0f8265c2d1183fd9a7e2a92c748998ac8775
 ```
 
+**NOTE:** If you don't specify a value for `finetune_task_name`, you will train a KM on all the documents in your dataset.
+
+**NOTE:** When running our experiments, we would queue up 1 of such command, for each of the documents in our dataset. 
+
 Notice here that we use `-c` to pass in a config, and `-k` to overwrite any argument from the command line. You can chain multiple `-k` calls to overwrite multiple arg values. 
 
 
