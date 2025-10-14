@@ -44,89 +44,34 @@ from projects.kms.utils.wiki_mmlu_evaluator import WikiMMLUEvaluator
 
 torch.set_float32_matmul_precision("high")
 
+BASE_PREFIX = f"hf://pclucas14" # "az://mttldata"
 
 train_datasets = {
-    "quality-km-llama-8b": "az://mttldata/quality-summaries-qa-next-chunk-llama-8b-instruct",
-    "quality-km-phi3-med": "az://mttldata/quality-summaries-qa-next-chunk-phi-3-medium",
-    "wiki-km-llama-8b": "az://mttldata/wiki-top-20-summaries-qa-next-chunk-llama-8b-instruct",
-    "wiki-km-phi3-med": "az://mttldata/wiki-top-20-summaries-qa-next-chunk-phi-3-medium",
-    "nqa-km-phi3-med": "az://mttldata/nqa-summaries-qa-next-chunk-phi-3-medium",
-    "nqa-km-llama-8b": "az://mttldata/nqa-summaries-qa-next-chunk-llama-8b-instruct",
+    "quality-km-llama-8b": f"{BASE_PREFIX}/quality-summaries-qa-next-chunk-llama-8b-instruct",
+    "quality-km-phi3-med": f"{BASE_PREFIX}/quality-summaries-qa-next-chunk-phi-3-medium",
+    "nqa-km-phi3-med": f"{BASE_PREFIX}/nqa-summaries-qa-next-chunk-phi-3-medium",
+    "nqa-km-llama-8b": f"{BASE_PREFIX}/nqa-summaries-qa-next-chunk-llama-8b-instruct",
 }
 
 evaluate_datasets = {
-    "nqa": "az://mttldata/narrativeqa-sanitized",
-    "nqa-rag": "az://mttldata/nqa-rag-256",
-    "nqa-rag-summaries": "az://mttldata/nqa-rag-summaries",
-    "nqa-rag-128": "az://mttldata/nqa-rag-128",
-    "nqa-rag-256": "az://mttldata/nqa-rag-256",
-    "nqa-rag-512": "az://mttldata/nqa-rag-512",
-    "nqa-rag-1024": "az://mttldata/nqa-rag-1024",
-    "nqa-rag-2048": "az://mttldata/nqa-rag-2048",
-    "nqa-rag-4096": "az://mttldata/nqa-rag-4096",
-    "wiki": "az://mttldata/wiki-top-20-sanitized",
-    "wiki-rag": "az://mttldata/wiki-top-20-sanitized-rag",
-    "quality": "az://mttldata/quality-sanitized",
-    "quality-rag": "az://mttldata/ql-rag-256",
-    "quality-rag-summaries": "az://mttldata/ql-rag-summaries",
-    "quality-rag-128": "az://mttldata/ql-rag-128",
-    "quality-rag-256": "az://mttldata/ql-rag-256",
-    "quality-rag-512": "az://mttldata/ql-rag-512",
-    "quality-rag-1024": "az://mttldata/ql-rag-1024",
-    "quality-rag-2048": "az://mttldata/ql-rag-2048",
-    "quality-rag-4096": "az://mttldata/ql-rag-4096",
-    "longhealth": "az://mttldata/longhealth-sanitized",
-    "gen_quality": "az://mttldata/quality-sanitized",
+    "nqa": f"{BASE_PREFIX}/narrativeqa-sanitized",
+    "nqa-rag": f"{BASE_PREFIX}/nqa-rag-256",
+    "quality": f"{BASE_PREFIX}/quality-sanitized",
+    "quality-rag": f"{BASE_PREFIX}/ql-rag-256",
 }
 
 evaluate_class = {
     "nqa": NQAZeroShotEvaluator,
     "nqa-rag": NQAZeroShotEvaluator,
-    "nqa-rag-summaries": NQAZeroShotEvaluator,
-    "nqa-rag-128": NQAZeroShotEvaluator,
-    "nqa-rag-256": NQAZeroShotEvaluator,
-    "nqa-rag-512": NQAZeroShotEvaluator,
-    "nqa-rag-1024": NQAZeroShotEvaluator,
-    "nqa-rag-2048": NQAZeroShotEvaluator,
-    "nqa-rag-4096": NQAZeroShotEvaluator,
-    "wiki": WikiMMLUEvaluator,
-    "wiki-rag": WikiMMLUEvaluator,
     "quality": QualityEvaluator,
     "quality-rag": QualityEvaluator,
-    "quality-rag-summaries": QualityEvaluator,
-    "quality-rag-128": QualityEvaluator,
-    "quality-rag-256": QualityEvaluator,
-    "quality-rag-512": QualityEvaluator,
-    "quality-rag-1024": QualityEvaluator,
-    "quality-rag-2048": QualityEvaluator,
-    "quality-rag-4096": QualityEvaluator,
-    "longhealth": LonghealthEvaluator,
-    "gen_quality": GenQualityEvaluator,
 }
 
 evaluate_metrics = {
     "nqa": "rougeL",
     "nqa-rag": "rougeL",
-    "nqa-rag-summaries": "rougeL",
-    "nqa-rag-128": "rougeL",
-    "nqa-rag-256": "rougeL",
-    "nqa-rag-512": "rougeL",
-    "nqa-rag-1024": "rougeL",
-    "nqa-rag-2048": "rougeL",
-    "nqa-rag-4096": "rougeL",
-    "wiki": "accuracy",
-    "wiki-rag": "accuracy",
     "quality": "accuracy",
     "quality-rag": "accuracy",
-    "quality-rag-summaries": "accuracy",
-    "quality-rag-128": "accuracy",
-    "quality-rag-256": "accuracy",
-    "quality-rag-512": "accuracy",
-    "quality-rag-1024": "accuracy",
-    "quality-rag-2048": "accuracy",
-    "quality-rag-4096": "accuracy",
-    "longhealth": "accuracy",
-    "gen_quality": "accuracy",
 }
 
 
