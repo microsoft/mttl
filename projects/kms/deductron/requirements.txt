@@ -1,4 +1,0 @@
-docker
-vllm==0.6.5
-langchain-text-splitter
-termcolor
