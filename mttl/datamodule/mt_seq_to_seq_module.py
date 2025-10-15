@@ -251,20 +251,12 @@ class FlanModule(DataModule):
                 desc="Filtering task sources",
             )
 
-        (self._task_names, self._task_to_id, train_dataset, _, _) = (
+        (self._task_names, self._task_to_id, train_dataset, dev_dataset, test_dataset) = (
             maybe_filter_hf_dataset_by_task(
                 dataset, "task_name", self.config.finetune_task_name, n_proc=num_proc
             )
         )
-
-        train_dataset = apply_source_template(
-            train_dataset, self.config.source_template
-        )
-
-        train_dataset, dev_dataset, test_dataset = split_on_split_column(
-            train_dataset, num_proc=num_proc
-        )
-
+        
         if self.config.remove_phi_eval_tasks:
             assert not any(
                 name in self.config.include_task_source.lower()
