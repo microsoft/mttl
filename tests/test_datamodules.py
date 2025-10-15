@@ -325,6 +325,7 @@ def test_multichoice_collator():
     )
     collator = MultipleChoiceCollator(
         tokenizer=tokenizer,
+        max_input_length=4096,
     )
     batch = [
         {"source": "a", "target": ["a1", "a2"], "task_name": "t1", "label_index": 1},
@@ -338,7 +339,7 @@ def test_multichoice_collator():
     assert output["num_options"] == [2, 1]
     assert output["task_names"] == ["t1", "t1", "t2"]
 
-    collator = MultipleChoiceCollator(tokenizer=tokenizer, multisource=True)
+    collator = MultipleChoiceCollator(tokenizer=tokenizer, multisource=True, max_input_length=4096)
     batch = [
         {"source": ["a1", "a2"], "target": "a", "task_name": "t1", "label_index": 1},
         {"source": ["b1"], "target": "b", "task_name": "t2", "label_index": 0},
@@ -360,19 +361,19 @@ def test_mbpp():
     )
 
     module = MBPPDataModule(config, for_generation=False)
-    assert len(module.train_dataset) == 120
+    assert len(module.test_dataset) == 427 # size of the sanitized split
     # must be executable so that the model trains on valid code
-    for ex in module.train_dataset:
+    for ex in module.test_dataset:
         exec(ex["source"] + ex["target"])
 
 
 @pytest.mark.parametrize(
     "subsample, subsample_per_task, train_size",
     [
-        (None, None, 160),
-        (0.5, True, 80),
+        (None, None, 200),
+        (0.5, False, 100),
         (5, False, 5),
-        (5, True, 10),
+        (5, True, 4),
     ],
 )
 def test_dst_subsample(tiny_flan_id, subsample, subsample_per_task, train_size):

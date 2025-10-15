@@ -171,6 +171,7 @@ class ExpertContainer(nn.Module, Container):
         expert: Expert,
         action="merge",
         is_default=False,
+        device: str = None,
     ) -> None:
         pass
 

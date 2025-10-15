@@ -149,7 +149,7 @@ class PolySelector(Selector):
         return {k: v.detach().item() for k, v in zip(self.expert_names, weights[0][0])}
 
     def on_add_expert(
-        self, expert_name: str, expert_info: ExpertInfo, is_default=False
+        self, expert_name: str, expert_info: ExpertInfo, is_default=False, device: str = None
     ):
         # we need additional space in the routing to accomodate the incoming expert
         self.module_logits.data = torch.empty(
@@ -189,7 +189,7 @@ class PolySelectorDirect(PolySelector):
         return {k: v.detach().item() for k, v in self.module_logits_dict.items()}
 
     def on_add_expert(
-        self, expert_name: str, expert_info: ExpertInfo, is_default=False
+        self, expert_name: str, expert_info: ExpertInfo, is_default=False, device: str = None
     ):
         """
         Assume:
@@ -252,7 +252,7 @@ class PolyUniform(PolySelectorDirect):
     """
 
     def on_add_expert(
-        self, expert_name: str, expert_info: ExpertInfo, is_default=False
+        self, expert_name: str, expert_info: ExpertInfo, is_default=False, device: str = None
     ):
         if expert_name not in self.module_logits_dict:
             self.module_logits_dict[expert_name] = torch.nn.Parameter(

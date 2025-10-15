@@ -107,6 +107,7 @@ class HardPromptExpertContainer(ExpertContainer):
         self,
         expert: Expert,
         is_default=False,
+        device: str = None,
     ) -> None:
         from mttl.models.modifiers.modify_model import get_modifier_name
 

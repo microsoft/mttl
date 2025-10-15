@@ -355,7 +355,7 @@ class TrainingArgs(DataArgs):
     expert_name: str = None
 
     # Training config
-    micro_batch_size: str = None
+    micro_batch_size: int = None
     compute_strategy: str = None
     scheduler: str = "linear_decay_with_warmup"
     checkpoint: str = None  # load from checkpoint

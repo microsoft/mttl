@@ -132,7 +132,7 @@ class PKSSelector(Selector):
         )
 
     def on_add_expert(
-        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False, device: str = None
     ):
         # No need to do anything here, as it relied on moe_num_experts to be passed at instantiation.
         pass

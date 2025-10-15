@@ -321,7 +321,7 @@ class SkilledLoRAExpertContainer(LoRAExpertContainer):
         else:
             raise ValueError("Unknown modifier type, expected LoRA or SkilledLoRA.")
 
-    def on_add_expert(self, expert: Expert, is_default=False) -> None:
+    def on_add_expert(self, expert: Expert, is_default=False, device: str = None) -> None:
         from mttl.models.containers.utils import filter_expert_weights
 
         # back-compatibility, in previous versions, the expert config was a training config

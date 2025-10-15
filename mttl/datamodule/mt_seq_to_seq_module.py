@@ -198,7 +198,7 @@ class FlatMultiTaskModule(DataModule):
         self.dev_dataset = dev_dataset
         self.test_dataset = test_dataset
 
-        if len(self.test_dataset) == 0:
+        if self.test_dataset is None or len(self.test_dataset) == 0:
             self.test_dataset = self.dev_dataset
 
 

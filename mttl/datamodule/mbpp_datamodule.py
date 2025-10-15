@@ -93,7 +93,7 @@ class MBPPDataModule(DataModule):
 
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
-        dataset = DatasetLibrary.pull_dataset("mbpp", name=self.config.name)
+        dataset = DatasetLibrary.pull_dataset("Muennighoff/mbpp", name=self.config.name)
 
         dataset = dataset.map(
             (
