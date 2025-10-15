@@ -154,7 +154,9 @@ class PackedMixin:
             elif "labels" in key:
                 return self.label_pad_token_id
             else:
-                raise ValueError(f"Unknown key {key}")
+                # TODO: make find a better way to do this
+                # Explicitly not using 0 or -1 as these are likely valid indices.
+                return 2**16 - 1
 
         for key, value in output_batch.items():
             if isinstance(value[0], torch.Tensor):

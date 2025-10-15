@@ -128,15 +128,15 @@ def nonzero_B_init(model):
     for mod in model.modules():
         if type(mod) == LoRAExpertContainer:
             for name, param in mod.lora_a.items():
-                param.data = torch.rand(param.shape, generator=gen) * 0.5
+                param.data = torch.rand(param.shape, generator=gen)
             for name, param in mod.lora_b.items():
-                param.data = torch.rand(param.shape, generator=gen) * 0.5
+                param.data = torch.rand(param.shape, generator=gen)
         elif type(mod) == SkilledLoRAExpertContainer:
             mod.experts.lora_a.data = (
-                torch.rand(mod.experts.lora_a.shape, generator=gen) * 0.5
+                torch.rand(mod.experts.lora_a.shape, generator=gen)
             )
             mod.experts.lora_b.data = (
-                torch.rand(mod.experts.lora_b.shape, generator=gen) * 0.5
+                torch.rand(mod.experts.lora_b.shape, generator=gen)
             )
 
 
@@ -195,26 +195,28 @@ def test_expert_selector_with_poly_task_routing(
         # Need to recreate experts so that they have the right amt of splits
         exp1 = create_dummy_expert(config, "task_1")
         exp2 = create_dummy_expert(config, "task_2")
+        exp3 = create_dummy_expert(config, "task_2")
+        exp4 = create_dummy_expert(config, "task_2")
 
-        module_dict = {"mod1": exp1, "mod2": exp2}
+        module_dict = {"mod1": exp1, "mod2": exp2, "mod3": exp3, "mod4": exp4}
         module = create_expert_model_from_args(config)
         module.add_experts_from_dict(module_dict, action="route")
 
-        nonzero_B_init(module)
+        nonzero_B_init(module) 
         output = module(**batch)
 
         # Now let's change the routing, to make sure the output also changes
         for mod in module.modules():
             if isinstance(mod, PolySelector):
                 mod.module_logits.data.uniform_(-10, 10)
-                mod.module_logits.data[:, -1] = 999
+                mod.module_logits.data[:, -1] = 1e6
 
         output_2 = module(**batch)
         assert np.abs(output.loss.item() - output_2.loss.item()) > 1
 
         # Finally, Test invalid tasks
         batch["task_names"][-1] = "task_10"
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError):
             output = module(**batch)
 
 
