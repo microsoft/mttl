@@ -165,7 +165,7 @@ class FlatMultiTaskModule(DataModule):
             dev_dataset,
             test_dataset,
         ) = maybe_filter_hf_dataset_by_task(
-            self.dataset, "task_name", self.config.finetune_task_name, num_proc=n_proc
+            self.dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
         )
 
         if self.config.augment_few_shot > 0:
@@ -253,7 +253,7 @@ class FlanModule(DataModule):
 
         (self._task_names, self._task_to_id, train_dataset, _, _) = (
             maybe_filter_hf_dataset_by_task(
-                dataset, "task_name", self.config.finetune_task_name, num_proc=num_proc
+                dataset, "task_name", self.config.finetune_task_name, n_proc=num_proc
             )
         )
 
