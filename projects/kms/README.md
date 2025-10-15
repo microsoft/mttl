@@ -1,7 +1,7 @@
 <div align="center">
     <img src="assets/km.gif" height=200 alt="Knowledge Modules Animation"/>
 
-**Storing long contexts in tiny KV caches with self-study.**
+**Condensing long document knowledge into LoRAs**
 
 
 [![GitHub](https://img.shields.io/github/license/microsoft/mttl)](https://img.shields.io/github/license/microsoft/mttl)
