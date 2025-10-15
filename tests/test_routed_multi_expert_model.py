@@ -491,6 +491,7 @@ def test_expert_selector_with_moe_clown_routing_soft(
     assert actual_entropy < entropy_uniform
 
 
+@torch.no_grad()
 def test_expert_selector_with_task_predictor_selection(tmp_multi_exp_config):
     seed_everything(0)
     config: MultiExpertConfig = tmp_multi_exp_config

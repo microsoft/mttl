@@ -1,5 +1,5 @@
 import os
-
+import torch 
 import pytorch_lightning as pl
 from pytorch_lightning import seed_everything
 
@@ -187,6 +187,7 @@ def train_classifier(args: RankerConfig):
         val_check_interval=args.val_check_interval,
         limit_val_batches=args.limit_val_batches,
         enable_checkpointing=False,
+        inference_mode=False
     )
     trainer.fit(module, datamodule)
     trainer.test(module, datamodule.test_dataloader())
