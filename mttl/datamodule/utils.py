@@ -44,7 +44,11 @@ def maybe_filter_hf_dataset_by_task(
     if "test" in dataset:
         test_dataset = dataset["test"]
 
-    if dev_dataset is None and test_dataset is None and "split" in train_dataset.features:
+    if (
+        dev_dataset is None
+        and test_dataset is None
+        and "split" in train_dataset.features
+    ):
         train_dataset, dev_dataset, test_dataset = split_on_split_column(
             train_dataset, num_proc=n_proc
         )

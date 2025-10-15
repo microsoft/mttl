@@ -98,7 +98,7 @@ def train_model(
 
         # eval and save best model
         if (
-            args.eval_every 
+            args.eval_every
             and args.eval_every > 0
             and step % args.eval_every == 0
             and datamodule.dev_dataset

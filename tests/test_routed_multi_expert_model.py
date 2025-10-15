@@ -132,11 +132,11 @@ def nonzero_B_init(model):
             for name, param in mod.lora_b.items():
                 param.data = torch.rand(param.shape, generator=gen)
         elif type(mod) == SkilledLoRAExpertContainer:
-            mod.experts.lora_a.data = (
-                torch.rand(mod.experts.lora_a.shape, generator=gen)
+            mod.experts.lora_a.data = torch.rand(
+                mod.experts.lora_a.shape, generator=gen
             )
-            mod.experts.lora_b.data = (
-                torch.rand(mod.experts.lora_b.shape, generator=gen)
+            mod.experts.lora_b.data = torch.rand(
+                mod.experts.lora_b.shape, generator=gen
             )
 
 
@@ -202,7 +202,7 @@ def test_expert_selector_with_poly_task_routing(
         module = create_expert_model_from_args(config)
         module.add_experts_from_dict(module_dict, action="route")
 
-        nonzero_B_init(module) 
+        nonzero_B_init(module)
         output = module(**batch)
 
         # Now let's change the routing, to make sure the output also changes

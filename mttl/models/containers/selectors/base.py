@@ -336,7 +336,11 @@ class Selector(nn.Module, Registrable):
 
     @abstractmethod
     def on_add_expert(
-        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False, device: str = None,
+        self,
+        expert_name: str,
+        expert_info: ExpertInfo = None,
+        is_default=False,
+        device: str = None,
     ):
         pass
 
@@ -449,7 +453,11 @@ class TaskPredictorSelector(Selector):
         )
 
     def on_add_expert(
-        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False, device: str = None
+        self,
+        expert_name: str,
+        expert_info: ExpertInfo = None,
+        is_default=False,
+        device: str = None,
     ):
         pass
 

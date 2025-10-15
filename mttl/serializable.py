@@ -53,7 +53,12 @@ class Serializable:
                 data_[field.name] = {
                     k: get_args(field_type)[1].fromdict(v) for k, v in value.items()
                 }
-            elif get_origin(field_type) is None and field_type in {int, float, bool, str}:
+            elif get_origin(field_type) is None and field_type in {
+                int,
+                float,
+                bool,
+                str,
+            }:
                 # If it's a direct type like int, float, bool, etc.
                 data_[field.name] = field_type(value)
             else:

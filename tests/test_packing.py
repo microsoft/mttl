@@ -24,7 +24,7 @@ def test_packing_and_attn(tiny_flan_id):
         "max_seq_per_pack": 4,
         "pack_sequences": False,
         "max_input_length": 1024,
-        "subsample_per_task": True
+        "subsample_per_task": True,
     }
     config = FlatMultiTaskConfig(**common_kwargs)
     dm = FlatMultiTaskModule(config)

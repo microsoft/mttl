@@ -44,7 +44,7 @@ from projects.kms.utils.wiki_mmlu_evaluator import WikiMMLUEvaluator
 
 torch.set_float32_matmul_precision("high")
 
-BASE_PREFIX = f"hf://pclucas14" # "az://mttldata"
+BASE_PREFIX = f"hf://pclucas14"  # "az://mttldata"
 
 train_datasets = {
     "quality-km-llama-8b": f"{BASE_PREFIX}/quality-summaries-qa-next-chunk-llama-8b-instruct",

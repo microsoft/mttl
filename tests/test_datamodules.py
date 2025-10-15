@@ -339,7 +339,9 @@ def test_multichoice_collator():
     assert output["num_options"] == [2, 1]
     assert output["task_names"] == ["t1", "t1", "t2"]
 
-    collator = MultipleChoiceCollator(tokenizer=tokenizer, multisource=True, max_input_length=4096)
+    collator = MultipleChoiceCollator(
+        tokenizer=tokenizer, multisource=True, max_input_length=4096
+    )
     batch = [
         {"source": ["a1", "a2"], "target": "a", "task_name": "t1", "label_index": 1},
         {"source": ["b1"], "target": "b", "task_name": "t2", "label_index": 0},
@@ -361,7 +363,7 @@ def test_mbpp():
     )
 
     module = MBPPDataModule(config, for_generation=False)
-    assert len(module.test_dataset) == 427 # size of the sanitized split
+    assert len(module.test_dataset) == 427  # size of the sanitized split
     # must be executable so that the model trains on valid code
     for ex in module.test_dataset:
         exec(ex["source"] + ex["target"])
