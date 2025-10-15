@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+import datasets
 
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.base import DatasetConfig
@@ -243,7 +244,7 @@ def test_auto_module(tiny_flan_id):
 
 @pytest.mark.skipif(
     tuple(map(int, datasets.__version__.split("."))) >= (4, 0, 0),
-    reason="The current version of datasets has a bug that breaks HumanEval and MBPP.",
+    reason="The current version of datasets does not support Dataset scripts.",
 )
 @pytest.mark.parametrize("task_name", [None, "high_school_government_and_politics"])
 def test_mmlu(task_name):
@@ -267,7 +268,7 @@ def test_mmlu(task_name):
 
 @pytest.mark.skipif(
     tuple(map(int, datasets.__version__.split("."))) >= (4, 0, 0),
-    reason="The current version of datasets has a bug that breaks HumanEval and MBPP.",
+    reason="The current version of datasets does not support Dataset scripts.",
 )
 def test_mmlu_spaces_and_merges(task_name=None):
     """this tests whether spaces are added correctly after sources or labels.

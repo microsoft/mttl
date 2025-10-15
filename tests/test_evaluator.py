@@ -1,5 +1,6 @@
 import os
 
+import datasets
 import numpy as np
 import pytest
 from transformers import AutoModelForCausalLM
@@ -65,7 +66,10 @@ def test_early_stopping(mocker, flan_data_module):
         " The man ",
     ]
 
-
+@pytest.mark.skipif(
+    tuple(map(int, datasets.__version__.split("."))) >= (4, 0, 0),
+    reason="The current version of datasets does not support Dataset scripts.",
+)
 def test_mmlu_eval():
     mmlu = MMLUEvaluator(
         MMLUDataConfig(
@@ -131,7 +135,7 @@ def test_loglike_eval():
 # Skip if datasets version if over 4.0.0
 @pytest.mark.skipif(
     tuple(map(int, datasets.__version__.split("."))) >= (4, 0, 0),
-    reason="The current version of datasets has a bug that breaks HumanEval and MBPP.",
+    reason="The current version of datasets does not support Dataset scripts.",
 )
 def test_code_evaluator(mocker):
     from mttl.datamodule.humaneval_module import HumanEvalConfig
@@ -173,7 +177,7 @@ def test_code_evaluator(mocker):
 
 @pytest.mark.skipif(
     tuple(map(int, datasets.__version__.split("."))) >= (4, 0, 0),
-    reason="The current version of datasets has a bug that breaks HumanEval and MBPP.",
+    reason="The current version of datasets does not support Dataset scripts.",
 )
 def test_setup_evaluators():
     from mttl.evaluators.base import setup_evaluators
@@ -193,7 +197,7 @@ def test_setup_evaluators():
 
 @pytest.mark.skipif(
     tuple(map(int, datasets.__version__.split("."))) >= (4, 0, 0),
-    reason="The current version of datasets has a bug that breaks HumanEval and MBPP.",
+    reason="The current version of datasets does not support Dataset scripts.",
 )
 def test_runner(mocker, gpt_neo):
     from mttl.evaluators.base import setup_evaluators
