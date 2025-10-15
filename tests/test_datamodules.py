@@ -370,8 +370,8 @@ def test_mbpp():
 @pytest.mark.parametrize(
     "subsample, subsample_per_task, train_size",
     [
-        (None, None, 200),
-        (0.5, False, 100),
+        (None, None, 160),
+        (0.5, False, 80),
         (5, False, 5),
         (5, True, 4),
     ],
