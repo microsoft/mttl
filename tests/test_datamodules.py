@@ -241,6 +241,10 @@ def test_auto_module(tiny_flan_id):
     assert len(flan.dev_dataset) == 216
 
 
+@pytest.mark.skipif(
+    tuple(map(int, datasets.__version__.split("."))) >= (4, 0, 0),
+    reason="The current version of datasets has a bug that breaks HumanEval and MBPP.",
+)
 @pytest.mark.parametrize("task_name", [None, "high_school_government_and_politics"])
 def test_mmlu(task_name):
     mmlu = MMLUDataModule(
@@ -261,7 +265,10 @@ def test_mmlu(task_name):
         assert len(mmlu.task_names) == 1
         assert mmlu.task_names[0] == task_name
 
-
+@pytest.mark.skipif(
+    tuple(map(int, datasets.__version__.split("."))) >= (4, 0, 0),
+    reason="The current version of datasets has a bug that breaks HumanEval and MBPP.",
+)
 def test_mmlu_spaces_and_merges(task_name=None):
     """this tests whether spaces are added correctly after sources or labels.
 

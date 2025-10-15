@@ -128,6 +128,11 @@ def test_loglike_eval():
     assert np.allclose(result, 0.1, rtol=0.01)
 
 
+# Skip if datasets version if over 4.0.0
+@pytest.mark.skipif(
+    tuple(map(int, datasets.__version__.split("."))) >= (4, 0, 0),
+    reason="The current version of datasets has a bug that breaks HumanEval and MBPP.",
+)
 def test_code_evaluator(mocker):
     from mttl.datamodule.humaneval_module import HumanEvalConfig
     from mttl.datamodule.mbpp_datamodule import MBPPDataConfig
@@ -166,7 +171,10 @@ def test_code_evaluator(mocker):
     assert gen_spy.call_args[1]["max_new_tokens"] == 20
     assert gen_spy.call_args[1]["stopping_criteria"] is not None
 
-
+@pytest.mark.skipif(
+    tuple(map(int, datasets.__version__.split("."))) >= (4, 0, 0),
+    reason="The current version of datasets has a bug that breaks HumanEval and MBPP.",
+)
 def test_setup_evaluators():
     from mttl.evaluators.base import setup_evaluators
     from mttl.evaluators.loglike_evaluator import LogLikeEvaluator
@@ -183,7 +191,10 @@ def test_setup_evaluators():
     assert len(runner.evaluators) == 2
     assert isinstance(runner.evaluators["piqa"], LogLikeEvaluator)
 
-
+@pytest.mark.skipif(
+    tuple(map(int, datasets.__version__.split("."))) >= (4, 0, 0),
+    reason="The current version of datasets has a bug that breaks HumanEval and MBPP.",
+)
 def test_runner(mocker, gpt_neo):
     from mttl.evaluators.base import setup_evaluators
 
