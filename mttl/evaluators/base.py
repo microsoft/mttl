@@ -10,6 +10,7 @@ import numpy as np
 import torch
 from transformers import StoppingCriteria, StoppingCriteriaList
 
+from mttl.dist_utils import is_main_process
 from mttl.logging import logger
 
 
@@ -132,7 +133,7 @@ class Evaluator(ABC):
 
         self._last_metrics = metrics
 
-        if output_path is None:
+        if output_path is None or not is_main_process():
             return
 
         if not os.path.exists(output_path):
@@ -176,6 +177,8 @@ class GenerationOutput:
     sequences_texts: List[str]  # everything that generate() returns in text
     sources_texts: List[str]  # the input source texts
     generated_texts: List[str] = None  # only the generated portion
+    time_per_request: float = None  # time to complete the request (in s)
+    num_prompt_tokens: List[int] = None  # number of tokens for each prompt
 
 
 class StoppingCriteriaSub(StoppingCriteria):
@@ -267,6 +270,8 @@ class GenerativeEvaluator(Evaluator):
         return generation_output
 
     def generate_for_batch(self, model, batch):
+        import time
+
         from mttl.models.expert_model import BaseExpertModel
         from mttl.models.lightning.base_module import LightningEfficientCheckpoint
         from mttl.models.utils import transfer_batch_to_device
@@ -289,14 +294,14 @@ class GenerativeEvaluator(Evaluator):
             )
             extra_kwargs["stopping_criteria"] = stopping_criteria
 
-        if extra_kwargs.get("temperature", 0.0) == 0.0:
-            # stop hf from complaining
-            extra_kwargs["do_sample"] = False
-
         device = next(model.parameters()).device
         batch = transfer_batch_to_device(batch, device)
 
+        # number of prompt tokens
+        num_prompt_tokens = batch["attention_mask"].sum(1).to("cpu").tolist()
+
         with torch.no_grad():
+            start = time.time()
             if isinstance(model, LightningEfficientCheckpoint) or isinstance(
                 model, BaseExpertModel
             ):
@@ -316,6 +321,7 @@ class GenerativeEvaluator(Evaluator):
                     output_scores=True,
                     **extra_kwargs,
                 )
+            end = time.time()
 
         # take only the prediction part
         # we cannot do cut at the token id level due to token healing problems
@@ -362,11 +368,13 @@ class GenerativeEvaluator(Evaluator):
 
         return self.postprocess_generation_output(
             GenerationOutput(
-                scores=predictions.scores,
+                scores=tuple(s.to("cpu") for s in predictions.scores),
                 sequences=predictions.sequences,
                 sequences_texts=sequences_texts,
                 sources_texts=sources_texts,
                 generated_texts=generated_texts,
+                time_per_request=float(end - start) / len(sequences_texts),
+                num_prompt_tokens=num_prompt_tokens,
             )
         )
 

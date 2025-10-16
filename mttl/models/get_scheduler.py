@@ -2,6 +2,8 @@ import torch
 from torch.optim.lr_scheduler import LambdaLR
 from transformers.optimization import AdafactorSchedule
 
+from mttl.logging import logger
+
 
 def get_scheduler(optimizer, config):
     """
@@ -20,6 +22,9 @@ def get_scheduler(optimizer, config):
     elif scheduler_name == "exponential_decay":
         return torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=config.gamma)
     elif scheduler_name == "linear_decay_with_warmup":
+        if config.warmup_steps == 0:
+            logger.warning("Warmup steps == 0 for linear_decay_with_warmup scheduler")
+
         return get_linear_schedule_with_warmup(
             optimizer, config.warmup_steps, config.total_steps
         )

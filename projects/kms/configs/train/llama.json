@@ -1,0 +1,20 @@
+{
+    "max_input_length": 4096,
+    "lora_rank": 16,
+    "lora_alpha": 16,
+    "lora_dropout": 0.05,
+    "weight_decay": 0.0,
+    "model_modifier": "lora",
+    "modify_layers": "q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj",
+    "trainable_param_names": ".*lora_[ab].*",
+    "learning_rate": 1e-3,
+    "precision": "bf16",
+    "model": "meta-llama/Llama-3.1-8B-Instruct",
+    "model_family": "gpt",
+    "optimizer": "adamw",
+    "warmup_proportion": 0.06,
+    "max_output_length": 64,
+    "padding_side": "right",
+    "truncation_side": "left",
+    "attn_implementation": "flash_attention_2"
+}

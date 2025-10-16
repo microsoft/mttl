@@ -122,8 +122,10 @@ class Args(Serializable):
     @classmethod
     def process_kwargs(cls, kwargs, eval=True, raise_error=True, silent=False):
         overwrites_log = []
+        kwargs_keys = list(kwargs.keys())
 
-        for k, v in kwargs.items():
+        for k in kwargs_keys:
+            v = kwargs[k]
             if eval:
                 try:
                     v = ast.literal_eval(v)
@@ -132,8 +134,16 @@ class Args(Serializable):
             else:
                 v = v
 
-            if not hasattr(cls, k) and raise_error:
-                raise ValueError(f"{k} is not in the config")
+            if not hasattr(cls, k):
+                if raise_error:
+                    raise ValueError(f"{k} is not in the config")
+                else:
+                    # if the key is not found, but we are fault tolerant, we remove it
+                    logger.warning(
+                        f"{k} is not in the config, skipping it, make sure this is intended!"
+                    )
+                    del kwargs[k]
+                    continue
 
             if eval and not silent:
                 overwrites_log.append(f"Overwriting {k} to {v}")
@@ -345,7 +355,7 @@ class TrainingArgs(DataArgs):
     expert_name: str = None
 
     # Training config
-    micro_batch_size: str = None
+    micro_batch_size: int = None
     compute_strategy: str = None
     scheduler: str = "linear_decay_with_warmup"
     checkpoint: str = None  # load from checkpoint
@@ -371,7 +381,7 @@ class TrainingArgs(DataArgs):
     save_every: int = None
     save_each_epoch: bool = False
     eval_every: int = None
-    eval_every_n_epoch: int = 1
+    eval_every_n_epoch: int = None
     seed: int = 42
     debug: bool = False
 
@@ -484,6 +494,9 @@ class TrainingArgs(DataArgs):
     def to_hf_training_args(self) -> "TrainingArguments":
         from transformers import TrainingArguments
 
+        # NOTE: unclear how `warmup_steps` and `warmup_ratio` are used in HF args
+        # given that we build the optimzer and scheduler ourselves
+
         return TrainingArguments(
             run_name=self.wandb_run_name
             or self.expert_name
@@ -503,6 +516,7 @@ class TrainingArgs(DataArgs):
             warmup_steps=self.warmup_steps if self.warmup_steps > 0 else 0,
             warmup_ratio=self.warmup_proportion if self.warmup_proportion > 0 else 0,
             num_train_epochs=self.num_train_epochs,
+            max_grad_norm=self.max_grad_norm,
             max_steps=self.total_steps,
             save_total_limit=1,
             remove_unused_columns=False,
@@ -511,6 +525,7 @@ class TrainingArgs(DataArgs):
             save_steps=self.save_every,
             eval_steps=self.eval_every,
             ddp_find_unused_parameters=False,
+            eval_on_start=self.eval_before_training,
         )
 
 

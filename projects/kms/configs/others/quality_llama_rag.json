@@ -1,0 +1,17 @@
+{
+    "evaluate_on": "quality-rag",
+    "max_input_length": 128000,
+    "eval_every_n_epoch": null,
+    "split_train_dev_on": "output",
+    "predict_batch_size": 1,
+    "precision": "bf16",
+    "model": "meta-llama/Llama-3.1-8B-Instruct",
+    "model_family": "gpt",
+    "max_output_length": 64,
+    "padding_side": "left",
+    "truncation_side": "left",
+    "attn_implementation": "flash_attention_2",
+    "task_name_field": "document_id",
+    "include_context": true,
+    "split": "dev"
+}

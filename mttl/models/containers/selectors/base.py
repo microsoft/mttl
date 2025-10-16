@@ -1,12 +1,11 @@
 import functools
 import threading
-from abc import ABC
+from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, Union
 
 import torch
-from pyparsing import abstractmethod
 from torch import nn
 
 from mttl.logging import logger
@@ -18,6 +17,7 @@ from mttl.models.containers.selectors.selector_output import (
     ExpertsAndWeightsSelectorOutput,
     ExpertsSplitsAndWeightsSelectorOutput,
     SelectorOutput,
+    SharedExpertsSelectorOutput,
 )
 from mttl.models.library.expert import ExpertInfo
 from mttl.models.modifiers.base import Modifier
@@ -104,7 +104,7 @@ class MultiSelectorConfig(Serializable):
         return self.selectors[key]
 
     def get(self, key):
-        return self.selectors.get(key, TaskNameSelectorConfig())
+        return self.selectors.get(key, DefaultExpertSelectorConfig())
 
     def keys(self):
         return self.selectors.keys()
@@ -268,7 +268,7 @@ class Selector(nn.Module, Registrable):
         self._task_to_expert_name = {}
         # dependency injection filled from ExpertContainer
         self.__layer_name__ = None
-        self.device = None
+        self.device = kwargs.get("device", None)
 
     @property
     def expert_names(self) -> list:
@@ -336,7 +336,11 @@ class Selector(nn.Module, Registrable):
 
     @abstractmethod
     def on_add_expert(
-        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+        self,
+        expert_name: str,
+        expert_info: ExpertInfo = None,
+        is_default=False,
+        device: str = None,
     ):
         pass
 
@@ -349,7 +353,8 @@ class Selector(nn.Module, Registrable):
             )
             self._task_to_expert_name[expert_name] = expert_name
         else:
-            for task_name in expert_info.expert_task_name.split(","):
+            # HACK: ensuring that `expert_task_name` is a string
+            for task_name in str(expert_info.expert_task_name).split(","):
                 if task_name in self._task_to_expert_name:
                     logger.warning(
                         f"Task name {task_name} already assigned to expert {self._task_to_expert_name[task_name]}"
@@ -448,7 +453,11 @@ class TaskPredictorSelector(Selector):
         )
 
     def on_add_expert(
-        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+        self,
+        expert_name: str,
+        expert_info: ExpertInfo = None,
+        is_default=False,
+        device: str = None,
     ):
         pass
 
@@ -526,7 +535,7 @@ class TaskNameSelector(Selector):
                 and len(self.task_to_expert_name)
             ):
                 raise ValueError(
-                    "Experts for all tasks have not been loaded! Set a default expert?"
+                    f"Experts for all tasks have not been loaded! Set a default expert? Task name not found: {task_names}"
                 )
             experts = [
                 self.task_to_expert_name.get(task_name, self.default_expert_name)
@@ -539,6 +548,23 @@ class TaskNameSelector(Selector):
         raise NotImplementedError(
             "Not required for TaskNameSelector as it performs hard selection. Use 'get_expert_instance' instead."
         )
+
+
+@dataclass
+class DefaultExpertSelectorConfig(SelectorConfig):
+    router_granularity: str = "coarsegrained"
+
+
+@Selector.register("default_expert_selector", DefaultExpertSelectorConfig)
+class DefaultExpertSelector(Selector):
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+
+    @forward_with_cache
+    def forward(self, input, **kwargs) -> SharedExpertsSelectorOutput:
+        if self.default_expert_name is None:
+            raise ValueError("No default expert name set!")
+        return SharedExpertsSelectorOutput(expert=self.default_expert_name)
 
 
 @dataclass

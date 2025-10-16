@@ -14,8 +14,8 @@ def SimpleArgs(tmp_path):
         optimizer: str = "adafactor"
         dataset: str = "t0"
         model: str = "t5-small"
-        total_steps: str = 1000
-        learning_rate: str = 1e-3
+        total_steps: int = 1000
+        learning_rate: float = 1e-3
         output_dir: str = str(tmp_path / "output_dir")
         attn_implementation: str = None
 

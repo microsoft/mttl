@@ -89,7 +89,11 @@ class MOERKHSSelector(Selector):
         raise ValueError("Not supported for MOESelector.")
 
     def on_add_expert(
-        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+        self,
+        expert_name: str,
+        expert_info: ExpertInfo = None,
+        is_default=False,
+        device: str = None,
     ):
         # just initialize the expert embeddings
         self.rkhs_embeddings.data = torch.cat(

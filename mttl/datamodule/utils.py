@@ -1,4 +1,6 @@
+import json
 import os
+from collections.abc import Iterable
 
 from transformers import AutoTokenizer, LlamaTokenizer
 
@@ -20,11 +22,13 @@ def maybe_filter_hf_dataset_by_task(
         all_tasks = all_tasks.union(set(dataset["test"][task_field]))
 
     if task_names:
-        task_names = (
-            sorted(task_names.split(","))
-            if isinstance(task_names, str)
-            else sorted(task_names)
-        )
+        if isinstance(task_names, str):
+            task_names = sorted(task_names.split(","))
+        elif isinstance(task_names, Iterable):
+            task_names = sorted(map(str, task_names))
+        else:
+            task_names = [str(task_names)]
+
         if not set(task_names).issubset(all_tasks):
             raise ValueError(
                 "task_names must be a subset of the available tasks. Got {} and {}".format(
@@ -33,39 +37,67 @@ def maybe_filter_hf_dataset_by_task(
             )
 
     train_dataset, dev_dataset, test_dataset = None, None, None
+    if "train" in dataset:
+        train_dataset = dataset["train"]
+    if "validation" in dataset:
+        dev_dataset = dataset["validation"]
+    if "test" in dataset:
+        test_dataset = dataset["test"]
 
+    if (
+        dev_dataset is None
+        and test_dataset is None
+        and "split" in train_dataset.features
+    ):
+        train_dataset, dev_dataset, test_dataset = split_on_split_column(
+            train_dataset, num_proc=n_proc
+        )
     if task_names is not None:
-        if "train" in dataset:
-            train_dataset = dataset["train"].filter(
-                lambda x: x[task_field] in task_names,
+        train_dataset = train_dataset.filter(
+            lambda x: str(x[task_field]) in task_names,
+            num_proc=n_proc,
+            desc="Filtering task names",
+        )
+        if dev_dataset:
+            dev_dataset = dev_dataset.filter(
+                lambda x: str(x[task_field]) in task_names,
                 num_proc=n_proc,
                 desc="Filtering task names",
             )
-        if "validation" in dataset:
-            dev_dataset = dataset["validation"].filter(
-                lambda x: x[task_field] in task_names,
+        if test_dataset:
+            test_dataset = test_dataset.filter(
+                lambda x: str(x[task_field]) in task_names,
                 num_proc=n_proc,
                 desc="Filtering task names",
             )
-        if "test" in dataset:
-            test_dataset = dataset["test"].filter(
-                lambda x: x[task_field] in task_names,
-                num_proc=n_proc,
-                desc="Filtering task names",
-            )
-    else:
-        if "train" in dataset:
-            train_dataset = dataset["train"]
-        if "validation" in dataset:
-            dev_dataset = dataset["validation"]
-        if "test" in dataset:
-            test_dataset = dataset["test"]
 
     if task_names is None:
         task_names = list(all_tasks)
 
     task_to_id = {task: i for i, task in enumerate(task_names)}
     return task_names, task_to_id, train_dataset, dev_dataset, test_dataset
+
+
+def split_on_split_column(dataset, num_proc=16):
+    if "split" not in dataset.features:
+        raise ValueError("Dataset does not have the required 'split' column!")
+
+    train_dataset = dataset.filter(
+        lambda x: x["split"] == "train",
+        num_proc=num_proc,
+        desc="Creating train set",
+    )
+    dev_dataset = dataset.filter(
+        lambda x: x["split"] in ["dev", "validation", "valid"],
+        num_proc=num_proc,
+        desc="Creating valid set",
+    )
+    test_dataset = dataset.filter(
+        lambda x: x["split"] in ["test"],
+        num_proc=num_proc,
+        desc="Creating test set",
+    )
+    return train_dataset, dev_dataset, test_dataset
 
 
 def tokenizer_merges_space(tokenizer):
@@ -149,3 +181,22 @@ def get_tokenizer_with_args(
     tokenizer.mttl_merges_space = tokenizer_merges_space(tokenizer)
     tokenizer.mttl_enforces_eos = tokenizer_enforces_eos(tokenizer)
     return tokenizer
+
+
+def apply_custom_split_file(dataset, split_file):
+    assert split_file.endswith(".json"), "split_file must be a json file"
+    split_file = json.load(open(split_file, "r"))
+    assert set(split_file.keys()) == {"train", "dev", "test"}
+
+    doc_to_split = {
+        doc: split for split in ["train", "dev", "test"] for doc in split_file[split]
+    }
+    all_docs = set(split_file["train"] + split_file["dev"] + split_file["test"])
+    dataset = dataset.filter(lambda x: x["document_id"] in all_docs)
+
+    def update_split(item):
+        item["split"] = doc_to_split[item["document_id"]]
+        return item
+
+    # Update the Split column
+    return dataset.map(update_split)

@@ -44,7 +44,7 @@ class Score:
 
     @property
     def hash(self) -> str:
-        return str(self.key).encode()
+        return self.key.encode()
 
     @classmethod
     def fromdict(self, data):
@@ -297,6 +297,50 @@ class ExpertLibrary:
             expert_info=self.data[expert_name],
             expert_weights=model,
         )
+
+    def add_experts_from_ckpts(
+        self, ckpt_paths: List[str], force: bool = False, update: bool = False
+    ):
+        """Add experts from a list of checkpoint paths.
+
+        Args:
+            ckpt_paths (List[str]): List of checkpoint paths.
+            force (bool, optional): Overwrite existing experts. Defaults to False.
+            update (bool, optional): Update existing library. If an expert with the same name exists, it skips addition.
+        """
+        import concurrent.futures
+        import threading
+
+        import tqdm
+
+        lock = threading.Lock()
+
+        def process_ckpt(ckpt_path):
+            try:
+                expert_dump = load_expert(ckpt_path)
+            except Exception as e:
+                logger.error(f"Error loading expert from {ckpt_path}: {e}\n")
+                raise e
+
+            with lock:
+                if update and expert_dump.name in self.data:
+                    logger.info(
+                        f"Expert {expert_dump.name} already exists. Skipping..."
+                    )
+                    return
+
+                self.add_expert(expert_dump, force=force)
+
+        with self.batched_commit():
+            with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+                future_results = executor.map(process_ckpt, ckpt_paths)
+                for _ in tqdm.tqdm(
+                    future_results,
+                    total=len(ckpt_paths),
+                    desc="Adding experts...",
+                    unit="expert",
+                ):
+                    pass
 
     def __len__(self):
         return len(self.data)
@@ -643,7 +687,10 @@ class ExpertLibrary:
             force=force,
         )
 
-    def _update_readme(self):
+    def update_readme(self, extra_info=None):
+        self._update_readme(extra_info=extra_info)
+
+    def _update_readme(self, extra_info: str = None):
         buffer = io.BytesIO()
         buffer.write(
             f"Number of experts present in the library: {len(self)}\n\n".encode("utf-8")
@@ -667,6 +714,10 @@ class ExpertLibrary:
                 "utf-8"
             )
         )
+
+        if extra_info is not None:
+            buffer.write(extra_info.encode("utf-8"))
+
         buffer.flush()
 
         addition = CommitOperationAdd(path_in_repo=f"README.md", path_or_fileobj=buffer)

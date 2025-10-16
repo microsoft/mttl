@@ -1,5 +1,6 @@
+from typing import Union
+
 import torch
-from pyparsing import Union
 from torch import Tensor, nn
 
 from mttl.logging import warn_once
@@ -11,6 +12,7 @@ from mttl.models.containers.selectors.selector_output import (
     BatchSequenceExpertsAndWeightsSelectorOutput,
     ExpertsAndWeightsSelectorOutput,
     SelectorOutput,
+    SharedExpertsSelectorOutput,
 )
 from mttl.models.library.expert import Expert
 from mttl.models.modifiers.lora import (
@@ -48,6 +50,12 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
         self.lora_a = nn.ParameterDict({})
         self.lora_b = nn.ParameterDict({})
 
+        assert isinstance(layer, nn.Linear)
+        # llama does stuff like `target_dtype = self.q_proj.weight.dtype`
+        # which fails if we do not have a point to `weight` and `bias` attributes
+        self.weight = layer.weight
+        self.bias = layer.bias
+
     def merge_expert(self, expert_name):
         if expert_name not in self.expert_infos:
             raise ValueError(
@@ -63,7 +71,8 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
     def on_add_expert(
         self,
         expert: Expert,
-        is_default=False,
+        is_default: bool = False,
+        device: str = None,
     ) -> None:
         from mttl.models.containers.utils import filter_expert_weights
 
@@ -86,8 +95,12 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
             )
             expert_weights = modifier.state_dict()
 
-        self.lora_a[expert.name] = expert_weights["lora_a"].to(self.layer.weight.device)
-        self.lora_b[expert.name] = expert_weights["lora_b"].to(self.layer.weight.device)
+        self.lora_a[expert.name] = expert_weights["lora_a"].to(
+            device or self.layer.weight.device
+        )
+        self.lora_b[expert.name] = expert_weights["lora_b"].to(
+            device or self.layer.weight.device
+        )
 
     def merge_with_layer(self):
         """Merge all experts with the layer."""
@@ -123,7 +136,11 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
         """Depending on the selection output, we and merge differently."""
         from mttl.models.modifiers.lora import SkilledLoRA, SkilledLoRAView
 
-        if isinstance(selection, ExpertsAndWeightsSelectorOutput):
+        if isinstance(selection, SharedExpertsSelectorOutput):
+            # a single, shared expert across the batch and sequence
+            expert = self.get(selection.expert)
+            return expert(input)
+        elif isinstance(selection, ExpertsAndWeightsSelectorOutput):
             # In this case, we have a list of experts and their weights
             # and these are shared across all the batch examples
             skilled_lora = SkilledLoRAView.from_loras(
@@ -224,11 +241,21 @@ class LoRAExpertContainer(ExpertContainer, MergeableContainer):
 
     def container_forward(self, input, **kwargs):
         selection = self.selector(input, container=self, **kwargs)
+
+        if hasattr(self.selector, "route"):
+            return self.selector.route(input, selection, container=self, **kwargs)
+
         return self.route(input, selection, **kwargs)
 
     def __getitem__(self, name) -> LoRA:
         """Returns a LoRA module."""
-        return LoRAView(self.config, self.layer, self.lora_a[name], self.lora_b[name])
+        view = LoRAView(
+            self.config,
+            self.layer,
+            self.lora_a[name],
+            self.lora_b[name],
+        )
+        return view
 
 
 class SkilledLoRAExpertContainer(LoRAExpertContainer):
@@ -294,7 +321,9 @@ class SkilledLoRAExpertContainer(LoRAExpertContainer):
         else:
             raise ValueError("Unknown modifier type, expected LoRA or SkilledLoRA.")
 
-    def on_add_expert(self, expert: Expert, is_default=False) -> None:
+    def on_add_expert(
+        self, expert: Expert, is_default=False, device: str = None
+    ) -> None:
         from mttl.models.containers.utils import filter_expert_weights
 
         # back-compatibility, in previous versions, the expert config was a training config

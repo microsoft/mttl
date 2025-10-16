@@ -1,0 +1,6 @@
+{
+    "dataset": "az://mttldata/narrativeqa-sanitized",
+    "evaluate_on": "nqa",
+    "custom_split_file":"splits/nqa/nqa_full.json",
+    "split": "test"
+}

@@ -52,7 +52,7 @@ def train_model(
     num_train_steps = len(dataloader)
     iter_train = iter(dataloader)
 
-    if args.eval_every_n_epoch != -1:
+    if args.eval_every_n_epoch and args.eval_every_n_epoch != -1:
         args.eval_every = num_train_steps * args.eval_every_n_epoch
 
     bar = tqdm(range(args.total_steps))
@@ -98,7 +98,8 @@ def train_model(
 
         # eval and save best model
         if (
-            args.eval_every > 0
+            args.eval_every
+            and args.eval_every > 0
             and step % args.eval_every == 0
             and datamodule.dev_dataset
         ):

@@ -59,8 +59,8 @@ def test_expert_model(monkeypatch):
     assert isinstance(model.selectors["lora"][0], TaskNameSelector)
 
 
-def test_disable_enable_adapters(monkeypatch, mocker, dummy_batch):
-    from mttl.models.expert_model import disable_adapters
+def test_disable_enable_modifiers(monkeypatch, mocker, dummy_batch):
+    from mttl.models.expert_model import disable_modifiers
 
     seed_everything(0)
 
@@ -74,7 +74,7 @@ def test_disable_enable_adapters(monkeypatch, mocker, dummy_batch):
 
     assert container._enabled
 
-    with disable_adapters(model):
+    with disable_modifiers(model):
         assert not container._enabled
         model(**dummy_batch)
         assert mock.call_count == 0
@@ -93,7 +93,7 @@ def test_disable_enable_adapters(monkeypatch, mocker, dummy_batch):
     assert model.modifiers[0]._enabled
     mock = mocker.spy(model.modifiers[0], "dropout_layer")
 
-    with disable_adapters(model):
+    with disable_modifiers(model):
         assert not model.modifiers[0]._enabled
         model(**dummy_batch)
         assert mock.call_count == 0

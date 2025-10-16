@@ -1,0 +1,15 @@
+{
+    "dataset": "az://mttldata/narrativeqa-sanitized",
+    "evaluate_on": "nqa",
+    "include_context": false,
+    "split": "test",
+    "custom_split_file": "splits/nqa/nqa_mini_test.json",
+    "model": "meta-llama/Llama-3.1-8B-Instruct",
+    "max_input_length": 128000,
+    "model_family": "gpt",
+    "padding_side": "left",
+    "truncation_side": "left",
+    "precision": "bf16",
+    "predict_batch_size": 1,
+    "max_output_length": 64
+}

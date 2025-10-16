@@ -94,6 +94,10 @@ def get_optimizer(model, args, no_decay=None):
         from torch.optim import AdamW
 
         optimizer = AdamW(param_groups, eps=args.adam_epsilon)
+    elif optim_name.lower() == "adamw8bit":
+        import bitsandbytes as bnb
+
+        optimizer = bnb.optim.Adam8bit(param_groups, eps=args.adam_epsilon)
     elif optim_name.lower() == "adafactor":
         optimizer = Adafactor(
             param_groups,
@@ -125,6 +129,11 @@ def get_optimizer_and_scheduler(model, args, num_train_examples, no_decay=None):
         args.total_steps = (
             math.ceil(num_train_examples / global_bs) * args.num_train_epochs
         )
+    else:
+        if args.total_steps > 0 and args.num_train_epochs > 0:
+            logger.warning(
+                "Both `total_steps` and `num_train_epochs` are set. `total_steps` will be used"
+            )
 
     if args.warmup_steps == -1 or args.warmup_proportion > 0.0:
         logger.info(

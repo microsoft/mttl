@@ -1,0 +1,19 @@
+{
+    "padding_side": "right",
+    "truncation_side": "left",
+    "max_input_length": 4096,
+    "learning_rate": 1e-3,
+    "lora_rank": 16,
+    "lora_alpha": 16,
+    "lora_dropout": 0.05,
+    "weight_decay": 0.0,
+    "model_modifier": "lora",
+    "modify_layers": ".*o_proj.*|.*qkv_proj.*|.*up_proj.*|.*gate_up_proj.*|.*down_proj.*",
+    "trainable_param_names": ".*lora_[ab].*",
+    "precision": "bf16",
+    "model": "microsoft/Phi-3-mini-4k-instruct",
+    "model_family": "gpt",
+    "optimizer": "adamw",
+    "warmup_proportion": 0.06,
+    "attn_implementation": "flash_attention_2"
+}

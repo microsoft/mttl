@@ -23,6 +23,7 @@ from mttl.models.library.expert import ExpertInfo
 class PolySelectorConfig(SelectorConfig):
     n_splits: int = 1
     task_names: List[str] = None
+    allow_unknown_tasks: bool = False
 
 
 @Selector.register("poly_router", PolySelectorConfig)
@@ -40,7 +41,7 @@ class PolySelector(Selector):
 
         # We add an extra task for the default (average) expert if not found
         shape = (
-            self.n_tasks + 1,
+            self.n_tasks + (1 if self.config.allow_unknown_tasks else 0),
             self.config.n_splits,
         )
         self.module_logits = nn.Parameter(torch.empty(*shape).uniform_(-1e-3, 1e-3))
@@ -101,10 +102,15 @@ class PolySelector(Selector):
                             if t not in self.config.task_names
                         ]
                     )
-                    logger.warning(
-                        f"Tasks {not_found_tasks} not in taining tasks. Defaulting to average selector."
-                    )
-                    PolySelector.avg_selector_warned = True
+                    if self.config.allow_unknown_tasks:
+                        logger.warning(
+                            f"Tasks {not_found_tasks} not in training tasks. Defaulting to average selector."
+                        )
+                        PolySelector.avg_selector_warned = True
+                    else:
+                        raise ValueError(
+                            f"Tasks {not_found_tasks} not in training tasks."
+                        )
 
                 assert not self.training, "Unknown tasks during training"
 
@@ -143,7 +149,11 @@ class PolySelector(Selector):
         return {k: v.detach().item() for k, v in zip(self.expert_names, weights[0][0])}
 
     def on_add_expert(
-        self, expert_name: str, expert_info: ExpertInfo, is_default=False
+        self,
+        expert_name: str,
+        expert_info: ExpertInfo,
+        is_default=False,
+        device: str = None,
     ):
         # we need additional space in the routing to accomodate the incoming expert
         self.module_logits.data = torch.empty(
@@ -183,7 +193,11 @@ class PolySelectorDirect(PolySelector):
         return {k: v.detach().item() for k, v in self.module_logits_dict.items()}
 
     def on_add_expert(
-        self, expert_name: str, expert_info: ExpertInfo, is_default=False
+        self,
+        expert_name: str,
+        expert_info: ExpertInfo,
+        is_default=False,
+        device: str = None,
     ):
         """
         Assume:
@@ -246,7 +260,11 @@ class PolyUniform(PolySelectorDirect):
     """
 
     def on_add_expert(
-        self, expert_name: str, expert_info: ExpertInfo, is_default=False
+        self,
+        expert_name: str,
+        expert_info: ExpertInfo,
+        is_default=False,
+        device: str = None,
     ):
         if expert_name not in self.module_logits_dict:
             self.module_logits_dict[expert_name] = torch.nn.Parameter(

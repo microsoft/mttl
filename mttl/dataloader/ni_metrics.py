@@ -21,7 +21,10 @@ class GPTTokenizer:
         return tokens
 
 
-xlingual_tokenizer = GPTTokenizer()
+try:
+    xlingual_tokenizer = GPTTokenizer()
+except:
+    xlingual_tokenizer = None
 
 
 # adapted the flowing from Squad v1.1 evaluation, without removing the articles.

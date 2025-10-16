@@ -7,7 +7,6 @@ from pytorch_lightning import Trainer, seed_everything
 from mttl.arguments import Args, ExpertConfig
 from mttl.datamodule.base import get_datamodule
 from mttl.logging import logger, setup_logging
-from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.lightning.callbacks import (
     DownstreamEvalCallback,
     LiveCheckpointCallback,
@@ -17,7 +16,13 @@ from mttl.models.lightning.callbacks import (
 from mttl.models.lightning.expert_module import ExpertModule, MoEModule
 from mttl.models.lightning.loggers import get_pl_loggers
 from mttl.models.monitors import get_monitors
-from mttl.utils import generate_random_string, rank_zero_only_and_wait, remote_login
+from mttl.utils import (
+    create_library,
+    generate_random_string,
+    rank_zero_only_and_wait,
+    remote_login,
+    upload_library,
+)
 
 
 def setup_profiler(args: ExpertConfig):
@@ -55,16 +60,6 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
     remote_login(args.remote_token)
     expert_library = None
     if args.library_id:
-
-        @rank_zero_only_and_wait(before=False, after=True)
-        def create_library(args):
-            expert_library = ExpertLibrary.get_expert_library(
-                repo_id=args.library_id,
-                create=True,
-                destination_id=args.destination_library_id,
-            )
-            return expert_library
-
         expert_library = create_library(args)
 
     loggers = get_pl_loggers(args)

@@ -1,0 +1,13 @@
+{
+    "router_selector": "ke_selector",
+    "include_context": false,
+    "callback_during_training": false,
+    "eval_before_training": false,
+    "dataset_type": "narrativeqa",
+    "dataset": "az://mttldata/narrativeqa-sanitized",
+    "patience": 5,
+    "max_train_tasks": 250,
+    "learning_rate": 1e-4,
+    "micro_batch_size": 1,
+    "predict_batch_size": 1
+}

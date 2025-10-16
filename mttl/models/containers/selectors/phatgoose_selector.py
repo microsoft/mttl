@@ -125,7 +125,11 @@ class PhatgooseTrainerSelector(Selector):
         )
 
     def on_add_expert(
-        self, expert_name: str, expert_info: "ExpertInfo", is_default: bool = False
+        self,
+        expert_name: str,
+        expert_info: "ExpertInfo",
+        is_default: bool = False,
+        device: str = None,
     ):
         self.gates[expert_name] = SigmoidGate(self.input_dim, device=self.device)
 

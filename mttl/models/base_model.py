@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional, Union
 
 import torch
 from huggingface_hub import hf_hub_download
-from transformers.modeling_outputs import CausalLMOutput
+from transformers.modeling_outputs import CausalLMOutput, Seq2SeqLMOutput
 from transformers.utils import PushToHubMixin
 
 from mttl.logging import logger
@@ -138,6 +138,13 @@ class BaseExpertModel(torch.nn.Module, Registrable, PushToHubMixin):
         )
         return output_model_file, output_config_file
 
+    def load_weights(self, save_directory: str):
+        """Reload the weights from a saved directory."""
+        state_dict = torch.load(
+            os.path.join(save_directory, WEIGHTS_NAME), map_location="cpu"
+        )
+        self.load_state_dict(state_dict, strict=False)
+
     @classmethod
     def from_pretrained(
         cls,
@@ -181,10 +188,12 @@ class BaseExpertModel(torch.nn.Module, Registrable, PushToHubMixin):
         attention_mask=None,
         labels=None,
         **kwargs,
-    ) -> CausalLMOutput:
+    ) -> Union[CausalLMOutput, Seq2SeqLMOutput]:
+
         outputs = self.model.forward(
             input_ids, attention_mask=attention_mask, labels=labels, **kwargs
         )
+
         return outputs
 
     @property

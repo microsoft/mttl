@@ -52,6 +52,10 @@ class TextEncoder(nn.Module):
         else:
             raise NotImplementedError
 
+        if outputs.is_inference() and not torch.is_inference_mode_enabled():
+            assert not outputs.requires_grad
+            outputs = outputs.clone().detach().requires_grad_(False)
+
         return outputs
 
 

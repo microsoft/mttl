@@ -1,0 +1,18 @@
+{
+    "eval_every": 50,
+    "save_every": 50,
+    "total_steps": 500,
+    "router_selector": "ke_selector",
+    "dataset_type": "quality",
+    "dataset": "az://mttldata/ql-rag-256",
+    "learning_rate": 1e-4,
+    "include_context": true,
+    "callback_during_training": false,
+    "topk_context": 5,
+    "custom_split_file": "splits/quality/quality_full.json",
+    "micro_batch_size": 1,
+    "predict_batch_size": 1,
+    "eval_before_training": false,
+    "learn_w": true,
+    "router_granularity": "finegrained"
+}

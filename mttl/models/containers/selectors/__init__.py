@@ -40,3 +40,7 @@ from mttl.models.containers.selectors.selector_output import (
     ExpertsSplitsAndWeightsSelectorOutput,
     SelectorOutput,
 )
+from projects.kms.utils.km_selector import (
+    KnowledgeExtractorSelector,
+    KnowledgeExtractorSelectorConfig,
+)

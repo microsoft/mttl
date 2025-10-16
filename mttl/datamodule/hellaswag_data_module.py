@@ -23,7 +23,7 @@ def _pre_process_text(text: str) -> str:
 class HellaswagMultiChoiceDataModule(MultiChoiceDataModule):
     def setup_dataset(self):
         n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
-        dataset = DatasetLibrary.pull_dataset("hellaswag", name="default")
+        dataset = DatasetLibrary.pull_dataset("Rowan/hellaswag", name="default")
 
         # convert task_id to task_name and labels
         def map_example(example):

@@ -1,8 +1,8 @@
 import abc
+from abc import abstractmethod
 from typing import List, Union
 
 import torch
-from pyparsing import abstractmethod
 from torch import nn
 
 from mttl.models.containers.selectors.base import Selector, TaskNameSelector
@@ -102,7 +102,9 @@ class ExpertContainer(nn.Module, Container):
                 is_default=expert_name == self.default_expert_name,
             )
 
-    def add_expert(self, expert: Expert, action="route", is_default=False) -> None:
+    def add_expert(
+        self, expert: Expert, action="route", is_default=False, device=None
+    ) -> None:
         expert_info = expert.expert_info
 
         if expert.name in self.expert_infos:
@@ -120,7 +122,7 @@ class ExpertContainer(nn.Module, Container):
             expert.name if is_default else self.default_expert_name
         )
 
-        self.on_add_expert(expert, is_default=is_default)
+        self.on_add_expert(expert, is_default=is_default, device=device)
 
         if action != "merge":
             # if a new expert was added, we update the selector and information meta-data
@@ -169,6 +171,7 @@ class ExpertContainer(nn.Module, Container):
         expert: Expert,
         action="merge",
         is_default=False,
+        device: str = None,
     ) -> None:
         pass
 
@@ -229,6 +232,7 @@ class ExpertContainer(nn.Module, Container):
         is_default: bool = False,
         selector_config: "SelectorConfig" = None,
         selector_cache: "SelectorsCache" = None,
+        device: str = None,
     ) -> None:
         """
         Base routine to modify the transformer architecture with an expert.
@@ -240,6 +244,7 @@ class ExpertContainer(nn.Module, Container):
             is_default: whether the expert should be set as default
             selector_config: selector configuration to use for the model
             selector_cache: cache to store the selectors for the model
+            device: device where to load the expert parameters, if None, same device as the model
         """
         from mttl.models.modifiers.modify_model import get_modifier_name
 
@@ -289,6 +294,7 @@ class ExpertContainer(nn.Module, Container):
                 expert,
                 action=action,
                 is_default=is_default,
+                device=device,
             )
 
         if expert_config.tie_params:

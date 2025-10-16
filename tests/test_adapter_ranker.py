@@ -1,5 +1,6 @@
 # unit test for adapter_ranker
 import pytest
+import torch
 
 from mttl.arguments import ExpertConfig, MultiExpertConfig, RankerConfig
 from mttl.datamodule.mt_seq_to_seq_module import FlanConfig, FlanModule
@@ -35,6 +36,7 @@ def test_train_ranker(tiny_flan_id, tmp_path, monkeypatch):
     assert any("classification" in dir for dir in dirs)
 
 
+@torch.no_grad()
 def test_clip_routing(tiny_flan_id):
     config = MultiExpertConfig()
 
@@ -74,6 +76,7 @@ def test_clip_routing(tiny_flan_id):
     assert prediction_experts[0][0][0] == "quarel_do_not_use"
 
 
+@torch.no_grad()
 def test_classifier_routing(tiny_flan_id):
     config = MultiExpertConfig(
         model="EleutherAI/gpt-neo-125m",

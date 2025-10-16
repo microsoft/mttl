@@ -17,7 +17,8 @@ from transformers import AutoTokenizer
 from transformers.tokenization_utils_base import PaddingStrategy
 
 from mttl.datamodule.utils import get_tokenizer
-from mttl.logging import logger
+from mttl.dist_utils import get_data_sampler
+from mttl.logging import logger, warn_once
 from mttl.registrable import Registrable
 
 
@@ -87,7 +88,6 @@ class DatasetConfig:
     model_family: str = "gpt"
     train_on_inputs: bool = False
     add_eos_to_targets: bool = True
-    add_eos_to_downstream_targets: bool = True
     finetune_task_name: str = None
     subsample_train: int = None
     subsample_dev: int = None
@@ -100,6 +100,8 @@ class DatasetConfig:
     task_id_field: str = "task_id"
     task_name_field: str = "task_name"
     task_source_field: str = "task_source"
+    dataloader_num_workers: int = 8
+    custom_split_file: str = None
 
 
 class PackedMixin:
@@ -144,21 +146,32 @@ class PackedMixin:
                     output_batch[key].append(value)
 
         # create proper containers
+        def get_pad_token(key):
+            if "attention_mask" in key:
+                return 0
+            elif "input_ids" in key:
+                return self.tokenizer.pad_token_id
+            elif "labels" in key:
+                return self.label_pad_token_id
+            else:
+                # TODO: make find a better way to do this
+                # Explicitly not using 0 or -1 as these are likely valid indices.
+                return 2**16 - 1
+
         for key, value in output_batch.items():
             if isinstance(value[0], torch.Tensor):
-                pad_token = {
-                    "input_ids": self.tokenizer.pad_token_id,
-                    "labels": self.label_pad_token_id,
-                }.get(key, 0)
+                # Is there a sequence in the batch?
+                if any(v.numel() > 1 for v in value):
+                    value = self.pad_sequence_wrapper(
+                        value,
+                        batch_first=True,
+                        padding_value=get_pad_token(key),
+                        side=self.tokenizer.padding_side,
+                    )
+                else:
+                    value = torch.stack(value, dim=0)
 
-                value = self.pad_sequence_wrapper(
-                    value,
-                    batch_first=True,
-                    padding_value=pad_token,
-                    side=self.tokenizer.padding_side,
-                )
                 output_batch[key] = value
-
         packed_seq_lens = output_batch["seq_lens"].flatten().cumsum(0)
         output_batch["packed_seq_lens"] = F.pad(packed_seq_lens, (1, 0)).to(torch.int32)
 
@@ -201,7 +214,7 @@ class DefaultCollator(PackedMixin):
     pad_to_multiple_of: Optional[int] = None
     label_pad_token_id: int = -100
     return_tensors: str = "pt"
-    model_family: str = "seq2seq"
+    model_family: str = "gpt"
     for_generation: bool = False
     train_on_inputs: bool = False
     task_to_id: dict = None
@@ -296,6 +309,7 @@ class DefaultCollator(PackedMixin):
                 pad_to_multiple_of=self.pad_to_multiple_of,
                 add_special_tokens=False,
             )
+
         label_mask = tokenized_labels["attention_mask"].bool()
         masked_labels = tokenized_labels["input_ids"].masked_fill(
             ~label_mask, self.label_pad_token_id
@@ -303,6 +317,20 @@ class DefaultCollator(PackedMixin):
         output_batch["input_ids"] = tokenized_sources["input_ids"]
         output_batch["attention_mask"] = tokenized_sources["attention_mask"]
         output_batch["labels"] = masked_labels
+
+        # NOTE: for future reference, we do not need to pass in `decoder_input_ids` if `labels` is passed.
+        # e.g. https://huggingface.co/docs/transformers/en/model_doc/t5
+        """
+        As you can see, only 2 inputs are required for the model in order to compute a loss: input_ids 
+        (which are the input_ids of the encoded input sequence) and labels (which are the input_ids of 
+        the encoded target sequence). The model will automatically create the decoder_input_ids based on 
+        the labels, by shifting them one position to the right and prepending the 
+        config.decoder_start_token_id, which for T5 is equal to 0 (i.e. the id of the pad token). 
+        Also note the task prefix: we prepend the input sequence with ‘translate English to German: ’ 
+        before encoding it. This will help in improving the performance, as this task prefix was used during 
+        T5’s pre-training.
+        """
+
         return output_batch
 
     def prepare_inputs_for_gpt_family(self, sources, labels):
@@ -318,6 +346,7 @@ class DefaultCollator(PackedMixin):
                 padding=self.padding,
                 return_tensors=self.return_tensors,
                 truncation=True,
+                add_special_tokens=False,
             )
             tokenized_labels = self.tokenizer(
                 labels,
@@ -325,6 +354,7 @@ class DefaultCollator(PackedMixin):
                 padding=self.padding,
                 return_tensors=self.return_tensors,
                 truncation=True,
+                add_special_tokens=False,
             )
             output_batch["input_ids"] = tokenized_sources["input_ids"]
             output_batch["attention_mask"] = tokenized_sources["attention_mask"]
@@ -435,10 +465,17 @@ class DefaultCollator(PackedMixin):
 
         # Otherwise process as expected
         sources = [b["source"] for b in batch]
-        labels = [b["target"] for b in batch]
+        og_labels = [b["target"] for b in batch]
         task_ids = [b.get(self.task_id_field, None) for b in batch]
         task_names = [b.get(self.task_name_field, None) for b in batch]
         task_sources = [b.get(self.task_source_field, None) for b in batch]
+
+        # Only tokenize a single label. Keep all other on
+        if isinstance(og_labels[0], list):
+            warn_once("Multiple labels found per example. Using the first one.")
+            labels = [l[0] for l in og_labels]
+        else:
+            labels = og_labels
 
         output_batch = (
             self.prepare_inputs_for_gpt_family(sources, labels)
@@ -462,7 +499,7 @@ class DefaultCollator(PackedMixin):
 
         output_batch["task_names"] = task_names
         output_batch["sources_texts"] = sources
-        output_batch["labels_texts"] = labels
+        output_batch["labels_texts"] = og_labels
         output_batch["task_sources"] = task_sources
 
         # integrate extra fields in the batch if required
@@ -487,8 +524,8 @@ class MultipleChoiceCollator(DefaultCollator):
         labels = [b["target"] for b in batch]
         label_index = [b["label_index"] for b in batch]
         task_ids = [b.get("task_id", None) for b in batch]
-        task_names = [b.get("task_name", None) for b in batch]
-        task_sources = [b.get("task_source", None) for b in batch]
+        task_names = [b.get(self.task_name_field, None) for b in batch]
+        task_sources = [b.get(self.task_source_field, None) for b in batch]
 
         if self.multisource:
             num_options = [len(t) for t in sources]
@@ -556,18 +593,22 @@ class DataModule(LightningDataModule, Registrable):
     collate_extra_fields: List[str] = None
 
     def train_dataloader(self, subsample=None):
+        import torch
+
         subsample = subsample or self.config.subsample
         train_dataset = self.train_dataset
         if subsample and subsample > 0:
             train_dataset = subsample_dst(train_dataset, subsample)
 
+        train_sampler = get_data_sampler(train_dataset)
         return DataLoader(
             train_dataset,
             batch_size=self.config.train_batch_size,
-            shuffle=True,
-            num_workers=8,
+            shuffle=train_sampler is None,
+            sampler=train_sampler,
+            num_workers=self.config.dataloader_num_workers,
             pin_memory=True,
-            persistent_workers=False,
+            persistent_workers=self.config.dataloader_num_workers > 0,
             collate_fn=self.collate_fn,
         )
 
@@ -576,13 +617,16 @@ class DataModule(LightningDataModule, Registrable):
         dev_dataset = self.dev_dataset
         if subsample and subsample > 0:
             dev_dataset = subsample_dst(dev_dataset, subsample)
+
+        dev_sampler = get_data_sampler(dev_dataset)
         return DataLoader(
             dev_dataset,
             batch_size=self.config.predict_batch_size,
-            shuffle=shuffle,
-            num_workers=8,
+            shuffle=shuffle and dev_sampler is None,
+            sampler=dev_sampler,
+            num_workers=self.config.dataloader_num_workers,
             pin_memory=False,
-            persistent_workers=False,
+            persistent_workers=self.config.dataloader_num_workers > 0,
             collate_fn=self.collate_fn,
             drop_last=False,
         )
@@ -592,13 +636,16 @@ class DataModule(LightningDataModule, Registrable):
         test_dataset = self.test_dataset
         if subsample and subsample > 0:
             test_dataset = subsample_dst(test_dataset, subsample)
+
+        test_sampler = get_data_sampler(test_dataset)
         return DataLoader(
             test_dataset,
             batch_size=self.config.predict_batch_size,
-            shuffle=shuffle,
-            num_workers=8,
+            shuffle=shuffle and test_sampler is None,
+            num_workers=self.config.dataloader_num_workers,
             pin_memory=False,
-            persistent_workers=False,
+            sampler=test_sampler,
+            persistent_workers=self.config.dataloader_num_workers > 0,
             collate_fn=self.collate_fn,
             drop_last=False,
         )
@@ -642,6 +689,42 @@ class DataModule(LightningDataModule, Registrable):
     @property
     def task_names(self):
         return self._task_names
+
+    @property
+    def train_task_names(self):
+        if not hasattr(self, "_train_task_names"):
+            if not self.train_dataset or len(self.train_dataset) == 0:
+                self._train_task_names = []
+            else:
+                self._train_task_names = list(
+                    set(self.train_dataset[self.config.task_name_field])
+                )
+
+        return self._train_task_names
+
+    @property
+    def dev_task_names(self):
+        if not hasattr(self, "_dev_task_names"):
+            if len(self.dev_dataset) == 0:
+                self._dev_task_names = []
+            else:
+                self._dev_task_names = list(
+                    set(self.dev_dataset[self.config.task_name_field])
+                )
+
+        return self._dev_task_names
+
+    @property
+    def test_task_names(self):
+        if not hasattr(self, "_test_task_names"):
+            if len(self.test_dataset) == 0:
+                self._test_task_names = []
+            else:
+                self._test_task_names = list(
+                    set(self.test_dataset[self.config.task_name_field])
+                )
+
+        return self._test_task_names
 
     @property
     def task_to_id(self):
@@ -708,6 +791,7 @@ class DataModule(LightningDataModule, Registrable):
 
         total_size = len(dataset)
         # make this deterministic to always sample the same subset
+        idxs = get_dst_idxs_sampled(n_samples, total_size)
         if isinstance(dataset, ArrowDataset):
             if per_task:
                 task_names = dataset.unique(self.config.task_name_field)
@@ -725,7 +809,9 @@ class DataModule(LightningDataModule, Registrable):
                             if value == task_name
                         ]
                     )
-                    idxs = get_dst_idxs_sampled(n_samples, len(task_idxs))
+                    idxs = get_dst_idxs_sampled(
+                        n_samples // len(task_names), len(task_idxs)
+                    )
                     task_idxs = task_idxs[idxs]
                     task_dataset = dataset.select(task_idxs)
                     subsampled_dataset.append(task_dataset)
@@ -737,7 +823,6 @@ class DataModule(LightningDataModule, Registrable):
                     )
                 subsampled_dataset = concatenate_datasets(subsampled_dataset)
             else:
-                idxs = get_dst_idxs_sampled(n_samples, total_size)
                 subsampled_dataset = dataset.select(idxs)
         else:
             assert (
@@ -878,6 +963,9 @@ class DataModule(LightningDataModule, Registrable):
             subsample = getattr(self.config, f"subsample_{split}", None)
             if subsample and subsample > 0:
                 dataset = getattr(self, f"{split}_dataset")
+                if dataset is None:
+                    continue
+
                 logger.warning(
                     f"subsampling the {split} dataset to {subsample} samples"
                 )
@@ -891,6 +979,8 @@ class DataModule(LightningDataModule, Registrable):
                 dataset = getattr(self, f"{split}_dataset")
 
                 logger.info(f"Packing sequences for {split} dataset")
+
+                # TODO: check that dataset has not already been tokenized
                 dataset = self.tokenize_dataset(dataset)
                 dataset = self.pack_sequences(
                     dataset, max_sequences=self.config.max_seq_per_pack

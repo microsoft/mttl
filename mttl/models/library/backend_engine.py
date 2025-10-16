@@ -11,6 +11,7 @@ from typing import Callable, List, Optional, Tuple, Union
 from azure.core.exceptions import ResourceExistsError, ResourceNotFoundError
 from azure.storage.blob import BlobServiceClient
 from azure.storage.blob.aio import BlobServiceClient as AsyncBlobServiceClient
+from filelock import AsyncFileLock
 from huggingface_hub import (
     CommitOperationAdd,
     CommitOperationCopy,
@@ -150,7 +151,7 @@ class BlobStorageEngine(BackendEngine):
         if _cache_dir is not None:
             self._cache_dir = Path(_cache_dir)
         if "BLOB_CACHE_DIR" in os.environ:
-            self._cache_dir = os.environ["BLOB_CACHE_DIR"]
+            self._cache_dir = Path(os.environ["BLOB_CACHE_DIR"])
         else:
             self._cache_dir = Path.home() / ".cache" / "mttl"
 
@@ -242,6 +243,8 @@ class BlobStorageEngine(BackendEngine):
         storage_account, container = repo_id.split("/")[:2]  # split at first "/"
         # The connection string is in the format:
         # https://<storage_account>.blob.core.windows.net/?<token>
+        # e.g. 'mttldata/narrativeqa-sanitized'
+        # becomes 'https://mttldata.blob.core.windows.net/', 'narrativeqa-sanitized'
         storage_uri = f"https://{storage_account}.blob.core.windows.net/"
         return storage_uri, container
 
@@ -349,8 +352,8 @@ class BlobStorageEngine(BackendEngine):
     def list_repo_files(self, repo_id):
         """List all files in a repository. The files might not be downloaded locally."""
         try:
-            container_client = self._get_container_client(repo_id)
-            return [b.name for b in container_client.list_blobs()]
+            with self._get_container_client(repo_id) as container_client:
+                return [b.name for b in container_client.list_blobs()]
         except ResourceNotFoundError as error:
             raise ValueError(f"Repository {repo_id} not found") from error
 
@@ -457,21 +460,23 @@ class BlobStorageEngine(BackendEngine):
         return local_filesnames[0] if is_str else local_filesnames
 
     async def _async_download_blob(self, blob_service_client, repo_id, filename):
-        # already cached!
         local_filename = self._get_local_filepath(repo_id, filename)
-        if local_filename.exists():
-            return local_filename
+        async with AsyncFileLock(str(local_filename) + ".lock"):
+            # already cached!
+            exists = local_filename.exists()
+            if exists:
+                return local_filename
 
-        storage_uri, container = self._parse_repo_id_to_storage_info(repo_id)
-        blob_client = blob_service_client.get_blob_client(
-            container=container, blob=filename
-        )
+            storage_uri, container = self._parse_repo_id_to_storage_info(repo_id)
+            blob_client = blob_service_client.get_blob_client(
+                container=container, blob=filename
+            )
 
-        os.makedirs(os.path.dirname(local_filename), exist_ok=True)
-        async with open(file=local_filename, mode="wb") as blob_file:
-            download_stream = await blob_client.download_blob()
-            data = await download_stream.readall()
-            blob_file.write(data)
+            os.makedirs(os.path.dirname(local_filename), exist_ok=True)
+            with open(file=local_filename, mode="wb") as blob_file:
+                download_stream = await blob_client.download_blob()
+                data = await download_stream.readall()
+                blob_file.write(data)
         return local_filename
 
     async def async_copy_blobs(
@@ -552,6 +557,25 @@ class BlobStorageEngine(BackendEngine):
                 container=container, blob=filename
             )
             await blob_client.delete_blob()
+
+    def _blob_exists(self, repo_id):
+        """When queried with a specific file, checks if file exists in the repo"""
+
+        # print(f'Checking if {repo_id} exists')
+        if len(repo_id.strip("/").split("/")) != 3:
+            message = f"`repo_id` should be in the format `storage_account/container/blob`. Got {repo_id}"
+            raise ValueError(message)
+
+        try:
+            file_name = repo_id.rstrip("/").split("/")[-1]
+            exists = file_name in self.list_repo_files(repo_id)
+            # print(f'File {file_name} exists in {repo_id}: {exists}')
+            return exists
+        except ValueError as error:
+            if "not found" in str(error):
+                return False
+            else:
+                raise error
 
 
 class LocalFSEngine(BackendEngine):

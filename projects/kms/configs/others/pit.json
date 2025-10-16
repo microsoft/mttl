@@ -1,0 +1,4 @@
+{
+    "loss_function": "lm",
+    "dataset_type": "pit"
+}

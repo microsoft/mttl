@@ -79,7 +79,10 @@ class HuggingfaceHubDatasetEngine(DatasetEngine):
         name: Optional[str] = None,
         **kwargs,
     ) -> None:
-        dataset.push_to_hub(self.dataset_id, name, **kwargs)
+        if name is not None:
+            dataset.push_to_hub(self.dataset_id, name, **kwargs)
+        else:
+            dataset.push_to_hub(self.dataset_id, **kwargs)
 
 
 class LocalDatasetEngine(DatasetEngine):

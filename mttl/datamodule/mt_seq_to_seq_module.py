@@ -6,7 +6,7 @@ import numpy
 from datasets import Dataset, concatenate_datasets
 
 from mttl.datamodule.base import DataModule, DatasetConfig
-from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task
+from mttl.datamodule.utils import maybe_filter_hf_dataset_by_task, split_on_split_column
 from mttl.logging import logger
 from mttl.models.library.dataset_library import DatasetLibrary
 
@@ -156,18 +156,16 @@ class FlatMultiTaskModule(DataModule):
                 desc="Creating split column.",
             )
 
+        self.dataset = apply_source_template(self.dataset, self.config.source_template)
+
         (
             self._task_names,
             self._task_to_id,
             train_dataset,
-            _,
-            _,
+            dev_dataset,
+            test_dataset,
         ) = maybe_filter_hf_dataset_by_task(
             self.dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
-        )
-
-        train_dataset = apply_source_template(
-            train_dataset, self.config.source_template
         )
 
         if self.config.augment_few_shot > 0:
@@ -180,23 +178,27 @@ class FlatMultiTaskModule(DataModule):
             train_dataset_aug = train_dataset_aug.shuffle()
             train_dataset = train_dataset_aug.select(range(len(train_dataset)))
 
-        self.train_dataset = train_dataset.filter(
-            lambda x: x["split"] == "train",
-            num_proc=n_proc,
-            desc="Creating train set",
-        )
-        self.dev_dataset = train_dataset.filter(
-            lambda x: x["split"] in ["validation", "valid"],
-            num_proc=n_proc,
-            desc="Creating valid set",
-        )
-        self.test_dataset = train_dataset.filter(
-            lambda x: x["split"] == "test",
-            num_proc=n_proc,
-            desc="Creating test set",
-        )
+            dev_dataset_aug = augment_few_shot(
+                dev_dataset,
+                self.config.augment_few_shot,
+                tokenizer=self.tokenizer,
+                max_input_length=self.config.max_input_length,
+            )
+            dev_dataset = dev_dataset_aug.select(range(len(dev_dataset)))
 
-        if len(self.test_dataset) == 0:
+            test_dataset_aug = augment_few_shot(
+                test_dataset,
+                self.config.augment_few_shot,
+                tokenizer=self.tokenizer,
+                max_input_length=self.config.max_input_length,
+            )
+            test_dataset = test_dataset_aug.select(range(len(test_dataset)))
+
+        self.train_dataset = train_dataset
+        self.dev_dataset = dev_dataset
+        self.test_dataset = test_dataset
+
+        if self.test_dataset is None or len(self.test_dataset) == 0:
             self.test_dataset = self.dev_dataset
 
 
@@ -223,7 +225,7 @@ class FlanModule(DataModule):
             raise ValueError("Please specify a flan dataset to load.")
 
         dataset = DatasetLibrary.pull_dataset_with_retry(self.config.dataset)
-        n_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
+        num_proc = int(os.environ.get("MTTL_NUM_PROC_DATASETS", 16))
 
         if "split" not in dataset.column_names["train"]:
             raise ValueError(
@@ -236,7 +238,7 @@ class FlanModule(DataModule):
                     filter_template_type,
                     set(self.config.include_template_type.split(",")),
                 ),
-                num_proc=n_proc,
+                num_proc=num_proc,
                 desc="Filtering template types",
             )
 
@@ -245,7 +247,7 @@ class FlanModule(DataModule):
                 partial(
                     filter_task_source, set(self.config.include_task_source.split(","))
                 ),
-                num_proc=n_proc,
+                num_proc=num_proc,
                 desc="Filtering task sources",
             )
 
@@ -253,37 +255,11 @@ class FlanModule(DataModule):
             self._task_names,
             self._task_to_id,
             train_dataset,
-            _,
-            _,
+            dev_dataset,
+            test_dataset,
         ) = maybe_filter_hf_dataset_by_task(
-            dataset, "task_name", self.config.finetune_task_name, n_proc=n_proc
+            dataset, "task_name", self.config.finetune_task_name, n_proc=num_proc
         )
-
-        train_dataset = apply_source_template(
-            train_dataset, self.config.source_template
-        )
-
-        if "split" in dataset.column_names["train"]:
-            self.train_dataset = train_dataset.filter(
-                lambda x: x["split"] == "train",
-                num_proc=n_proc,
-                desc="Creating train set",
-            )
-            self.dev_dataset = train_dataset.filter(
-                lambda x: x["split"] == "validation",
-                num_proc=n_proc,
-                desc="Creating valid set",
-            )
-            self.test_dataset = train_dataset.filter(
-                lambda x: x["split"] == "test",
-                num_proc=n_proc,
-                desc="Creating test set",
-            )
-        else:
-            self.train_dataset, self.dev_dataset = self.create_train_valid_split(
-                train_dataset
-            )
-            self.test_dataset = self.dev_dataset
 
         if self.config.remove_phi_eval_tasks:
             assert not any(
@@ -291,14 +267,20 @@ class FlanModule(DataModule):
                 for name in ["niv2", "*"]
             ), "niv2 not currently supported for phi-2 eval exclusion"
 
-            self.train_dataset = self.train_dataset.filter(
-                lambda x: not is_phi2_eval_task(x["task_name"]),
-                num_proc=n_proc,
-                desc="Filtering phi-2 eval tasks from training mixture.",
-            )
-            if not self.train_dataset.num_rows:
-                logger.warning(
-                    "No training examples left after filtering. "
-                    "Please set `remove_phi_eval_tasks=False` "
-                    "if you want to train on phi-2 eval tasks."
+            for ds in [train_dataset, dev_dataset, test_dataset]:
+                ds = ds.filter(
+                    lambda x: not is_phi2_eval_task(x["task_name"]),
+                    num_proc=num_proc,
+                    desc="Filtering phi-2 eval tasks",
                 )
+
+                if not ds.num_rows:
+                    logger.warning(
+                        "No training examples left after filtering. "
+                        "Please set `remove_phi_eval_tasks=False` "
+                        "if you want to train on phi-2 eval tasks."
+                    )
+
+        self.train_dataset = train_dataset
+        self.dev_dataset = dev_dataset
+        self.test_dataset = test_dataset

@@ -1,14 +1,20 @@
+import time
+
 import numpy as np
 import torch
 from tqdm.auto import tqdm
 
+from mttl.dist_utils import distributed_mean, is_main_process
 from mttl.evaluators.base import Evaluator, switch_to_eval_mode
 from mttl.logging import logger
 from mttl.models.utils import compute_loglike_loss
+from mttl.utils import get_raw_model
 
 
 class LogLikeEvaluator(Evaluator):
     def __init__(self, datamodule, **kwargs):
+        self.length_normalization = kwargs.pop("length_normalization", True)
+
         super().__init__(datamodule=datamodule, **kwargs)
 
     @switch_to_eval_mode
@@ -34,13 +40,19 @@ class LogLikeEvaluator(Evaluator):
         pbar = tqdm(
             enumerate(dataloader),
             total=len(dataloader),
+            disable=not is_main_process(),
+            leave=False,
+            position=1,
         )
 
         all_losses = []
         all_accuracies = []
         all_predictions = []
-
+        time_per_request = []
+        tokens_per_request = []
         device = next(model.parameters()).device
+
+        raw_model = get_raw_model(model)
 
         for num_batch, batch in pbar:
             if num_batches is not None and num_batch >= num_batches:
@@ -55,8 +67,9 @@ class LogLikeEvaluator(Evaluator):
             batch = transfer_batch_to_device(batch, device)
 
             with torch.no_grad():
-                if isinstance(model, LightningEfficientCheckpoint) or isinstance(
-                    model, BaseExpertModel
+                start = time.time()
+                if isinstance(raw_model, LightningEfficientCheckpoint) or isinstance(
+                    raw_model, BaseExpertModel
                 ):
                     logits = model.forward(**batch).logits
                 else:
@@ -64,27 +77,50 @@ class LogLikeEvaluator(Evaluator):
                         input_ids=batch["input_ids"],
                         attention_mask=batch["attention_mask"],
                     ).logits
-
+                end = time.time()
                 loss_per_option = compute_loglike_loss(
-                    logits, batch["labels"], reduction="none"
+                    logits,
+                    batch["labels"],
+                    reduction="none",
+                    normalize_length=self.length_normalization,
                 )
-                loss_per_option = loss_per_option.cpu()
-
                 if loss_per_option.dtype in [torch.bfloat16, torch.float16]:
-                    loss_per_option = loss_per_option.float().numpy()
+                    loss_per_option = loss_per_option.float()
 
+                loss_per_option = loss_per_option.cpu().numpy()
                 loss_per_example = [
                     loss_per_option[
                         int(np.sum(num_options[:i])) : int(np.sum(num_options[: i + 1]))
                     ]
                     for i in range(batch_size)
                 ]
+
                 predictions = [
                     np.argmin(option_loss) for option_loss in loss_per_example
                 ]
 
+                # get number of tokens in prompt
+                label_pad_id = self.datamodule.collate_fn.label_pad_token_id
+                num_tokens_in_prompt = (
+                    (
+                        batch["attention_mask"].sum(1)
+                        - batch["labels"].ne(label_pad_id).sum(1)
+                    )
+                    .cpu()
+                    .tolist()
+                )
+
+                num_tokens_in_prompt = [
+                    num_tokens_in_prompt[
+                        int(np.sum(num_options[:i])) : int(np.sum(num_options[: i + 1]))
+                    ][0]
+                    for i in range(batch_size)
+                ]
+
                 all_predictions.extend(predictions)
                 all_losses.extend(loss_per_option.tolist())
+                time_per_request.append((end - start) / batch_size)
+                tokens_per_request.extend(num_tokens_in_prompt)
 
                 if labels_index is not None:
                     all_accuracies.extend(
@@ -97,14 +133,35 @@ class LogLikeEvaluator(Evaluator):
                 logger.info("Prediction:\n%s", labels_texts[predictions[0]])
 
             if all_accuracies:
-                pbar.set_description("Accuracy: {:.4f}".format(np.mean(all_accuracies)))
+                pbar.set_description(
+                    "Accuracy: {:.4f} \t Loss {:.4f} \t Time: {:.4f}".format(
+                        np.mean(all_accuracies),
+                        np.mean(all_losses),
+                        np.mean(time_per_request),
+                    )
+                )
+
+            del batch
+            del logits
+            del loss_per_option
+            torch.cuda.empty_cache()
+
+        loss = distributed_mean(all_losses, device)
+        all_accuracies = (
+            distributed_mean(all_accuracies, device) if all_accuracies else None
+        )
+        time_per_request = distributed_mean(time_per_request, device)
+        tokens_per_request = distributed_mean(tokens_per_request, device)
 
         metrics = {
-            "loss": float(np.mean(all_losses)),
-            "loglike": -float(np.mean(all_losses)),
+            "loss": loss,
+            "loglike": -loss,
             "predictions": all_predictions,
-            "accuracy": float(np.mean(all_accuracies)) if all_accuracies else None,
+            "accuracy": all_accuracies,
+            "time_per_request": time_per_request,
+            "tokens_per_request": tokens_per_request,
         }
 
-        self.save_metrics(metrics, output_path)
+        if output_path:
+            self.save_metrics(metrics, output_path)
         return metrics["accuracy"]

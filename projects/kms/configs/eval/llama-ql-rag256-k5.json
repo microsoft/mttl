@@ -1,0 +1,15 @@
+{
+    "dataset": "az://mttldata/quality-sanitized",
+    "evaluate_on": "quality-rag-256",
+    "include_context": true,
+    "topk_context": 5,
+    "split": "dev",
+    "custom_split_file": "splits/quality/quality_full.json",
+    "model": "meta-llama/Llama-3.1-8B-Instruct",
+    "max_input_length": 128000,
+    "model_family": "gpt",
+    "padding_side": "right",
+    "truncation_side": "left",
+    "precision": "bf16",
+    "predict_batch_size": 1
+}

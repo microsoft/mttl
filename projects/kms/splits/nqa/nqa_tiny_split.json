@@ -1,0 +1,23 @@
+{
+    "train": [
+        "a71ea0ede601f09b48d88dbe9c060c60709a3a1c",
+        "7fc9e3ebe3d72f9d10a838c9b60ff8f6072a274f",
+        "d0f0333ad7eb04d248ae1a8a6b69e68b7b359f76",
+        "b57cfffa1b8af82d2f3890200178338cec29a23f",
+        "0772d79247ec3faf8f25765d731b0310a30517ff"
+    ],
+    "dev": [
+        "3e9666459feb414586d9d23b51c8a020bacc150a",
+        "ba74352102b49e66de4485552e80012fe38adb20",
+        "60a79c800ff1d55aedfba99108890ecc3632c456",
+        "b856de66b8fd259ac0a3e5bef124efb447fe4f75",
+        "139004cd2411c6909a752ecf897d326ed8bf419c"
+    ],
+    "test": [
+        "eef816f32f560811968ec9e20eb4e5f034199444",
+        "c72161c89a7dc8ea5d62b200689bd2acae6f354d",
+        "64de615fe8d7b550c3f9ce72e55bab8ebac69b2f",
+        "6deb1d33098457dbbf6c8b9fc39ae9f2ac601bbf",
+        "823a8b6bbbb0bbeec9c4bec1929b64a3694232d7"
+    ]
+}

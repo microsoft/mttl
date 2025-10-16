@@ -20,6 +20,13 @@ class SelectorOutput:
 
 
 @dataclass
+class SharedExpertsSelectorOutput(SelectorOutput):
+    """A selector output that contains a single shared expert across batch and sequence"""
+
+    expert: str
+
+
+@dataclass
 class BatchExpertsSelectorOutput(SelectorOutput):
     """A selector output that contains a list of experts without weights.
 

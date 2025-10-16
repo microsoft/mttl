@@ -7,8 +7,14 @@ import torch
 
 from mttl.logging import logger
 
+bnb = None
+try:
+    import bitsandbytes as bnb
+except ImportError:
+    logger.debug("bitsandbytes not available.")
 
-def compute_loglike_loss(logits, labels, reduction="none"):
+
+def compute_loglike_loss(logits, labels, reduction="none", normalize_length=True):
     bs = logits.size(0)
     vocab_size = logits.size(-1)
     labels = labels.squeeze(-1)
@@ -29,7 +35,10 @@ def compute_loglike_loss(logits, labels, reduction="none"):
         # mean only non-zero
         non_zero_loss = (loss != 0).sum(dim=-1)
         non_zero_loss[non_zero_loss == 0] = 1
-        loss = loss.sum(dim=-1) / non_zero_loss
+        if normalize_length:
+            loss = loss.sum(dim=-1) / non_zero_loss
+        else:
+            loss = loss.sum(dim=-1)
     return loss
 
 
@@ -102,30 +111,34 @@ def model_loader_helper(
     load_in_8bit=False,
     attn_implementation=None,
 ):
-    if load_in_4bit and load_in_8bit:
-        raise ValueError("Specify either 'load_in_4bit' or 'load_in_8bit' or neither.")
 
     from transformers import (
         AutoModelForCausalLM,
         AutoModelForSeq2SeqLM,
-        BitsAndBytesConfig,
-        LlamaForCausalLM,
         PreTrainedModel,
     )
 
-    if load_in_8bit:
-        bnb_config = BitsAndBytesConfig(load_in_8bit=True)
-    elif load_in_4bit:
-        bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
-            bnb_4bit_use_double_quant=True,
-        )
-    else:
-        bnb_config = None
+    if load_in_4bit and load_in_8bit:
+        raise ValueError("Specify either 'load_in_4bit' or 'load_in_8bit' or neither.")
 
-    logger.info(f"Attention Implementation: {attn_implementation}")
+    bnb_config = None
+    if bnb:
+        from transformers import BitsAndBytesConfig
+
+        if load_in_8bit:
+            bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+        elif load_in_4bit:
+            bnb_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,
+            )
+    elif load_in_4bit or load_in_8bit:
+        raise ValueError(
+            "Quantization was requested, but bitsandbytes is not available. "
+            "Please install bitsandbytes with `pip install -e '.[bitsandbytes]'`."
+        )
 
     # set dtype
     if bf16:
@@ -134,6 +147,10 @@ def model_loader_helper(
         torch_dtype = torch.float16
     else:
         torch_dtype = torch.float32
+
+    logger.info(f"Attention Implementation: {attn_implementation}")
+    logger.info(f"BnB config: {bnb_config}")
+    logger.info(f"Dtype: {torch_dtype}")
 
     if isinstance(model_name, PreTrainedModel):
         return model_name.train()

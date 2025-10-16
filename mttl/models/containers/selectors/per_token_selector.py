@@ -229,7 +229,11 @@ class PerTokenSelector(Selector, LoadableLibraryMixin):
         )
 
     def on_add_expert(
-        self, expert_name: str, expert_info: ExpertInfo = None, is_default=False
+        self,
+        expert_name: str,
+        expert_info: ExpertInfo = None,
+        is_default=False,
+        device: str = None,
     ):
         if self.library_artifacts is not None:
             proto = get_expert_prototype_from_library_artifacts(

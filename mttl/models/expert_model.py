@@ -7,6 +7,7 @@ from typing import Dict, List, Union
 
 import torch
 
+from mttl.dist_utils import is_dist_avail_and_initialized
 from mttl.logging import logger
 from mttl.models.base_model import BaseExpertModel
 from mttl.models.containers.base import (
@@ -35,17 +36,38 @@ from mttl.models.modifiers.modify_model import modify_transformer
 
 
 @contextlib.contextmanager
-def disable_adapters(model):
+def set_active_expert(model, expert_name):
+    """Context manager to set the active expert in a model.
+
+    Args:
+        model (BaseExpertModel): The model to set the active expert in.
+    """
+    if is_dist_avail_and_initialized() and hasattr(model, "module"):
+        model = model.module
+
+    state = model.config.default_expert_name
+    model.set_default_expert(expert_name)
+
+    yield
+
+    model.set_default_expert(state)
+
+
+@contextlib.contextmanager
+def disable_modifiers(model):
     """Context manager to disable all adapters in a model.
 
     Args:
         model (BaseExpertModel): The model to disable adapters in.
     """
-    model.disable_adapters()
+    if is_dist_avail_and_initialized() and hasattr(model, "module"):
+        model = model.module
+
+    model.disable_modifiers()
 
     yield
 
-    model.enable_adapters()
+    model.enable_modifiers()
 
 
 @dataclass
@@ -68,11 +90,11 @@ class ExpertModel(BaseExpertModel):
         if config.modifier_config is not None:
             modify_transformer(self.model, config.modifier_config)
 
-    def enable_adapters(self):
+    def enable_modifiers(self):
         for module in self.modifiers:
             module.enable()
 
-    def disable_adapters(self):
+    def disable_modifiers(self):
         for module in self.modifiers:
             module.disable()
 
@@ -186,11 +208,11 @@ class MultiExpertMixin:
     def selector_config(self, value: AutoSelectorConfig):
         self._selector_config = value
 
-    def enable_adapters(self):
+    def enable_modifiers(self):
         for module in self.experts_containers:
             module.enable()
 
-    def disable_adapters(self):
+    def disable_modifiers(self):
         for module in self.experts_containers:
             module.disable()
 
@@ -202,6 +224,7 @@ class MultiExpertMixin:
         """Propagate default expert to all containers that contain it."""
         for container in self.experts_containers:
             container.default_expert_name = None
+        self.config.default_expert_name = None
 
     def set_default_expert(self, expert_name):
         """Propagate default expert to all containers that contain it."""
@@ -213,6 +236,7 @@ class MultiExpertMixin:
                 container.default_expert_name = expert_name
             else:
                 raise ValueError(f"Expert {expert_name} not found in the container.")
+        self.config.default_expert_name = expert_name
 
     @property
     def lock(self):
@@ -258,9 +282,9 @@ class MultiExpertMixin:
 
             library = ExpertLibrary.get_expert_library(library)
 
-        def add_module(self, module_name):
+        def add_module(model, module_name):
             expert_dump = library[module_name]
-            self.add_expert_instance(expert_dump)
+            model.add_expert_instance(expert_dump)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
             # Create a list to hold the futures
@@ -356,6 +380,7 @@ class MultiExpertMixin:
         expert_name=None,
         action="route",
         is_default=False,
+        device=None,
     ) -> Expert:
         """
         If action is merge, then the expert is merged with the existing model, and we return None.
@@ -380,6 +405,7 @@ class MultiExpertMixin:
                 is_default=is_default,
                 selector_config=selector_config,
                 selector_cache=self.selector_cache,
+                device=None,
             )
 
             if action != "merge":
@@ -699,7 +725,7 @@ class MoEModelConfig(BaseExpertModelConfig):
     # if library_id is not None, then we load experts from the library
     library_id: str = None
     # how many experts to add if not in library
-    moe_num_experts: int = 1
+    moe_num_experts: int = 0
     # if selector_config is not None, then we use it to select experts
     selector_config: AutoSelectorConfig = None
     # if modifier_config is not None, then we create moe_num_experts with this modifier
@@ -715,10 +741,10 @@ class MoEModel(BaseExpertModel, MultiExpertMixin):
 
         if not self.config.library_id and self.config.moe_num_experts >= 1:
             self.add_empty_experts()
-            self.moe_num_experts = self.config.moe_num_experts
-        else:
+        elif self.config.library_id:
             expert_library = ExpertLibrary.get_expert_library(self.config.library_id)
             assert len(expert_library) > 0, "No experts found in the library."
+
             for i, expert in enumerate(sorted(list(expert_library.keys()))):
                 self.add_expert_instance(expert_library[expert], expert_name=expert)
 
@@ -733,3 +759,7 @@ class MoEModel(BaseExpertModel, MultiExpertMixin):
                     f"Added all {self.config.moe_num_experts} experts to container."
                 )
                 break
+
+    @property
+    def moe_num_experts(self):
+        return len(self.experts_names)
