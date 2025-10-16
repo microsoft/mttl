@@ -66,6 +66,7 @@ def test_early_stopping(mocker, flan_data_module):
         " The man ",
     ]
 
+
 @pytest.mark.skipif(
     tuple(map(int, datasets.__version__.split("."))) >= (4, 0, 0),
     reason="The current version of datasets does not support Dataset scripts.",
@@ -175,6 +176,7 @@ def test_code_evaluator(mocker):
     assert gen_spy.call_args[1]["max_new_tokens"] == 20
     assert gen_spy.call_args[1]["stopping_criteria"] is not None
 
+
 @pytest.mark.skipif(
     tuple(map(int, datasets.__version__.split("."))) >= (4, 0, 0),
     reason="The current version of datasets does not support Dataset scripts.",
@@ -194,6 +196,7 @@ def test_setup_evaluators():
     )
     assert len(runner.evaluators) == 2
     assert isinstance(runner.evaluators["piqa"], LogLikeEvaluator)
+
 
 @pytest.mark.skipif(
     tuple(map(int, datasets.__version__.split("."))) >= (4, 0, 0),

@@ -11,6 +11,7 @@ from mttl.models.ranker.classifier_ranker import SentenceTransformerClassifier
 from mttl.models.ranker.clip_ranker import CLIPRanker
 from mttl.models.ranker.train_utils import train_classifier
 
+
 def test_train_ranker(tiny_flan_id, tmp_path, monkeypatch):
     import os
 

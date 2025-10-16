@@ -266,6 +266,7 @@ def test_mmlu(task_name):
         assert len(mmlu.task_names) == 1
         assert mmlu.task_names[0] == task_name
 
+
 @pytest.mark.skipif(
     tuple(map(int, datasets.__version__.split("."))) >= (4, 0, 0),
     reason="The current version of datasets does not support Dataset scripts.",
@@ -361,6 +362,10 @@ def test_multichoice_collator():
     assert output["task_names"] == ["t1", "t1", "t2"]
 
 
+@pytest.mark.skipif(
+    tuple(map(int, datasets.__version__.split("."))) >= (4, 0, 0),
+    reason="The current version of datasets does not support Dataset scripts.",
+)
 def test_mbpp():
     config = MBPPDataConfig(
         model="EleutherAI/gpt-neo-125m",
