@@ -332,4 +332,7 @@ if __name__ == "__main__":
             logger.info("Model already trained, skipping")
             exit(0)
 
+    # The configs still contain pointers to internal az://mttldata paths, replace them
+    args.dataset = args.dataset.replace('az://mttldata', BASE_PREFIX)
+
     train_km(args)

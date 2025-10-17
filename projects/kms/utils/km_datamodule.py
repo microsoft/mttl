@@ -350,6 +350,7 @@ class LMDataModule(DataModule):
         assert len(dataset) == 1, "all dataset should be in `train`"
 
         # Let's first filter out unused tasks
+        # NOTE: do not split on split column here, we will do custom train / dev split later
         (
             self._task_names,
             self._task_to_id,
@@ -360,6 +361,7 @@ class LMDataModule(DataModule):
             dataset,
             self.config.task_name_field,
             self.config.finetune_task_name,
+            should_split_on_split_column=False,
             n_proc=n_proc,
         )
 

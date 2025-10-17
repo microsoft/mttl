@@ -35,15 +35,12 @@ class NQADatamodule(DataModule):
         (
             self._task_names,
             self._task_to_id,
-            train_dataset,
-            _,
-            _,
+            self.train_dataset,
+            self.dev_dataset,
+            self.test_dataset,
         ) = maybe_filter_hf_dataset_by_task(
-            dataset, self.config.task_name_field, self.config.finetune_task_name
-        )
-
-        self.train_dataset, self.dev_dataset, self.test_dataset = split_on_split_column(
-            train_dataset
+            dataset, self.config.task_name_field, self.config.finetune_task_name, 
+            should_split_on_split_column=False
         )
 
         def expand_questions(examples, tokenizer):

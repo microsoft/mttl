@@ -129,6 +129,7 @@ class PITDatasetModule(DataModule):
             self.config.task_name_field,
             self.config.finetune_task_name,
             n_proc=n_proc,
+            should_split_on_split_column=False,
         )
 
         train_dataset = train_dataset.map(

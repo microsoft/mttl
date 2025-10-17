@@ -86,7 +86,7 @@ class LonghealthDatamodule(DataModule):
             _,
             _,
         ) = maybe_filter_hf_dataset_by_task(
-            dataset, self.config.task_name_field, self.config.finetune_task_name
+            dataset, self.config.task_name_field, self.config.finetune_task_name, should_split_on_split_column=False
         )
 
         # Let's make sure that the full prompt is always in context
@@ -186,6 +186,8 @@ class LonghealthDatamodule(DataModule):
         if self.tokenizer.chat_template is None:
             self.tokenizer.apply_chat_template = lambda x, **kwargs: x[0]["content"]
 
+        # TODO: refactor code to leverage `split_on_split_column` in 
+        # `maybe_filter_hf_dataset_by_task`
         if "split" in train_dataset.features:
             self.train_dataset, self.dev_dataset, self.test_dataset = (
                 split_on_split_column(train_dataset)
