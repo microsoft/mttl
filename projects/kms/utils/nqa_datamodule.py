@@ -39,8 +39,10 @@ class NQADatamodule(DataModule):
             self.dev_dataset,
             self.test_dataset,
         ) = maybe_filter_hf_dataset_by_task(
-            dataset, self.config.task_name_field, self.config.finetune_task_name, 
-            should_split_on_split_column=False
+            dataset,
+            self.config.task_name_field,
+            self.config.finetune_task_name,
+            should_split_on_split_column=False,
         )
 
         def expand_questions(examples, tokenizer):

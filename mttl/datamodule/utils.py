@@ -8,7 +8,11 @@ from mttl.logging import logger
 
 
 def maybe_filter_hf_dataset_by_task(
-    dataset, task_field, task_names: str = None, n_proc=16, should_split_on_split_column=True
+    dataset,
+    task_field,
+    task_names: str = None,
+    n_proc=16,
+    should_split_on_split_column=True,
 ):
     """Filter a HuggingFace dataset by task names."""
 
