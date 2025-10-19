@@ -15,8 +15,6 @@ from mttl.evaluators.loglike_evaluator import LogLikeEvaluator
 from mttl.logging import logger, warn_once
 from projects.kms.utils.nqa_datamodule import NQADatamodule, NQADatasetConfig
 from projects.kms.utils.quality_datamodule import (
-    GenQualityDataModule,
-    GenQualityDatasetConfig,
     QualityDatamodule,
     QualityDatasetConfig,
 )

@@ -8,7 +8,11 @@ from mttl.logging import logger
 
 
 def maybe_filter_hf_dataset_by_task(
-    dataset, task_field, task_names: str = None, n_proc=16
+    dataset,
+    task_field,
+    task_names: str = None,
+    n_proc=16,
+    should_split_on_split_column=True,
 ):
     """Filter a HuggingFace dataset by task names."""
 
@@ -48,7 +52,9 @@ def maybe_filter_hf_dataset_by_task(
         dev_dataset is None
         and test_dataset is None
         and "split" in train_dataset.features
+        and should_split_on_split_column
     ):
+        logger.info("Splitting train dataset on 'split' column.")
         train_dataset, dev_dataset, test_dataset = split_on_split_column(
             train_dataset, num_proc=n_proc
         )
