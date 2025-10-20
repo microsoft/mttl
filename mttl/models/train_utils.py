@@ -198,7 +198,7 @@ def train_sparse_model(model, datamodule, args, do_test=False):
                 num_train_steps / args.gradient_accumulation_steps
             ):
                 make_sparse_model_during_training(
-                    model, batch, parameter_selection_procedure="per_layer"
+                    model, batch, parameter_selection_procedure="max_connection_sensitivity"
                 )
 
         # eval and save best model

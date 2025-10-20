@@ -555,8 +555,10 @@ class TiesMerge(LibraryTransform):
                 used += keep_mask.sum().item()
             else:
                 # sign majority vote
-                sign_per_dim = expert_weights.sign().sum(0, keepdim=True).sign()
                 sign_per_dim = expert_weights.sum(0, keepdim=True).sign()
+                # resolve zero signs: https://github.com/rezazzr/breadcrumbs/blob/main/src/task_vectors.py#L334
+                majority_sign = torch.sign(sign_per_dim.sum())
+                sign_per_dim[sign_per_dim == 0] = majority_sign
 
                 # keep only weights whose sign agree with the majority
                 use_for_avg = expert_weights.sign() == sign_per_dim
@@ -1524,3 +1526,4 @@ class MBCWithCosSimTransform(LibraryTransform):
         for key, label in zip(expert_names, cluster_labels):
             clusters[f"cluster_{label}"].append(key)
         return clusters
+
