@@ -507,6 +507,7 @@ def run_multitask(args: FinetuneConfig):
 
 @register_finetune_func("poly_from_scratch")
 def finetune_polylib_full(args: FinetuneConfig, dm):
+    from mttl.models.containers.selectors.poly_selector import PolySelectorConfig, PolySelectorDirectConfig
     """
     Trains poly from scratch, fine- or coarsegrained
     """
@@ -516,9 +517,9 @@ def finetune_polylib_full(args: FinetuneConfig, dm):
         and "selector" in args.trainable_param_names
     ):
         args.trainable_param_names += "|.*module_logits.*|.*selector.*"
-    assert args.library_id is None
     args.router_selector = "poly_router"
-    module = MoEModule(**vars(args))
+    module = MoEModule(**vars(args), selector_config=PolySelectorConfig(task_names=["adversarial_qa_dbert_generate_question", "duorc_SelfRC_question_answering", "quail_description_context_question_answer_id"]))
+    # module.model.set_selector("lora", PolySelectorConfig(task_names=["adversarial_qa_dbert_generate_question", "duorc_SelfRC_question_answering", "quail_description_context_question_answer_id"]))
     module.to("cuda")
     return train_module(args, module, dm)
 
