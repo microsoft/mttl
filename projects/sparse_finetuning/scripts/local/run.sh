@@ -18,8 +18,9 @@ for task_name in "${task_name_list[@]}"; do
     finetune_task_name=${task_name} \
     expert_name=${task_name} \
     wandb_project=${WANDB_PROJECT} \
-    library_id=${LIB_ID}/${EXP_NAME} \
-    output_dir=./experiment/${JOB_NAME}
+    output_dir=./experiment/${JOB_NAME} \
+    library_id="hf://zhan1993/task_experts_phi-3_mini_lora"
+   
 
     sleep 1
 done
