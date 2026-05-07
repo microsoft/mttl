@@ -458,11 +458,617 @@ class CPMerge(LibraryTransform):
 class CPMergeAfterConfig(LibraryTransformConfig):
     cp_rank: int = 4
     path: str = "cp_merge_after_ingredients.pt"
+    plot_similarity: bool = False
+    plot_output_dir: str = "cp_merge_after_plots"
+    plot_cp_sti: bool = False
+    plot_cpd_convergence: bool = False
+    cpd_n_iter_max: int = 100
+    cpd_tol: float = 1e-8
 
 @LibraryTransform.register("cp_merge_after", CPMergeAfterConfig)
 class CPMergeAfter(LibraryTransform):
     def __init__(self, config: CPMergeAfterConfig = None):
         super().__init__(config or CPMergeAfterConfig())
+
+    def _save_similarity_heatmap(
+        self, sim_matrix: np.ndarray, labels: List[str], title: str, save_path: str
+    ):
+        import matplotlib.pyplot as plt
+
+        n = len(labels)
+        fig_size = max(6.0, min(0.5 * n, 20.0))
+        fig, ax = plt.subplots(figsize=(fig_size, fig_size))
+        im = ax.imshow(sim_matrix, cmap="coolwarm", vmin=-1.0, vmax=1.0)
+        ax.set_title(title)
+        ax.set_xticks(np.arange(n))
+        ax.set_yticks(np.arange(n))
+        ax.set_xticklabels(labels, fontsize=22, rotation=45, ha="right")
+        ax.set_yticklabels(labels, fontsize=22)
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="Cosine similarity")
+        fig.tight_layout()
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+
+    def _plot_factor_similarity(self, experts: List[Expert], layer_names: List[str]):
+        os.makedirs(self.config.plot_output_dir, exist_ok=True)
+        expert_names = [expert.name.split("_")[0] for expert in experts]
+        factors_to_plot = {"U": "U (from SVD of TASK matrix)", "V": "V (from SVD of TASK matrix)"}
+        summary_rows = []
+
+        for factor_name, factor_title in factors_to_plot.items():
+            layer_similarities = []
+            for layer in tqdm(layer_names[:1]):
+                key_a = f"{layer}.lora_a"
+                key_b = f"{layer}.lora_b"
+                if any(
+                    key_a not in expert.expert_weights or key_b not in expert.expert_weights
+                    for expert in experts
+                ):
+                    continue
+
+                flattened = []
+                for expert in experts:
+                    lora_a = expert.expert_weights[key_a].detach().float()
+                    lora_b = expert.expert_weights[key_b].detach().float()
+                    task_matrix = lora_a @ lora_b
+                    u, _, vh = torch.linalg.svd(task_matrix, full_matrices=False)
+                    k = 4
+                    if factor_name == "U":
+                        factor = u[:, :k].cpu().numpy()
+                    else:
+                        factor = vh.transpose(-2, -1)[:, :k].cpu().numpy()
+                    flattened.append(factor.reshape(-1))
+
+                layer_matrix = cosine_similarity(np.stack(flattened, axis=0))
+                layer_similarities.append(layer_matrix)
+
+            if not layer_similarities:
+                logger.warning(
+                    f"Skipping {factor_name} similarity plot; no valid layers found."
+                )
+                continue
+
+            mean_similarity = np.mean(np.stack(layer_similarities, axis=0), axis=0)
+            output_path = os.path.join(
+                self.config.plot_output_dir,
+                f"cpmergeafter_svd_{factor_name.lower()}_cosine_similarity.png",
+            )
+            self._save_similarity_heatmap(
+                sim_matrix=mean_similarity,
+                labels=expert_names,
+                title=f"Pairwise cosine similarity of {factor_title} across tasks",
+                save_path=output_path,
+            )
+            matrix_csv_path = os.path.join(
+                self.config.plot_output_dir,
+                f"cpmergeafter_svd_{factor_name.lower()}_cosine_similarity_matrix.csv",
+            )
+            np.savetxt(
+                matrix_csv_path,
+                mean_similarity,
+                delimiter=",",
+                header=",".join(expert_names),
+                comments="",
+            )
+
+            off_diag_mask = ~np.eye(mean_similarity.shape[0], dtype=bool)
+            off_diag_vals = mean_similarity[off_diag_mask]
+            if off_diag_vals.size > 0:
+                summary_rows.append(
+                    {
+                        "factor": factor_name,
+                        "mean_offdiag_cosine": float(np.mean(off_diag_vals)),
+                        "std_offdiag_cosine": float(np.std(off_diag_vals)),
+                        "min_offdiag_cosine": float(np.min(off_diag_vals)),
+                        "max_offdiag_cosine": float(np.max(off_diag_vals)),
+                    }
+                )
+            logger.info(
+                f"Saved {factor_title} cosine-similarity plot to {output_path}"
+            )
+            logger.info(
+                f"Saved {factor_title} cosine-similarity matrix CSV to {matrix_csv_path}"
+            )
+
+        if summary_rows:
+            summary_csv_path = os.path.join(
+                self.config.plot_output_dir,
+                "cpmergeafter_svd_cosine_similarity_summary.csv",
+            )
+            with open(summary_csv_path, "w", encoding="utf-8") as f:
+                f.write(
+                    "factor,mean_offdiag_cosine,std_offdiag_cosine,min_offdiag_cosine,max_offdiag_cosine\n"
+                )
+                for row in summary_rows:
+                    f.write(
+                        f"{row['factor']},{row['mean_offdiag_cosine']:.8f},{row['std_offdiag_cosine']:.8f},{row['min_offdiag_cosine']:.8f},{row['max_offdiag_cosine']:.8f}\n"
+                    )
+            logger.info(f"Saved cosine-similarity summary CSV to {summary_csv_path}")
+
+    def _save_cpd_convergence_artifacts(
+        self,
+        layer_name: str,
+        rec_errors: List[float],
+        input_tensor: torch.Tensor,
+    ):
+        import matplotlib.pyplot as plt
+
+        os.makedirs(self.config.plot_output_dir, exist_ok=True)
+        input_tensor = input_tensor.detach().float().cpu()
+        numel = input_tensor.numel()
+        fro_norm = torch.linalg.norm(input_tensor).item()
+        rec_errors = [float(e) for e in rec_errors]
+        mse_values = [((e * fro_norm) ** 2) / numel for e in rec_errors]
+        iters = list(range(1, len(rec_errors) + 1))
+
+        safe_layer_name = re.sub(r"[^a-zA-Z0-9_.-]", "_", layer_name)
+        csv_path = os.path.join(
+            self.config.plot_output_dir,
+            f"cpmergeafter_cpd_convergence_{safe_layer_name}.csv",
+        )
+        with open(csv_path, "w", encoding="utf-8") as f:
+            f.write("iteration,rec_error,mse\n")
+            for i, rec_e, mse in zip(iters, rec_errors, mse_values):
+                f.write(f"{i},{rec_e:.12e},{mse:.12e}\n")
+
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.tick_params(axis="both", which="major", labelsize=22)
+        ax.plot(iters, mse_values, marker="o", linewidth=1.5, markersize=3)
+        ax.set_xlabel("CPD iteration", fontsize=22)
+        ax.set_ylabel("MSE", fontsize=22)
+        ax.set_title(f"CPD convergence (ALS) - {layer_name}", fontsize=22)
+        ax.set_yscale("log")
+        ax.grid(True, linestyle="--", alpha=0.4)
+        fig.tight_layout()
+        png_path = os.path.join(
+            self.config.plot_output_dir,
+            f"cpmergeafter_cpd_convergence_{safe_layer_name}.png",
+        )
+        fig.savefig(png_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        logger.info(f"Saved CPD convergence CSV to {csv_path}")
+        logger.info(f"Saved CPD convergence plot to {png_path}")
+        return mse_values
+
+    def _save_cpd_convergence_summary(self, layer_to_mse: Dict[str, List[float]]):
+        import matplotlib.pyplot as plt
+
+        if not layer_to_mse:
+            return
+
+        os.makedirs(self.config.plot_output_dir, exist_ok=True)
+        max_len = max(len(v) for v in layer_to_mse.values())
+        stacked = np.full((len(layer_to_mse), max_len), np.nan, dtype=np.float64)
+        layer_names = list(layer_to_mse.keys())
+        for row_idx, layer_name in enumerate(layer_names):
+            vals = layer_to_mse[layer_name]
+            stacked[row_idx, : len(vals)] = np.array(vals, dtype=np.float64)
+
+        mean_mse = np.nanmean(stacked, axis=0)
+        std_mse = np.nanstd(stacked, axis=0)
+        iters = np.arange(1, max_len + 1)
+
+        csv_path = os.path.join(
+            self.config.plot_output_dir,
+            "cpmergeafter_cpd_convergence_summary.csv",
+        )
+        with open(csv_path, "w", encoding="utf-8") as f:
+            f.write("iteration,mean_mse,std_mse,num_layers\n")
+            for idx in range(max_len):
+                valid_count = int(np.sum(~np.isnan(stacked[:, idx])))
+                f.write(
+                    f"{iters[idx]},{mean_mse[idx]:.12e},{std_mse[idx]:.12e},{valid_count}\n"
+                )
+
+        fig, ax = plt.subplots(figsize=(7, 4))
+        ax.plot(iters, mean_mse, linewidth=2.0, label="Mean MSE")
+        ax.fill_between(
+            iters,
+            np.maximum(mean_mse - std_mse, 1e-20),
+            mean_mse + std_mse,
+            alpha=0.25,
+            label="Mean +/- std",
+        )
+        ax.set_xlabel("CPD iteration", fontsize=22)
+        ax.set_ylabel("Reconstruction MSE", fontsize=22)
+        ax.set_title("CPD convergence summary (ALS, average over layers)", fontsize=22)
+        ax.set_yscale("log")
+        ax.grid(True, linestyle="--", alpha=0.4)
+        ax.legend()
+        fig.tight_layout()
+        png_path = os.path.join(
+            self.config.plot_output_dir,
+            "cpmergeafter_cpd_convergence_summary.png",
+        )
+        fig.savefig(png_path, dpi=200, bbox_inches="tight")
+        plt.close(fig)
+        logger.info(f"Saved CPD convergence summary CSV to {csv_path}")
+        logger.info(f"Saved CPD convergence summary plot to {png_path}")
+
+    def _normalize_factor_columns(self, x: torch.Tensor, eps: float = 1e-12) -> torch.Tensor:
+        col_norms = torch.linalg.norm(x, dim=0, keepdim=True).clamp_min(eps)
+        return x / col_norms
+
+    def _compute_cp_sti_metrics(self, factors_cp) -> Dict[str, float]:
+        a, b, c = factors_cp.factors
+        a = a.detach().float()
+        b = b.detach().float()
+        c = c.detach().float()
+        rank = a.shape[1]
+        eye = torch.eye(rank, device=a.device, dtype=a.dtype)
+
+        ga = a.T @ a
+        gb = b.T @ b
+        gc = c.T @ c
+        ga_c = ga - eye
+        gb_c = gb - eye
+        gc_c = gc - eye
+
+        diag_ga = torch.diag(torch.diag(ga_c))
+        diag_gb = torch.diag(torch.diag(gb_c))
+        diag_gc = torch.diag(torch.diag(gc_c))
+        off_ga = ga_c - diag_ga
+        off_gb = gb_c - diag_gb
+        off_gc = gc_c - diag_gc
+
+        a_n = self._normalize_factor_columns(a)
+        b_n = self._normalize_factor_columns(b)
+        c_n = self._normalize_factor_columns(c)
+        ga_n = a_n.T @ a_n
+        gb_n = b_n.T @ b_n
+        gc_n = c_n.T @ c_n
+        ga_n_c = ga_n - eye
+        gb_n_c = gb_n - eye
+        gc_n_c = gc_n - eye
+        off_ga_n = ga_n_c - torch.diag(torch.diag(ga_n_c))
+        off_gb_n = gb_n_c - torch.diag(torch.diag(gb_n_c))
+        off_gc_n = gc_n_c - torch.diag(torch.diag(gc_n_c))
+
+        metrics = {
+            "cp_sti_raw": float(torch.norm(ga_c * gb_c * gc_c, p=1).item()),
+            "cp_sti_diag_only": float(torch.norm(diag_ga * diag_gb * diag_gc, p=1).item()),
+            "cp_sti_offdiag": float(torch.norm(off_ga * off_gb * off_gc, p=1).item()),
+            "cp_sti_norm": float(torch.norm(ga_n_c * gb_n_c * gc_n_c, p=1).item()),
+            "cp_sti_norm_offdiag": float(
+                torch.norm(off_ga_n * off_gb_n * off_gc_n, p=1).item()
+            ),
+            "cp_sti_raw_fro": float(torch.norm(ga_c * gb_c * gc_c, p="fro").item()),
+            "cp_sti_diag_only_fro": float(
+                torch.norm(diag_ga * diag_gb * diag_gc, p="fro").item()
+            ),
+            "cp_sti_offdiag_fro": float(
+                torch.norm(off_ga * off_gb * off_gc, p="fro").item()
+            ),
+            "cp_sti_norm_fro": float(
+                torch.norm(ga_n_c * gb_n_c * gc_n_c, p="fro").item()
+            ),
+            "cp_sti_norm_offdiag_fro": float(
+                torch.norm(off_ga_n * off_gb_n * off_gc_n, p="fro").item()
+            ),
+        }
+        denom = metrics["cp_sti_raw"] + 1e-12
+        metrics["cp_sti_diag_fraction"] = metrics["cp_sti_diag_only"] / denom
+        metrics["cp_sti_offdiag_fraction"] = metrics["cp_sti_offdiag"] / denom
+        denom_fro = metrics["cp_sti_raw_fro"] + 1e-12
+        metrics["cp_sti_diag_fraction_fro"] = metrics["cp_sti_diag_only_fro"] / denom_fro
+        metrics["cp_sti_offdiag_fraction_fro"] = (
+            metrics["cp_sti_offdiag_fro"] / denom_fro
+        )
+        return metrics
+
+    def _save_cp_sti_artifacts(self, layer_to_cp_sti: Dict[str, Dict[str, float]]):
+        import matplotlib.pyplot as plt
+
+        if not layer_to_cp_sti:
+            return
+        os.makedirs(self.config.plot_output_dir, exist_ok=True)
+        layers = list(layer_to_cp_sti.keys())
+        cp_sti_raw = [float(layer_to_cp_sti[layer]["cp_sti_raw"]) for layer in layers]
+        cp_sti_diag_only = [
+            float(layer_to_cp_sti[layer]["cp_sti_diag_only"]) for layer in layers
+        ]
+        cp_sti_offdiag = [
+            float(layer_to_cp_sti[layer]["cp_sti_offdiag"]) for layer in layers
+        ]
+        cp_sti_norm = [float(layer_to_cp_sti[layer]["cp_sti_norm"]) for layer in layers]
+        cp_sti_norm_offdiag = [
+            float(layer_to_cp_sti[layer]["cp_sti_norm_offdiag"]) for layer in layers
+        ]
+        cp_sti_diag_fraction = [
+            float(layer_to_cp_sti[layer]["cp_sti_diag_fraction"]) for layer in layers
+        ]
+        cp_sti_offdiag_fraction = [
+            float(layer_to_cp_sti[layer]["cp_sti_offdiag_fraction"]) for layer in layers
+        ]
+        cp_sti_raw_fro = [
+            float(layer_to_cp_sti[layer]["cp_sti_raw_fro"]) for layer in layers
+        ]
+        cp_sti_diag_only_fro = [
+            float(layer_to_cp_sti[layer]["cp_sti_diag_only_fro"]) for layer in layers
+        ]
+        cp_sti_offdiag_fro = [
+            float(layer_to_cp_sti[layer]["cp_sti_offdiag_fro"]) for layer in layers
+        ]
+        cp_sti_norm_fro = [
+            float(layer_to_cp_sti[layer]["cp_sti_norm_fro"]) for layer in layers
+        ]
+        cp_sti_norm_offdiag_fro = [
+            float(layer_to_cp_sti[layer]["cp_sti_norm_offdiag_fro"]) for layer in layers
+        ]
+        cp_sti_diag_fraction_fro = [
+            float(layer_to_cp_sti[layer]["cp_sti_diag_fraction_fro"]) for layer in layers
+        ]
+        cp_sti_offdiag_fraction_fro = [
+            float(layer_to_cp_sti[layer]["cp_sti_offdiag_fraction_fro"]) for layer in layers
+        ]
+
+        csv_path = os.path.join(
+            self.config.plot_output_dir, "cpmergeafter_cp_sti_by_layer.csv"
+        )
+        with open(csv_path, "w", encoding="utf-8") as f:
+            f.write("layer,cp_sti\n")
+            for layer, value in zip(layers, cp_sti_raw):
+                f.write(f"{layer},{value:.12e}\n")
+
+        detailed_csv_path = os.path.join(
+            self.config.plot_output_dir, "cpmergeafter_cp_sti_ablation_by_layer.csv"
+        )
+        with open(detailed_csv_path, "w", encoding="utf-8") as f:
+            f.write(
+                "layer,cp_sti_raw,cp_sti_diag_only,cp_sti_offdiag,cp_sti_norm,cp_sti_norm_offdiag,cp_sti_diag_fraction,cp_sti_offdiag_fraction,cp_sti_raw_fro,cp_sti_diag_only_fro,cp_sti_offdiag_fro,cp_sti_norm_fro,cp_sti_norm_offdiag_fro,cp_sti_diag_fraction_fro,cp_sti_offdiag_fraction_fro\n"
+            )
+            for i, layer in enumerate(layers):
+                f.write(
+                    f"{layer},{cp_sti_raw[i]:.12e},{cp_sti_diag_only[i]:.12e},{cp_sti_offdiag[i]:.12e},{cp_sti_norm[i]:.12e},{cp_sti_norm_offdiag[i]:.12e},{cp_sti_diag_fraction[i]:.12e},{cp_sti_offdiag_fraction[i]:.12e},{cp_sti_raw_fro[i]:.12e},{cp_sti_diag_only_fro[i]:.12e},{cp_sti_offdiag_fro[i]:.12e},{cp_sti_norm_fro[i]:.12e},{cp_sti_norm_offdiag_fro[i]:.12e},{cp_sti_diag_fraction_fro[i]:.12e},{cp_sti_offdiag_fraction_fro[i]:.12e}\n"
+                )
+
+        def _maybe_set_log_scale(ax, series_list, ratio_threshold: float = 50.0):
+            positive = []
+            for series in series_list:
+                arr = np.array(series, dtype=np.float64)
+                arr = arr[np.isfinite(arr)]
+                arr = arr[arr > 0]
+                if arr.size > 0:
+                    positive.append(arr)
+            if not positive:
+                return
+            all_pos = np.concatenate(positive)
+            vmin = float(np.min(all_pos))
+            vmax = float(np.max(all_pos))
+            if vmin > 0 and (vmax / vmin) >= ratio_threshold:
+                ax.set_yscale("log")
+                ylabel = ax.get_ylabel() or "Interference"
+                ax.set_ylabel(f"{ylabel} (log scale)", fontsize=12)
+
+        fig, ax = plt.subplots(figsize=(12, 5))
+        x = np.arange(len(layers))
+        ax.bar(x, cp_sti_raw, color="#4CAF50", alpha=0.85, label="CP-STI (raw)")
+        ax.plot(x, cp_sti_raw, color="#FF8C42", marker="o", linewidth=2, markersize=3)
+        ax.set_xlabel("Layer", fontsize=16)
+        ax.set_ylabel("Interference", fontsize=16)
+        ax.set_title("CP-STI across layers", fontsize=16)
+        ax.set_xticks(x)
+        ax.set_xticklabels(layers, rotation=45, ha="right", fontsize=10)
+        ax.grid(True, axis="y", linestyle="--", alpha=0.4)
+        ax.legend()
+        _maybe_set_log_scale(ax, [cp_sti_raw])
+        fig.tight_layout()
+        png_path = os.path.join(self.config.plot_output_dir, "cpmergeafter_cp_sti_across_layers.png")
+        fig.savefig(png_path, dpi=250, bbox_inches="tight")
+        plt.close(fig)
+
+        fig2, ax2 = plt.subplots(figsize=(13, 5))
+        ax2.plot(x, cp_sti_raw, marker="o", linewidth=1.8, label="raw")
+        ax2.plot(x, cp_sti_diag_only, marker="o", linewidth=1.8, label="diag-only")
+        ax2.plot(x, cp_sti_offdiag, marker="o", linewidth=1.8, label="offdiag-only")
+        ax2.plot(x, cp_sti_norm, marker="o", linewidth=1.8, label="normalized")
+        ax2.plot(
+            x,
+            cp_sti_norm_offdiag,
+            marker="o",
+            linewidth=1.8,
+            label="normalized offdiag-only",
+        )
+        ax2.set_xlabel("Layer", fontsize=14)
+        ax2.set_ylabel("Interference", fontsize=14)
+        ax2.set_title("CP-STI ablation across layers", fontsize=14)
+        ax2.set_xticks(x)
+        ax2.set_xticklabels(layers, rotation=45, ha="right", fontsize=10)
+        ax2.grid(True, axis="y", linestyle="--", alpha=0.4)
+        ax2.legend()
+        _maybe_set_log_scale(
+            ax2,
+            [
+                cp_sti_raw,
+                cp_sti_diag_only,
+                cp_sti_offdiag,
+                cp_sti_norm,
+                cp_sti_norm_offdiag,
+            ],
+        )
+        fig2.tight_layout()
+        ablation_png_path = os.path.join(
+            self.config.plot_output_dir, "cpmergeafter_cp_sti_ablation_across_layers.png"
+        )
+        fig2.savefig(ablation_png_path, dpi=250, bbox_inches="tight")
+        plt.close(fig2)
+
+        fig3, ax3 = plt.subplots(figsize=(13, 4.5))
+        ax3.plot(x, cp_sti_diag_fraction, marker="o", linewidth=1.8, label="diag fraction")
+        ax3.plot(
+            x,
+            cp_sti_offdiag_fraction,
+            marker="o",
+            linewidth=1.8,
+            label="offdiag fraction",
+        )
+        ax3.set_ylim(0.0, 1.05)
+        ax3.set_xlabel("Layer", fontsize=14)
+        ax3.set_ylabel("Fraction of raw CP-STI", fontsize=14)
+        ax3.set_title("CP-STI diagonal vs off-diagonal contribution", fontsize=14)
+        ax3.set_xticks(x)
+        ax3.set_xticklabels(layers, rotation=45, ha="right", fontsize=10)
+        ax3.grid(True, axis="y", linestyle="--", alpha=0.4)
+        ax3.legend()
+        fig3.tight_layout()
+        frac_png_path = os.path.join(
+            self.config.plot_output_dir, "cpmergeafter_cp_sti_diag_offdiag_fraction.png"
+        )
+        fig3.savefig(frac_png_path, dpi=250, bbox_inches="tight")
+        plt.close(fig3)
+
+        fig3b, ax3b = plt.subplots(figsize=(13, 4.5))
+        ax3b.plot(
+            x, cp_sti_diag_fraction_fro, marker="o", linewidth=1.8, label="diag fraction (Fro)"
+        )
+        ax3b.plot(
+            x,
+            cp_sti_offdiag_fraction_fro,
+            marker="o",
+            linewidth=1.8,
+            label="offdiag fraction (Fro)",
+        )
+        ax3b.set_ylim(0.0, 1.05)
+        ax3b.set_xlabel("Layer", fontsize=14)
+        ax3b.set_ylabel("Fraction of raw CP-STI (Fro)", fontsize=14)
+        ax3b.set_title("CP-STI diagonal vs off-diagonal (Frobenius)", fontsize=14)
+        ax3b.set_xticks(x)
+        ax3b.set_xticklabels(layers, rotation=45, ha="right", fontsize=10)
+        ax3b.grid(True, axis="y", linestyle="--", alpha=0.4)
+        ax3b.legend()
+        fig3b.tight_layout()
+        frac_fro_png_path = os.path.join(
+            self.config.plot_output_dir, "cpmergeafter_cp_sti_diag_offdiag_fraction_fro.png"
+        )
+        fig3b.savefig(frac_fro_png_path, dpi=250, bbox_inches="tight")
+        plt.close(fig3b)
+
+        fig6, axes6 = plt.subplots(1, 2, figsize=(16, 5), sharex=True)
+        axes6[0].plot(x, cp_sti_raw, marker="o", linewidth=1.8, label="L1 raw")
+        axes6[0].plot(x, cp_sti_raw_fro, marker="o", linewidth=1.8, label="Fro raw")
+        axes6[0].set_title("Raw CP-STI: L1 vs Frobenius", fontsize=13)
+        axes6[0].set_xlabel("Layer", fontsize=12)
+        axes6[0].set_ylabel("Interference", fontsize=12)
+        axes6[0].set_xticks(x)
+        axes6[0].set_xticklabels(layers, rotation=45, ha="right", fontsize=9)
+        axes6[0].grid(True, axis="y", linestyle="--", alpha=0.4)
+        axes6[0].legend(fontsize=10)
+        _maybe_set_log_scale(axes6[0], [cp_sti_raw, cp_sti_raw_fro], ratio_threshold=20.0)
+
+        axes6[1].plot(x, cp_sti_offdiag, marker="o", linewidth=1.8, label="L1 offdiag")
+        axes6[1].plot(
+            x, cp_sti_offdiag_fro, marker="o", linewidth=1.8, label="Fro offdiag"
+        )
+        axes6[1].set_title("Offdiag CP-STI: L1 vs Frobenius", fontsize=13)
+        axes6[1].set_xlabel("Layer", fontsize=12)
+        axes6[1].set_ylabel("Interference", fontsize=12)
+        axes6[1].set_xticks(x)
+        axes6[1].set_xticklabels(layers, rotation=45, ha="right", fontsize=9)
+        axes6[1].grid(True, axis="y", linestyle="--", alpha=0.4)
+        axes6[1].legend(fontsize=10)
+        _maybe_set_log_scale(
+            axes6[1], [cp_sti_offdiag, cp_sti_offdiag_fro], ratio_threshold=20.0
+        )
+        fig6.tight_layout()
+        l1_vs_fro_png_path = os.path.join(
+            self.config.plot_output_dir, "cpmergeafter_cp_sti_l1_vs_fro_across_layers.png"
+        )
+        fig6.savefig(l1_vs_fro_png_path, dpi=250, bbox_inches="tight")
+        plt.close(fig6)
+
+        grouped = {"o_proj": [], "qkv_proj": []}
+        for i, layer_name in enumerate(layers):
+            m = re.search(r"layers\.(\d+)\.self_attn\.(o_proj|qkv_proj)", layer_name)
+            if m is None:
+                continue
+            layer_idx = int(m.group(1))
+            proj = m.group(2)
+            grouped[proj].append(
+                {
+                    "layer_idx": layer_idx,
+                    "raw": cp_sti_raw[i],
+                    "diag_only": cp_sti_diag_only[i],
+                    "offdiag": cp_sti_offdiag[i],
+                    "norm": cp_sti_norm[i],
+                    "norm_offdiag": cp_sti_norm_offdiag[i],
+                }
+            )
+
+        if grouped["o_proj"] or grouped["qkv_proj"]:
+            for proj in grouped:
+                grouped[proj] = sorted(grouped[proj], key=lambda x: x["layer_idx"])
+
+            fig4, axes4 = plt.subplots(1, 2, figsize=(16, 5), sharey=True)
+            proj_order = [("o_proj", "O projection"), ("qkv_proj", "QKV projection")]
+            for ax4, (proj_key, proj_title) in zip(axes4, proj_order):
+                rows = grouped[proj_key]
+                if not rows:
+                    ax4.set_title(f"{proj_title} (no data)", fontsize=13)
+                    ax4.set_xlabel("Layer index", fontsize=12)
+                    ax4.grid(True, axis="y", linestyle="--", alpha=0.4)
+                    continue
+                x4 = [r["layer_idx"] for r in rows]
+                y4 = [r["raw"] for r in rows]
+                ax4.plot(x4, y4, marker="o", linewidth=1.8, label=f"raw ({proj_key})")
+                ax4.set_title(f"CP-STI raw: {proj_title}", fontsize=13)
+                ax4.set_xlabel("Layer index", fontsize=12)
+                ax4.grid(True, axis="y", linestyle="--", alpha=0.4)
+                ax4.legend(fontsize=10)
+                _maybe_set_log_scale(ax4, [y4], ratio_threshold=20.0)
+
+            axes4[0].set_ylabel("Interference", fontsize=12)
+            fig4.tight_layout()
+            by_proj_raw_png_path = os.path.join(
+                self.config.plot_output_dir, "cpmergeafter_cp_sti_raw_by_proj_across_layers.png"
+            )
+            fig4.savefig(by_proj_raw_png_path, dpi=250, bbox_inches="tight")
+            plt.close(fig4)
+
+            fig5, axes5 = plt.subplots(1, 2, figsize=(18, 5), sharey=True)
+            for ax5, (proj_key, proj_title) in zip(axes5, proj_order):
+                rows = grouped[proj_key]
+                if not rows:
+                    ax5.set_title(f"{proj_title} (no data)", fontsize=13)
+                    ax5.set_xlabel("Layer index", fontsize=12)
+                    ax5.grid(True, axis="y", linestyle="--", alpha=0.4)
+                    continue
+                x5 = [r["layer_idx"] for r in rows]
+                series = {
+                    "raw": [r["raw"] for r in rows],
+                    "diag-only": [r["diag_only"] for r in rows],
+                    "offdiag-only": [r["offdiag"] for r in rows],
+                    "normalized": [r["norm"] for r in rows],
+                    "norm offdiag": [r["norm_offdiag"] for r in rows],
+                }
+                for label, y5 in series.items():
+                    ax5.plot(x5, y5, marker="o", linewidth=1.6, label=label)
+                ax5.set_title(f"CP-STI ablation: {proj_title}", fontsize=13)
+                ax5.set_xlabel("Layer index", fontsize=12)
+                ax5.grid(True, axis="y", linestyle="--", alpha=0.4)
+                ax5.legend(fontsize=9)
+                _maybe_set_log_scale(ax5, list(series.values()), ratio_threshold=20.0)
+
+            axes5[0].set_ylabel("Interference", fontsize=12)
+            fig5.tight_layout()
+            by_proj_ablation_png_path = os.path.join(
+                self.config.plot_output_dir,
+                "cpmergeafter_cp_sti_ablation_by_proj_across_layers.png",
+            )
+            fig5.savefig(by_proj_ablation_png_path, dpi=250, bbox_inches="tight")
+            plt.close(fig5)
+
+        logger.info(f"Saved CP-STI CSV to {csv_path}")
+        logger.info(f"Saved CP-STI plot to {png_path}")
+        logger.info(f"Saved CP-STI ablation CSV to {detailed_csv_path}")
+        logger.info(f"Saved CP-STI ablation plot to {ablation_png_path}")
+        logger.info(f"Saved CP-STI diag/offdiag fraction plot to {frac_png_path}")
+        logger.info(f"Saved CP-STI diag/offdiag fraction (Fro) plot to {frac_fro_png_path}")
+        logger.info(f"Saved CP-STI L1-vs-Fro plot to {l1_vs_fro_png_path}")
+        if grouped["o_proj"] or grouped["qkv_proj"]:
+            logger.info(f"Saved CP-STI raw by projection plot to {by_proj_raw_png_path}")
+            logger.info(
+                f"Saved CP-STI ablation by projection plot to {by_proj_ablation_png_path}"
+            )
 
     def _get_task_vectors(self, expert):
         task_vectors = {}
@@ -493,7 +1099,10 @@ class CPMergeAfter(LibraryTransform):
             name.split(".lora_")[0] for name in one_expert.expert_weights.keys()
         ]
         layer_names = sorted(list(set(layer_names)))
-
+        if self.config.plot_similarity:
+            self._plot_factor_similarity(experts=experts, layer_names=layer_names)
+        if self.config.plot_cp_sti:
+            cp_sti_by_layer = {}
         task_vectors_experts = {}
         if not os.path.exists(self.config.path) or recompute:
             for expert in experts:
@@ -507,17 +1116,28 @@ class CPMergeAfter(LibraryTransform):
                 logger.info(f"Layer {layer} merged with CP decomposition")
                 try:
                     task_vectors_stack = torch.stack(task_vectors, dim=0).to("cuda")
-                    factors_cp = parafac(
-                                task_vectors_stack,
-                                rank=self.config.cp_rank,
-                                init="random",
-                                random_state=42,
-                            )
-                    # cp_third_order_tensor = tl.cp_tensor.cp_to_tensor(factors_cp)
-                    # merged_param = cp_third_order_tensor.mean(0)
+                    factors_cp, rec_errors = parafac(
+                        task_vectors_stack,
+                        rank=self.config.cp_rank,
+                        init="random",
+                        random_state=42,
+                        n_iter_max=self.config.cpd_n_iter_max,
+                        tol=self.config.cpd_tol,
+                        return_errors=True,
+                    )
+                    if self.config.plot_cpd_convergence:
+                        if "cpd_mse_by_layer" not in locals():
+                            cpd_mse_by_layer = {}
+                        cpd_mse_by_layer[layer] = self._save_cpd_convergence_artifacts(
+                            layer_name=layer,
+                            rec_errors=rec_errors,
+                            input_tensor=task_vectors_stack,
+                        )
                     ar = factors_cp.factors[0] #[n_experts, rank]
                     br = factors_cp.factors[1] #[input_dim, rank]
                     cr = factors_cp.factors[2] #[output_dim, rank]
+                    if self.config.plot_cp_sti:
+                        cp_sti_by_layer[layer] = self._compute_cp_sti_metrics(factors_cp)
 
                     ar_sum = torch.sum(ar, dim=0)
                     delta = (br * ar_sum.unsqueeze(0)) @ cr.T
@@ -526,15 +1146,35 @@ class CPMergeAfter(LibraryTransform):
                 except Exception as e:
                     logger.info(e)               
                     task_vectors_stack = torch.stack(task_vectors, dim=0).to("cpu")
-                    factors_cp = parafac(
+                    factors_cp, rec_errors = parafac(
                         task_vectors_stack,
                         rank=self.config.cp_rank,
                         init="random",
                         random_state=42,
+                        n_iter_max=self.config.cpd_n_iter_max,
+                        tol=self.config.cpd_tol,
+                        return_errors=True,
                     )
-                    cp_third_order_tensor = tl.cp_tensor.cp_to_tensor(factors_cp)
-                    merged_param = cp_third_order_tensor.mean(0)
-                    task_merged_vectors[layer] = merged_param
+                    if self.config.plot_cpd_convergence:
+                        if "cpd_mse_by_layer" not in locals():
+                            cpd_mse_by_layer = {}
+                        cpd_mse_by_layer[layer] = self._save_cpd_convergence_artifacts(
+                            layer_name=layer,
+                            rec_errors=rec_errors,
+                            input_tensor=task_vectors_stack,
+                        )
+                    ar = factors_cp.factors[0]
+                    br = factors_cp.factors[1]
+                    cr = factors_cp.factors[2]
+                    if self.config.plot_cp_sti:
+                        cp_sti_by_layer[layer] = self._compute_cp_sti_metrics(factors_cp)
+                    ar_sum = torch.sum(ar, dim=0)
+                    delta = (br * ar_sum.unsqueeze(0)) @ cr.T
+                    task_merged_vectors[layer] = delta
+            if self.config.plot_cpd_convergence and "cpd_mse_by_layer" in locals():
+                self._save_cpd_convergence_summary(cpd_mse_by_layer)
+            if self.config.plot_cp_sti and cp_sti_by_layer:
+                self._save_cp_sti_artifacts(cp_sti_by_layer)
             torch.save(task_merged_vectors, self.config.path)
         else:
             task_merged_vectors = torch.load(self.config.path)
@@ -917,6 +1557,8 @@ class ISOMerge(LibraryTransform):
 @dataclass
 class TSVMergeConfig(LibraryTransformConfig):
     path: str = "tsv_ingredients.pt"
+    plot_sti: bool = False
+    plot_output_dir: str = "tsv_merge_plots"
 
 
 @LibraryTransform.register("tsv_merge", TSVMergeConfig)
@@ -983,6 +1625,117 @@ class TSVMerge(LibraryTransform):
 
         return merged_param
 
+    def _compute_sti(self, task_vectors, device, sv_reduction) -> Dict[str, float]:
+        u_factors = []
+        v_factors = []
+        sigma_parts = []
+        for vec in task_vectors:
+            vec = vec.to(device).float()
+            u, s, vh = torch.linalg.svd(vec, full_matrices=False)
+            reduced_rank = max(1, int(s.shape[0] * sv_reduction))
+            u_factors.append(u[:, :reduced_rank])
+            v_factors.append(vh.transpose(-2, -1)[:, :reduced_rank])
+            sigma_parts.append(s[:reduced_rank])
+
+        u_cat = torch.cat(u_factors, dim=1)
+        v_cat = torch.cat(v_factors, dim=1)
+        sigma_vec = torch.cat(sigma_parts, dim=0)
+        gram_u = u_cat.T @ u_cat
+        gram_v = v_cat.T @ v_cat
+        eye = torch.eye(gram_u.shape[0], device=device, dtype=gram_u.dtype)
+        core_no_sigma = (gram_u - eye) * (gram_v - eye)
+        sigma_mat = torch.diag(sigma_vec).to(gram_u.dtype)
+        core_sigma = (gram_u - eye) @ sigma_mat @ (gram_v - eye)
+
+        return {
+            "sti": float(torch.norm(core_sigma, p=1).item()),
+            "sti_fro": float(torch.norm(core_sigma, p="fro").item()),
+            "sti_no_sigma": float(torch.norm(core_no_sigma, p=1).item()),
+            "sti_no_sigma_fro": float(torch.norm(core_no_sigma, p="fro").item()),
+        }
+
+    def _save_sti_artifacts(self, layer_to_sti: Dict[str, Dict[str, float]]):
+        import matplotlib.pyplot as plt
+
+        if not layer_to_sti:
+            return
+        os.makedirs(self.config.plot_output_dir, exist_ok=True)
+        layers = list(layer_to_sti.keys())
+        values = [float(layer_to_sti[layer]["sti"]) for layer in layers]
+        values_fro = [float(layer_to_sti[layer]["sti_fro"]) for layer in layers]
+        values_no_sigma = [float(layer_to_sti[layer]["sti_no_sigma"]) for layer in layers]
+        values_no_sigma_fro = [
+            float(layer_to_sti[layer]["sti_no_sigma_fro"]) for layer in layers
+        ]
+
+        csv_path = os.path.join(self.config.plot_output_dir, "tsvmerge_sti_by_layer.csv")
+        with open(csv_path, "w", encoding="utf-8") as f:
+            f.write("layer,sti\n")
+            for layer, value in zip(layers, values):
+                f.write(f"{layer},{value:.12e}\n")
+
+        detailed_csv_path = os.path.join(
+            self.config.plot_output_dir, "tsvmerge_sti_ablation_by_layer.csv"
+        )
+        with open(detailed_csv_path, "w", encoding="utf-8") as f:
+            f.write("layer,sti,sti_fro,sti_no_sigma,sti_no_sigma_fro\n")
+            for i, layer in enumerate(layers):
+                f.write(
+                    f"{layer},{values[i]:.12e},{values_fro[i]:.12e},{values_no_sigma[i]:.12e},{values_no_sigma_fro[i]:.12e}\n"
+                )
+
+        fig, ax = plt.subplots(figsize=(12, 5))
+        x = np.arange(len(layers))
+        ax.bar(x, values, color="#4CAF50", alpha=0.85, label="STI")
+        ax.plot(x, values, color="#FF8C42", marker="o", linewidth=2, markersize=3)
+        ax.set_xlabel("Layer", fontsize=16)
+        ax.set_ylabel("Interference", fontsize=16)
+        ax.set_title("STI across layers (TSV merge)", fontsize=16)
+        ax.set_xticks(x)
+        ax.set_xticklabels(layers, rotation=45, ha="right", fontsize=10)
+        ax.grid(True, axis="y", linestyle="--", alpha=0.4)
+        ax.legend()
+        fig.tight_layout()
+        png_path = os.path.join(self.config.plot_output_dir, "tsvmerge_sti_across_layers.png")
+        fig.savefig(png_path, dpi=250, bbox_inches="tight")
+        plt.close(fig)
+
+        fig2, axes2 = plt.subplots(1, 2, figsize=(16, 5), sharex=True)
+        axes2[0].plot(x, values, marker="o", linewidth=1.8, label="L1 (with Sigma)")
+        axes2[0].plot(
+            x, values_no_sigma, marker="o", linewidth=1.8, label="L1 (no Sigma)"
+        )
+        axes2[0].set_title("TSV STI (L1)", fontsize=13)
+        axes2[0].set_xlabel("Layer", fontsize=12)
+        axes2[0].set_ylabel("Interference", fontsize=12)
+        axes2[0].set_xticks(x)
+        axes2[0].set_xticklabels(layers, rotation=45, ha="right", fontsize=9)
+        axes2[0].grid(True, axis="y", linestyle="--", alpha=0.4)
+        axes2[0].legend(fontsize=10)
+
+        axes2[1].plot(x, values_fro, marker="o", linewidth=1.8, label="Fro (with Sigma)")
+        axes2[1].plot(
+            x, values_no_sigma_fro, marker="o", linewidth=1.8, label="Fro (no Sigma)"
+        )
+        axes2[1].set_title("TSV STI (Frobenius)", fontsize=13)
+        axes2[1].set_xlabel("Layer", fontsize=12)
+        axes2[1].set_ylabel("Interference", fontsize=12)
+        axes2[1].set_xticks(x)
+        axes2[1].set_xticklabels(layers, rotation=45, ha="right", fontsize=9)
+        axes2[1].grid(True, axis="y", linestyle="--", alpha=0.4)
+        axes2[1].legend(fontsize=10)
+
+        fig2.tight_layout()
+        ablation_png_path = os.path.join(
+            self.config.plot_output_dir, "tsvmerge_sti_ablation_across_layers.png"
+        )
+        fig2.savefig(ablation_png_path, dpi=250, bbox_inches="tight")
+        plt.close(fig2)
+        logger.info(f"Saved STI CSV to {csv_path}")
+        logger.info(f"Saved STI plot to {png_path}")
+        logger.info(f"Saved STI ablation CSV to {detailed_csv_path}")
+        logger.info(f"Saved STI ablation plot to {ablation_png_path}")
+
     @torch.no_grad()
     def transform(self, library, persist=True, recompute=False) -> dict:
         # empty the cache
@@ -1005,6 +1758,7 @@ class TSVMerge(LibraryTransform):
             task_merged_vectors = torch.load(self.config.path)
             return task_merged_vectors
         else:
+            layer_to_sti = {}
             for layer in layer_names:
                 logger.info(f"compute task vector for {layer}")
                 # Get task vectors for this layer from all experts
@@ -1020,9 +1774,13 @@ class TSVMerge(LibraryTransform):
                     else torch.device("cpu")
                 )
                 original_dtype = task_vectors[0].dtype
+                if self.config.plot_sti:
+                    layer_to_sti[layer] = self._compute_sti(task_vectors, device, sv_reduction)
                 task_merged_vectors[layer] = self._merge_task_vectors(
                     task_vectors, layer, device, original_dtype, sv_reduction
                 )
+            if self.config.plot_sti and layer_to_sti:
+                self._save_sti_artifacts(layer_to_sti)
             torch.save(task_merged_vectors, self.config.path)
 
         return task_merged_vectors
@@ -2149,7 +2907,7 @@ class ExpertProjector(LibraryTransform):
 
         assert set(state_dict_keys) == set(
             expert_basis[0].expert_weights.keys()
-        ), breakpoint()
+        )
 
         if granularity == "coarsegrained":
             # build a n_experts x D matrix of concatenated parameters
