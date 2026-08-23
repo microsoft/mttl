@@ -33,6 +33,8 @@ from mttl.models.library.library_transforms import (
     WuDiMerge2Config,
     KnotMerge,
     KnotMergeConfig,
+    OSRMMerge,
+    OSRMMergeConfig,
     TSVMerge,
     TSVMergeConfig,
     TiesMergeAfter,
@@ -341,6 +343,23 @@ def run_eval(args: EvaluationConfig):
         )
         cfg = KnotMergeConfig(path=f"{args.library_id}/knot_ingredients.pt")
         task_merged_vectors = KnotMerge(cfg).transform(library, recompute=args.recompute_prototypes)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
+    elif args.merge_or_route in ["osrm", "osrm_ties"]:
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        osrm_path = os.path.join(str(args.library_id), "osrm_hidden_states.pt")
+        cfg = OSRMMergeConfig(
+            max_samples_per_task=getattr(args, "max_samples_per_task", 100),
+            merge_method="ties" if args.merge_or_route == "osrm_ties" else "uniform",
+            path=osrm_path,
+        )
+        task_merged_vectors = OSRMMerge(cfg).transform(
+            library,
+            recompute=args.recompute_prototypes,
+            default_args=args,
+        )
         model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
     elif args.merge_or_route == "analytical_wudi_merge":
         model = MultiExpertModel(

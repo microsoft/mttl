@@ -25,6 +25,8 @@ from mttl.models.library.library_transforms import (
     HiddenStateComputerConfig,
     KnotMerge,
     KnotMergeConfig,
+    OSRMMerge,
+    OSRMMergeConfig,
     MBClusteringTransformConfig,
     MBCWithCosSimTransform,
     PhatgooseTransform,
@@ -94,6 +96,68 @@ def test_knot_merge(tmp_path, create_dummy_expert):
             merged_layers.append(p_name)
             state_dict[p_name] += value
     assert len(merged_layers) == len(exp.expert_weights.keys()) == 1
+
+
+def test_osrm_merge(tmp_path, create_dummy_expert):
+    seed_everything(0)
+    config = ExpertConfig(
+        **{
+            "model_modifier": "lora",
+            "lora_rank": 8,
+            "lora_alpha": 16,
+            "warmup_steps": 0,
+            "modify_layers": "c_fc",
+            "trainable_param_names": ".*lora_[ab].*",
+            "output_dir": tmp_path,
+            "precision": "32",
+            "model": "EleutherAI/gpt-neo-125m",
+            "device_map": "cpu",
+            "dataset_type": "flan",
+            "lora_init_b_random": True,
+        }
+    )
+    config.finetune_task_name = "cot_creak"
+    expert1 = create_dummy_expert(config, "cot_creak")
+    config.finetune_task_name = "cot_creak_ii"
+    expert2 = create_dummy_expert(config, "cot_creak_ii")
+    expert1.expert_weights = {
+        k: v for k, v in expert1.expert_weights.items() if "8.mlp" in k
+    }
+    expert2.expert_weights = {
+        k: v for k, v in expert2.expert_weights.items() if "8.mlp" in k
+    }
+
+    library = LocalExpertLibrary(tmp_path)
+    library.add_expert(expert1)
+    library.add_expert(expert2)
+
+    layer = next(iter(expert1.expert_weights.keys())).split(".lora_")[0]
+    in_features = expert1.expert_weights[f"{layer}.lora_a"].shape[0]
+    # Other-task mean activations (Eq. 4): one vector per task / layer.
+    hidden_states = {
+        expert1.name: {layer: torch.randn(1, in_features)},
+        expert2.name: {layer: torch.randn(1, in_features)},
+    }
+
+    merged = OSRMMerge(
+        OSRMMergeConfig(path=f"{tmp_path}/osrm_hidden_states.pt")
+    ).transform(library, hidden_states=hidden_states)
+
+    delta = expert1.expert_weights[f"{layer}.lora_a"] @ expert1.expert_weights[
+        f"{layer}.lora_b"
+    ]
+    assert layer in merged
+    assert merged[layer].shape == delta.shape
+
+    # Recovered ΔW lives in the r-dimensional OSRM subspace, so rank <= lora_rank.
+    assert torch.linalg.matrix_rank(merged[layer].float()) <= 8
+
+    # Projection is a least-squares fit: A A^T ΔW, so applying it twice is idempotent.
+    H_neg = hidden_states[expert2.name][layer]
+    A = OSRMMerge.smallest_right_singular_vectors(H_neg, rank=8)
+    rec = OSRMMerge.reproject_delta(delta.float(), A.float())
+    rec2 = OSRMMerge.reproject_delta(rec, A.float())
+    assert torch.allclose(rec, rec2, atol=1e-4)
 
 
 def test_arrow():

@@ -1972,6 +1972,347 @@ class UniformMergeAfter(LibraryTransform):
 
 
 @dataclass
+class OSRMMergeConfig(LibraryTransformConfig):
+    """Config for OSRM (Orthogonal Subspaces for Robust model Merging).
+
+    Zhang & Zhou, ACL 2025, https://arxiv.org/abs/2505.22934
+    """
+
+    max_samples_per_task: int = 100
+    pool: str = "mean"  # mean over tokens, then over samples (Eq. 4)
+    use_base_model_only: bool = True  # collect H from the pretrained backbone
+    average_features: bool = True  # one mean vector per task (official impl.)
+    merge_method: str = "uniform"  # uniform (task arithmetic) or ties
+    ties_mask_rate: float = 0.8
+    path: str = "osrm_hidden_states.pt"
+
+
+@LibraryTransform.register("osrm_merge", OSRMMergeConfig)
+class OSRMMerge(LibraryTransform):
+    """Post-hoc OSRM merge for already-trained LoRA experts.
+
+    Section 5.4 of Zhang & Zhou, ACL 2025 (https://arxiv.org/abs/2505.22934):
+    1. Collect pretrained hidden states H_t for every task / layer.
+    2. For expert t, take the r smallest right-singular directions of H_{¬t}
+       as the constrained LoRA-A subspace (Eq. 3).
+    3. Re-decompose ΔW_t ≈ B̃_t Ã_t in that subspace and merge the recovered
+       task vectors with task arithmetic (or TIES).
+
+    Returns ``{layer: delta_W}`` in ``(in, out)`` orientation, same as the
+    other ``*_after`` merges.
+    """
+
+    def __init__(self, config: OSRMMergeConfig = None):
+        super().__init__(config or OSRMMergeConfig())
+
+    def _update_args(self, args, default_args):
+        if default_args is None:
+            return
+        for k, v in vars(default_args).items():
+            if not hasattr(args, k):
+                setattr(args, k, v)
+        if hasattr(default_args, "updated_kwargs"):
+            for k, v in default_args.updated_kwargs.items():
+                setattr(args, k, v)
+
+    def _get_task_vectors(self, expert):
+        task_vectors = {}
+        for key in expert.expert_weights.keys():
+            base_layer_name = key.split(".lora_")[0]
+            if base_layer_name not in task_vectors:
+                task_vectors[base_layer_name] = None
+        for layer in task_vectors.keys():
+            lora_a = expert.expert_weights[f"{layer}.lora_a"]
+            lora_b = expert.expert_weights[f"{layer}.lora_b"]
+            task_vectors[layer] = lora_a.data @ lora_b.data
+        return task_vectors
+
+    def _get_lora_rank(self, expert, layer):
+        return expert.expert_weights[f"{layer}.lora_a"].shape[-1]
+
+    @staticmethod
+    def smallest_right_singular_vectors(H: torch.Tensor, rank: int) -> torch.Tensor:
+        """Ã^T with shape ``(n, r)``: last ``r`` right singular vectors of H.
+
+        Paper Eq. (3) / official ``peft_analytical_init``: SVD of H, then
+        ``V[:, n-r:n]``. MTTL stores LoRA-A as ``(in, r)``, i.e. Ã^T.
+        """
+        if H.ndim != 2:
+            raise ValueError(f"Expected H of shape (k, n), got {tuple(H.shape)}")
+        n = H.shape[-1]
+        rank = min(int(rank), n)
+        if rank <= 0:
+            raise ValueError(f"rank must be positive, got {rank}")
+        orig_dtype = H.dtype
+        device = H.device
+        H32 = H.detach().to(device=device, dtype=torch.float32)
+        # full_matrices=True so Vt is (n, n) even when k < n
+        _, _, Vt = torch.linalg.svd(H32, full_matrices=True)
+        return Vt[-rank:, :].T.to(dtype=orig_dtype)
+
+    @staticmethod
+    def reproject_delta(delta_W: torch.Tensor, A: torch.Tensor) -> torch.Tensor:
+        """Least-squares recovery ΔW̃ = A (A^+ ΔW), paper Section 5.4.
+
+        ``delta_W`` is MTTL ``lora_a @ lora_b`` with shape ``(in, out)``.
+        ``A`` has orthonormal columns of shape ``(in, r)``.
+        """
+        A = A.to(device=delta_W.device, dtype=delta_W.dtype)
+        B = A.T @ delta_W
+        return A @ B
+
+    def _pool_hidden(self, hidden_state, attention_mask, device):
+        if hidden_state.ndim == 2:
+            return hidden_state
+        if hidden_state.ndim != 3:
+            raise ValueError(
+                f"Unexpected hidden state rank {hidden_state.ndim}, expected 2 or 3"
+            )
+        bs = hidden_state.size(0)
+        if self.config.pool == "last":
+            if attention_mask is None:
+                return hidden_state[:, -1]
+            last_token_idx = attention_mask.sum(1).to(hidden_state.device) - 1
+            bs_idx = torch.arange(bs, device=hidden_state.device)
+            return hidden_state[bs_idx, last_token_idx]
+        if self.config.pool == "mean":
+            if attention_mask is None:
+                return hidden_state.mean(dim=1)
+            mask = attention_mask.to(hidden_state.device).unsqueeze(-1)
+            denom = mask.sum(1).clamp(min=1.0)
+            return (hidden_state * mask).sum(1) / denom
+        raise ValueError(f"Unknown pool={self.config.pool}")
+
+    def _track_hidden_states(self, model, device="cpu"):
+        model.container = {}
+
+        def build_hook(name):
+            def retrieve_input(module, input, output):
+                model.container[name] = input[0].detach().to(device)
+
+            return retrieve_input
+
+        handles = []
+        for container in model.experts_containers:
+            handles.append(
+                container.register_forward_hook(build_hook(container.layer_name))
+            )
+        return handles
+
+    def _retrieve_hidden_states(self, model):
+        keys = list(model.container.keys())
+        values = [model.container[k] for k in keys]
+        for key in keys:
+            del model.container[key]
+        return {k: v for k, v in zip(keys, values)}
+
+    @torch.no_grad()
+    def _encode_expert_hidden_states(self, model, expert, default_args, device):
+        from mttl.arguments import ExpertConfig
+
+        training_config = ExpertConfig.from_dict(expert.training_config)
+        self._update_args(training_config, default_args)
+        training_config.dataset = expert.expert_info.dataset
+        training_config.subsample_train = self.config.max_samples_per_task
+        if expert.expert_info.expert_task_name:
+            train_tasks = expert.expert_info.expert_task_name.split(",")
+            training_config.finetune_task_name = ",".join(train_tasks)
+            training_config.subsample_train *= len(train_tasks)
+        training_config.train_batch_size = (
+            default_args.predict_batch_size if default_args is not None else 4
+        )
+
+        dm = get_datamodule(training_config)
+        dataloader = dm.train_dataloader()
+        device_model = next(model.parameters()).device
+
+        summed = defaultdict(lambda: 0.0)
+        stacked = defaultdict(list)
+        count = 0
+
+        pbar = tqdm(
+            enumerate(dataloader),
+            total=len(dataloader),
+            desc=f"OSRM hidden states [{expert.name}]",
+        )
+        for _, batch in pbar:
+            batch = transfer_batch_to_device(batch, device_model)
+            model.forward(**batch)
+            hidden_states = self._retrieve_hidden_states(model)
+            attention_mask = batch.get("attention_mask", None)
+            for layer, hidden_state in hidden_states.items():
+                pooled = self._pool_hidden(hidden_state, attention_mask, device)
+                if self.config.average_features:
+                    summed[layer] += pooled.sum(0)
+                else:
+                    stacked[layer].append(pooled.detach().cpu())
+            if "input_ids" in batch:
+                count += batch["input_ids"].size(0)
+            elif hidden_states:
+                count += next(iter(hidden_states.values())).size(0)
+
+        features = {}
+        if self.config.average_features:
+            if count == 0:
+                raise ValueError(f"No samples encoded for expert {expert.name}")
+            for layer, value in summed.items():
+                features[layer] = (value / count).detach().cpu().unsqueeze(0)
+        else:
+            for layer, chunks in stacked.items():
+                features[layer] = torch.cat(chunks, dim=0)
+        return features
+
+    @torch.no_grad()
+    def collect_hidden_states(self, library, experts, default_args=None):
+        """Collect pretrained per-layer features H_t for every expert."""
+        from mttl.arguments import ExpertConfig
+
+        first = experts[0]
+        training_config = ExpertConfig.from_dict(first.training_config)
+        self._update_args(training_config, default_args)
+
+        device_map = getattr(training_config, "device_map", None) or (
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=training_config.model),
+            device_map=device_map,
+        )
+        # Containers give us layer-aligned hooks; disable adapters so H is
+        # computed on the pretrained backbone (Algorithm 1 / official code).
+        model.add_expert_instance(first, is_default=True)
+        if self.config.use_base_model_only:
+            for container in model.experts_containers:
+                container.disable()
+
+        handles = self._track_hidden_states(model, device="cpu")
+        output = {}
+        try:
+            for expert in experts:
+                output[expert.name] = self._encode_expert_hidden_states(
+                    model, expert, default_args, device="cpu"
+                )
+        finally:
+            for handle in handles:
+                handle.remove()
+            del model
+        return output
+
+    def _other_task_features(self, hidden_states, expert_name, layer):
+        rows = []
+        for name, per_layer in hidden_states.items():
+            if name == expert_name:
+                continue
+            if layer not in per_layer:
+                continue
+            feat = per_layer[layer]
+            if feat.ndim == 1:
+                feat = feat.unsqueeze(0)
+            rows.append(feat)
+        if not rows:
+            return None
+        return torch.cat(rows, dim=0)
+
+    def _merge_layer_vectors(self, task_vectors):
+        if self.config.merge_method == "uniform":
+            return sum(task_vectors) / len(task_vectors)
+        if self.config.merge_method == "ties":
+            ties = TiesMergeAfter(
+                TiesMergeAfterConfig(mask_rate=self.config.ties_mask_rate)
+            )
+            masked = [
+                ties.mask_smallest_magnitude_param_values(
+                    tv, self.config.ties_mask_rate
+                )
+                for tv in task_vectors
+            ]
+            signs = ties.get_param_signs(masked)
+            return ties.disjoint_merge(masked, signs)
+        raise ValueError(
+            f"Unknown OSRM merge_method={self.config.merge_method}. "
+            "Use 'uniform' or 'ties'."
+        )
+
+    @torch.no_grad()
+    def transform(
+        self,
+        library,
+        persist=False,
+        recompute=False,
+        default_args=None,
+        hidden_states=None,
+    ):
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+
+        expert_names = list(library.keys())
+        experts = [library[name] for name in expert_names]
+        logger.info(
+            "Merging {} experts using OSRM ({})".format(
+                len(experts), self.config.merge_method
+            )
+        )
+
+        layer_names = [
+            name.split(".lora_")[0] for name in experts[0].expert_weights.keys()
+        ]
+        layer_names = sorted(list(set(layer_names)))
+
+        if hidden_states is None:
+            if (
+                self.config.path
+                and os.path.exists(self.config.path)
+                and not recompute
+            ):
+                logger.info(f"Loading cached OSRM hidden states from {self.config.path}")
+                hidden_states = torch.load(self.config.path, map_location="cpu")
+            else:
+                hidden_states = self.collect_hidden_states(
+                    library, experts, default_args=default_args
+                )
+                if self.config.path:
+                    os.makedirs(
+                        os.path.dirname(os.path.abspath(self.config.path)) or ".",
+                        exist_ok=True,
+                    )
+                    torch.save(hidden_states, self.config.path)
+                    logger.info(f"Saved OSRM hidden states to {self.config.path}")
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        recovered_experts = {}
+        for expert in experts:
+            deltas = self._get_task_vectors(expert)
+            recovered = {}
+            for layer in layer_names:
+                H_neg = self._other_task_features(hidden_states, expert.name, layer)
+                delta = deltas[layer]
+                if H_neg is None:
+                    logger.warning(
+                        f"No out-of-task features for {expert.name}/{layer}; "
+                        "keeping the original task vector"
+                    )
+                    recovered[layer] = delta
+                    continue
+                rank = self._get_lora_rank(expert, layer)
+                H_neg = H_neg.to(device=device)
+                A = self.smallest_right_singular_vectors(H_neg, rank)
+                recovered[layer] = self.reproject_delta(delta.to(device), A).cpu()
+            recovered_experts[expert.name] = recovered
+
+        task_merged_vectors = {}
+        for layer in layer_names:
+            task_vectors = [
+                recovered_experts[expert.name][layer] for expert in experts
+            ]
+            logger.info(
+                f"OSRM merging layer {layer} with {len(task_vectors)} recovered "
+                f"task vectors ({self.config.merge_method})"
+            )
+            task_merged_vectors[layer] = self._merge_layer_vectors(task_vectors)
+        return task_merged_vectors
+
+
+@dataclass
 class KnotMergeConfig(WeightedLinearMergeConfig):
     path: str = "knot_ingredients.pt"  # path to store SVD components
 
