@@ -350,8 +350,12 @@ def run_eval(args: EvaluationConfig):
             **loading_kwargs,
         )
         osrm_path = os.path.join(str(args.library_id), "osrm_hidden_states.pt")
+        max_samples = getattr(args, "max_samples_per_task", 100)
+        if not isinstance(max_samples, (int, float)):
+            # CLI union of transform configs leaves conflicting defaults unresolved.
+            max_samples = 100
         cfg = OSRMMergeConfig(
-            max_samples_per_task=getattr(args, "max_samples_per_task", 100),
+            max_samples_per_task=int(max_samples),
             merge_method="ties" if args.merge_or_route == "osrm_ties" else "uniform",
             path=osrm_path,
         )

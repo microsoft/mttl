@@ -1986,6 +1986,14 @@ class OSRMMergeConfig(LibraryTransformConfig):
     ties_mask_rate: float = 0.8
     path: str = "osrm_hidden_states.pt"
 
+    def __post_init__(self):
+        # EvaluationConfig unions all LibraryTransform configs; conflicting
+        # defaults (e.g. vs HiddenStateComputerConfig) stay as MultiDefaultValue.
+        if not isinstance(self.max_samples_per_task, (int, float)):
+            self.max_samples_per_task = 100
+        else:
+            self.max_samples_per_task = int(self.max_samples_per_task)
+
 
 @LibraryTransform.register("osrm_merge", OSRMMergeConfig)
 class OSRMMerge(LibraryTransform):
@@ -2113,11 +2121,12 @@ class OSRMMerge(LibraryTransform):
         training_config = ExpertConfig.from_dict(expert.training_config)
         self._update_args(training_config, default_args)
         training_config.dataset = expert.expert_info.dataset
-        training_config.subsample_train = self.config.max_samples_per_task
+        n_tasks = 1
         if expert.expert_info.expert_task_name:
             train_tasks = expert.expert_info.expert_task_name.split(",")
             training_config.finetune_task_name = ",".join(train_tasks)
-            training_config.subsample_train *= len(train_tasks)
+            n_tasks = len(train_tasks)
+        training_config.subsample_train = int(self.config.max_samples_per_task) * n_tasks
         training_config.train_batch_size = (
             default_args.predict_batch_size if default_args is not None else 4
         )
