@@ -16,7 +16,6 @@
 # Lint as: python3
 """Natural Instruction V2 Dataset."""
 
-
 import json
 import os
 import random

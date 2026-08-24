@@ -1,8 +1,8 @@
-from mttl.models.containers.peer_container import PEERMLPContainer
 import numpy as np
 import pytest
 
 from mttl.arguments import MoEExpertConfig
+from mttl.models.containers.peer_container import PEERMLPContainer
 from mttl.models.expert_model import MoEModel, MoEModelConfig
 
 
