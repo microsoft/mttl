@@ -27,6 +27,8 @@ from mttl.models.library.library_transforms import (
     KnotMergeConfig,
     OSRMMerge,
     OSRMMergeConfig,
+    IterISMerge,
+    IterISMergeConfig,
     MBClusteringTransformConfig,
     MBCWithCosSimTransform,
     PhatgooseTransform,
@@ -158,6 +160,78 @@ def test_osrm_merge(tmp_path, create_dummy_expert):
     rec = OSRMMerge.reproject_delta(delta.float(), A.float())
     rec2 = OSRMMerge.reproject_delta(rec, A.float())
     assert torch.allclose(rec, rec2, atol=1e-4)
+
+
+def test_iteris_solution_recovers_single_task():
+    torch.manual_seed(0)
+    tokens, in_features, out_features = 64, 12, 8
+    X = torch.randn(1, tokens, in_features)
+    W = torch.randn(1, out_features, in_features)
+    W_star = IterISMerge.solution_matrix(
+        W,
+        X,
+        X,
+        coef_list=torch.ones(1),
+        manual_coef=torch.ones(1),
+        alpha_1=1e-12,
+        alpha_2=1e-12,
+        reg_coef=0.0,
+    )
+    assert W_star.shape == (out_features, in_features)
+    assert torch.allclose(W_star.float(), W[0].float(), atol=1e-3)
+
+
+def test_iteris_merge(tmp_path, create_dummy_expert):
+    seed_everything(0)
+    config = ExpertConfig(
+        **{
+            "model_modifier": "lora",
+            "lora_rank": 8,
+            "lora_alpha": 16,
+            "warmup_steps": 0,
+            "modify_layers": "c_fc",
+            "trainable_param_names": ".*lora_[ab].*",
+            "output_dir": tmp_path,
+            "precision": "32",
+            "model": "EleutherAI/gpt-neo-125m",
+            "device_map": "cpu",
+            "dataset_type": "flan",
+            "lora_init_b_random": True,
+        }
+    )
+    config.finetune_task_name = "cot_creak"
+    expert1 = create_dummy_expert(config, "cot_creak")
+    config.finetune_task_name = "cot_creak_ii"
+    expert2 = create_dummy_expert(config, "cot_creak_ii")
+    expert1.expert_weights = {
+        k: v for k, v in expert1.expert_weights.items() if "8.mlp" in k
+    }
+    expert2.expert_weights = {
+        k: v for k, v in expert2.expert_weights.items() if "8.mlp" in k
+    }
+
+    library = LocalExpertLibrary(tmp_path)
+    library.add_expert(expert1)
+    library.add_expert(expert2)
+
+    layer = next(iter(expert1.expert_weights.keys())).split(".lora_")[0]
+    in_features = expert1.expert_weights[f"{layer}.lora_a"].shape[0]
+    out_features = expert1.expert_weights[f"{layer}.lora_b"].shape[-1]
+    hidden_states = {
+        expert1.name: {layer: torch.randn(16, in_features)},
+        expert2.name: {layer: torch.randn(16, in_features)},
+    }
+
+    merged = IterISMerge(
+        IterISMergeConfig(path=f"{tmp_path}/iteris_hidden_states.pt", max_iter=1)
+    ).transform(library, hidden_states=hidden_states)
+
+    delta = expert1.expert_weights[f"{layer}.lora_a"] @ expert1.expert_weights[
+        f"{layer}.lora_b"
+    ]
+    assert layer in merged
+    assert merged[layer].shape == delta.shape
+    assert merged[layer].shape == (in_features, out_features)
 
 
 def test_arrow():

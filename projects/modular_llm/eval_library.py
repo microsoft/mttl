@@ -35,6 +35,8 @@ from mttl.models.library.library_transforms import (
     KnotMergeConfig,
     OSRMMerge,
     OSRMMergeConfig,
+    IterISMerge,
+    IterISMergeConfig,
     TSVMerge,
     TSVMergeConfig,
     TiesMergeAfter,
@@ -360,6 +362,39 @@ def run_eval(args: EvaluationConfig):
             path=osrm_path,
         )
         task_merged_vectors = OSRMMerge(cfg).transform(
+            library,
+            recompute=args.recompute_prototypes,
+            default_args=args,
+        )
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
+    elif args.merge_or_route == "iteris":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+
+        def _resolve_arg(name, default):
+            value = getattr(args, name, default)
+            if isinstance(default, bool):
+                return bool(value) if isinstance(value, bool) else default
+            if isinstance(default, int) and not isinstance(value, bool):
+                return int(value) if isinstance(value, (int, float)) else default
+            if isinstance(default, float):
+                return float(value) if isinstance(value, (int, float)) else default
+            return value if value is not None and not hasattr(value, "defaults") else default
+
+        cfg = IterISMergeConfig(
+            max_iter=_resolve_arg("max_iter", 10),
+            max_samples_per_task=_resolve_arg("max_samples_per_task", 50),
+            max_tokens_per_task=_resolve_arg("max_tokens_per_task", 1024),
+            alpha_1=_resolve_arg("alpha_1", 1e-7),
+            alpha_2=_resolve_arg("alpha_2", 1e-7),
+            reg_coef=_resolve_arg("reg_coef", 0.0),
+            with_pretrain_matrix=_resolve_arg("with_pretrain_matrix", 0),
+            include_lora_scaling=_resolve_arg("include_lora_scaling", True),
+            path=os.path.join(str(args.library_id), "iteris_hidden_states.pt"),
+        )
+        task_merged_vectors = IterISMerge(cfg).transform(
             library,
             recompute=args.recompute_prototypes,
             default_args=args,

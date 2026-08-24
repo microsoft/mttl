@@ -2322,6 +2322,508 @@ class OSRMMerge(LibraryTransform):
 
 
 @dataclass
+class IterISMergeConfig(LibraryTransformConfig):
+    """Config for IterIS (Iterative Inference-Solving Alignment).
+
+    Chen et al., CVPR 2025, https://arxiv.org/abs/2411.15231
+    Official: https://github.com/HKUST-LongGroup/IterIS-merging
+    """
+
+    max_iter: int = 10
+    max_samples_per_task: int = 50
+    max_tokens_per_task: int = 1024
+    alpha_1: float = 1e-7
+    alpha_2: float = 1e-7
+    reg_coef: float = 0.0
+    with_pretrain_matrix: int = 0
+    include_lora_scaling: bool = True
+    manual_coef: list = None
+    path: str = "iteris_hidden_states.pt"
+
+    def __post_init__(self):
+        if not isinstance(self.max_samples_per_task, (int, float)):
+            self.max_samples_per_task = 50
+        else:
+            self.max_samples_per_task = int(self.max_samples_per_task)
+        if not isinstance(self.max_iter, (int, float)):
+            self.max_iter = 10
+        else:
+            self.max_iter = int(self.max_iter)
+        if not isinstance(self.max_tokens_per_task, (int, float)):
+            self.max_tokens_per_task = 1024
+        else:
+            self.max_tokens_per_task = int(self.max_tokens_per_task)
+        if not isinstance(self.path, str):
+            self.path = "iteris_hidden_states.pt"
+
+
+@LibraryTransform.register("iteris_merge", IterISMergeConfig)
+class IterISMerge(LibraryTransform):
+    """Post-hoc IterIS merge for already-trained LoRA experts.
+
+    Chen et al., CVPR 2025 (https://arxiv.org/abs/2411.15231):
+    1. Collect layer inputs X_t on each task from that task's LoRA-merged model.
+    2. Closed-form solve for a merged delta W* that aligns LoRA outputs
+       W_t X_t with the current merged inference activations W* X̃_t.
+    3. Apply W* to the backbone, re-collect X̃, and iterate.
+
+    Returns ``{layer: delta_W}`` in ``(in, out)`` orientation, same as the
+    other ``*_after`` merges. Official PEFT uses ``(out, in)``; we transpose
+    at the boundary.
+    """
+
+    def __init__(self, config: IterISMergeConfig = None):
+        super().__init__(config or IterISMergeConfig())
+
+    def _update_args(self, args, default_args):
+        if default_args is None:
+            return
+        for k, v in vars(default_args).items():
+            if not hasattr(args, k):
+                setattr(args, k, v)
+        if hasattr(default_args, "updated_kwargs"):
+            for k, v in default_args.updated_kwargs.items():
+                setattr(args, k, v)
+
+    def _lora_scaling(self, expert):
+        if not self.config.include_lora_scaling:
+            return 1.0
+        cfg = getattr(expert, "expert_config", None)
+        rank = getattr(cfg, "lora_rank", None) if cfg is not None else None
+        alpha = getattr(cfg, "lora_alpha", None) if cfg is not None else None
+        if rank is None or alpha is None or rank == 0:
+            return 1.0
+        return float(alpha) / float(rank)
+
+    def _get_task_vectors(self, expert):
+        """LoRA deltas in official ``(out, in)`` orientation."""
+        scaling = self._lora_scaling(expert)
+        task_vectors = {}
+        for key in expert.expert_weights.keys():
+            base_layer_name = key.split(".lora_")[0]
+            if base_layer_name not in task_vectors:
+                task_vectors[base_layer_name] = None
+        for layer in task_vectors.keys():
+            lora_a = expert.expert_weights[f"{layer}.lora_a"]
+            lora_b = expert.expert_weights[f"{layer}.lora_b"]
+            # MTTL: input @ A @ B, Linear.weight is (out, in)
+            task_vectors[layer] = scaling * (lora_a.data @ lora_b.data).T
+        return task_vectors
+
+    def _track_hidden_states(self, model, device="cpu"):
+        model.container = {}
+
+        def build_hook(name):
+            def retrieve_input(module, input, output):
+                model.container[name] = input[0].detach().to(device)
+
+            return retrieve_input
+
+        handles = []
+        for container in model.experts_containers:
+            handles.append(
+                container.register_forward_hook(build_hook(container.layer_name))
+            )
+        return handles
+
+    def _retrieve_hidden_states(self, model):
+        keys = list(model.container.keys())
+        values = [model.container[k] for k in keys]
+        for key in keys:
+            del model.container[key]
+        return {k: v for k, v in zip(keys, values)}
+
+    def _flatten_hidden(self, hidden_state, attention_mask):
+        if hidden_state.ndim == 2:
+            return hidden_state
+        if hidden_state.ndim != 3:
+            raise ValueError(
+                f"Unexpected hidden state rank {hidden_state.ndim}, expected 2 or 3"
+            )
+        if attention_mask is not None and attention_mask.shape[:2] == hidden_state.shape[:2]:
+            mask = attention_mask.bool().to(hidden_state.device)
+            return hidden_state[mask]
+        return hidden_state.reshape(-1, hidden_state.shape[-1])
+
+    def _snapshot_base_weights(self, model):
+        w0 = {}
+        for container in model.experts_containers:
+            w0[container.layer_name] = container.layer.weight.detach().clone().cpu()
+        return w0
+
+    def _restore_base_weights(self, model, w0):
+        for container in model.experts_containers:
+            name = container.layer_name
+            if name not in w0:
+                continue
+            container.layer.weight.data.copy_(
+                w0[name].to(
+                    device=container.layer.weight.device,
+                    dtype=container.layer.weight.dtype,
+                )
+            )
+
+    def _apply_deltas(self, model, deltas_out_in, w0, replace=False):
+        for container in model.experts_containers:
+            name = container.layer_name
+            if name not in deltas_out_in:
+                continue
+            delta = deltas_out_in[name].to(
+                device=container.layer.weight.device,
+                dtype=container.layer.weight.dtype,
+            )
+            if replace:
+                container.layer.weight.data.copy_(delta)
+            else:
+                base = w0[name].to(
+                    device=container.layer.weight.device,
+                    dtype=container.layer.weight.dtype,
+                )
+                container.layer.weight.data.copy_(base + delta)
+
+    def _stack_layer_features(self, hidden_states, expert_names, layer):
+        feats = []
+        for name in expert_names:
+            if name not in hidden_states or layer not in hidden_states[name]:
+                raise ValueError(f"Missing IterIS features for {name}/{layer}")
+            feat = hidden_states[name][layer]
+            if feat.ndim == 1:
+                feat = feat.unsqueeze(0)
+            feats.append(feat)
+        min_t = min(f.shape[0] for f in feats)
+        if min_t == 0:
+            raise ValueError(f"No tokens collected for layer {layer}")
+        return torch.stack([f[:min_t] for f in feats], dim=0)
+
+    @staticmethod
+    def _reg_math(term, alpha):
+        eye = torch.eye(term.size(-1), dtype=term.dtype, device=term.device)
+        return term + alpha.view(-1, 1, 1) * eye
+
+    @staticmethod
+    def solution_matrix(
+        W_list,
+        X_list,
+        X_tilde_list,
+        coef_list,
+        manual_coef,
+        alpha_1=1e-7,
+        alpha_2=1e-7,
+        reg_coef=0.0,
+    ):
+        """Closed-form IterIS step (official ``solution_matrix``).
+
+        ``W_list`` is ``(N, out, in)``, ``X_*`` are ``(N, tokens, in)``.
+        Returns ``W*`` with shape ``(out, in)``.
+        """
+        n_tasks = W_list.shape[0]
+        weights = (coef_list * manual_coef).view(n_tasks, 1, 1)
+        x_tilde = (1.0 - reg_coef) * X_tilde_list + reg_coef * X_list
+
+        x_x_tilde = torch.matmul(X_list.transpose(-1, -2), x_tilde)
+        x_x_tilde = IterISMerge._reg_math(
+            x_x_tilde, torch.norm(x_x_tilde, p="fro", dim=[-2, -1]) * alpha_1
+        )
+        x_tilde_x_tilde = torch.matmul(x_tilde.transpose(-1, -2), x_tilde)
+        x_tilde_x_tilde = IterISMerge._reg_math(
+            x_tilde_x_tilde,
+            torch.norm(x_tilde_x_tilde, p="fro", dim=[-2, -1]) * alpha_2,
+        )
+
+        term1 = torch.sum(torch.matmul(W_list, x_x_tilde) * weights, dim=0).double()
+        term2 = torch.sum(x_tilde_x_tilde * weights, dim=0).double()
+        try:
+            result = torch.linalg.solve(term2.T, term1.T).T
+        except RuntimeError:
+            ridge = 1e-5 * torch.eye(
+                term2.size(0), dtype=term2.dtype, device=term2.device
+            )
+            result = torch.linalg.solve(term2.T + ridge, term1.T).T
+        return result.to(dtype=W_list.dtype)
+
+    def _task_coefficients(self, W_list, X_list, w0_layer):
+        merge_w = W_list
+        if w0_layer is not None:
+            merge_w = W_list + w0_layer.to(device=W_list.device, dtype=W_list.dtype)
+        # official: ||W||_F^2 / sum_i ||X_i W_i^T||_F^2  (shared denominator)
+        numer = torch.norm(merge_w, p="fro", dim=[-2, -1]) ** 2
+        outputs = torch.matmul(X_list, merge_w.transpose(1, 2))
+        denom = torch.sum(torch.norm(outputs, p="fro", dim=[-2, -1]) ** 2)
+        return numer / denom.clamp_min(1e-12)
+
+    def _manual_coef(self, n_tasks, device, dtype):
+        manual = getattr(self.config, "manual_coef", None)
+        if manual is None:
+            return torch.ones(n_tasks, device=device, dtype=dtype)
+        values = torch.as_tensor(manual, device=device, dtype=dtype).flatten()
+        if values.numel() == 1:
+            return values.repeat(n_tasks)
+        if values.numel() != n_tasks:
+            logger.warning(
+                "IterIS manual_coef length %s != %s tasks; using ones",
+                values.numel(),
+                n_tasks,
+            )
+            return torch.ones(n_tasks, device=device, dtype=dtype)
+        return values
+
+    @torch.no_grad()
+    def _encode_batches(self, model, batches, device, desc):
+        device_model = next(model.parameters()).device
+        stacked = defaultdict(list)
+        pbar = tqdm(enumerate(batches), total=len(batches), desc=desc)
+        for _, batch in pbar:
+            batch = {
+                k: v.to(device_model) if torch.is_tensor(v) else v
+                for k, v in batch.items()
+            }
+            model.forward(**batch)
+            hidden_states = self._retrieve_hidden_states(model)
+            attention_mask = batch.get("attention_mask", None)
+            for layer, hidden_state in hidden_states.items():
+                stacked[layer].append(
+                    self._flatten_hidden(hidden_state, attention_mask).detach().cpu()
+                )
+        features = {}
+        max_tokens = int(self.config.max_tokens_per_task)
+        for layer, chunks in stacked.items():
+            feat = torch.cat(chunks, dim=0)
+            if feat.size(0) > max_tokens:
+                feat = feat[:max_tokens]
+            features[layer] = feat
+        return features
+
+    @torch.no_grad()
+    def _collect_expert_batches(self, expert, default_args):
+        from mttl.arguments import ExpertConfig
+
+        training_config = ExpertConfig.from_dict(expert.training_config)
+        self._update_args(training_config, default_args)
+        training_config.dataset = expert.expert_info.dataset
+        n_tasks = 1
+        if expert.expert_info.expert_task_name:
+            train_tasks = expert.expert_info.expert_task_name.split(",")
+            training_config.finetune_task_name = ",".join(train_tasks)
+            n_tasks = len(train_tasks)
+        training_config.subsample_train = int(self.config.max_samples_per_task) * n_tasks
+        training_config.train_batch_size = (
+            default_args.predict_batch_size if default_args is not None else 4
+        )
+        dm = get_datamodule(training_config)
+        batches = []
+        for batch in dm.train_dataloader():
+            cpu_batch = {}
+            for key, value in batch.items():
+                if torch.is_tensor(value):
+                    cpu_batch[key] = value.detach().cpu()
+                else:
+                    cpu_batch[key] = value
+            batches.append(cpu_batch)
+        return batches
+
+    @torch.no_grad()
+    def collect_hidden_states(self, library, experts, default_args=None):
+        """Collect per-task layer inputs from each LoRA-merged backbone."""
+        from mttl.arguments import ExpertConfig
+
+        first = experts[0]
+        training_config = ExpertConfig.from_dict(first.training_config)
+        self._update_args(training_config, default_args)
+        device_map = getattr(training_config, "device_map", None) or (
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=training_config.model),
+            device_map=device_map,
+        )
+        model.add_expert_instance(first, is_default=True)
+        model.disable_adapters()
+        handles = self._track_hidden_states(model, device="cpu")
+        w0 = self._snapshot_base_weights(model)
+        hidden_states = {}
+        batches = {}
+        try:
+            for expert in experts:
+                logger.info("IterIS: collecting mid-features for %s", expert.name)
+                batches[expert.name] = self._collect_expert_batches(
+                    expert, default_args
+                )
+                deltas = self._get_task_vectors(expert)
+                self._apply_deltas(model, deltas, w0, replace=False)
+                hidden_states[expert.name] = self._encode_batches(
+                    model,
+                    batches[expert.name],
+                    device="cpu",
+                    desc=f"IterIS hidden states [{expert.name}]",
+                )
+                self._restore_base_weights(model, w0)
+        finally:
+            for handle in handles:
+                handle.remove()
+        return hidden_states, batches, model, w0
+
+    def _solve_once(self, experts, layer_names, hidden_states, hidden_tilde, w0, device):
+        expert_names = [expert.name for expert in experts]
+        n_tasks = len(experts)
+        merged = {}
+        for layer in tqdm(layer_names, desc="IterIS closed-form"):
+            X = self._stack_layer_features(hidden_states, expert_names, layer).to(
+                device=device, dtype=torch.float32
+            )
+            X_tilde = self._stack_layer_features(hidden_tilde, expert_names, layer).to(
+                device=device, dtype=torch.float32
+            )
+            W = torch.stack(
+                [self._get_task_vectors(expert)[layer] for expert in experts], dim=0
+            ).to(device=device, dtype=torch.float32)
+            w0_layer = None
+            if w0 is not None and layer in w0:
+                w0_layer = w0[layer].to(device=device, dtype=torch.float32)
+            if int(self.config.with_pretrain_matrix) == 1:
+                if w0_layer is None:
+                    raise ValueError(
+                        "with_pretrain_matrix=1 requires base weights; "
+                        "cannot use the hidden_states-only path."
+                    )
+                W_solve = W + w0_layer
+            else:
+                W_solve = W
+            coef = self._task_coefficients(W, X, w0_layer)
+            manual = self._manual_coef(n_tasks, device=device, dtype=W.dtype)
+            W_star = self.solution_matrix(
+                W_solve,
+                X,
+                X_tilde,
+                coef,
+                manual,
+                alpha_1=float(self.config.alpha_1),
+                alpha_2=float(self.config.alpha_2),
+                reg_coef=float(self.config.reg_coef),
+            )
+            if int(self.config.with_pretrain_matrix) == 1:
+                W_star = W_star - w0_layer.to(device=W_star.device, dtype=W_star.dtype)
+            merged[layer] = W_star.cpu()
+        return merged
+
+    @torch.no_grad()
+    def transform(
+        self,
+        library,
+        persist=False,
+        recompute=False,
+        default_args=None,
+        hidden_states=None,
+        batches=None,
+    ):
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+
+        expert_names = list(library.keys())
+        experts = [library[name] for name in expert_names]
+        logger.info("Merging {} experts using IterIS".format(len(experts)))
+
+        layer_names = [
+            name.split(".lora_")[0] for name in experts[0].expert_weights.keys()
+        ]
+        layer_names = sorted(list(set(layer_names)))
+
+        model = None
+        w0 = None
+        handles = []
+        cache = None
+        if hidden_states is None and self.config.path and os.path.exists(self.config.path) and not recompute:
+            logger.info("Loading cached IterIS hidden states from %s", self.config.path)
+            cache = torch.load(self.config.path, map_location="cpu")
+            if isinstance(cache, dict) and "hidden_states" in cache:
+                hidden_states = cache["hidden_states"]
+                batches = cache.get("batches")
+            else:
+                hidden_states = cache
+
+        if hidden_states is None:
+            hidden_states, batches, model, w0 = self.collect_hidden_states(
+                library, experts, default_args=default_args
+            )
+            if self.config.path:
+                os.makedirs(
+                    os.path.dirname(os.path.abspath(self.config.path)) or ".",
+                    exist_ok=True,
+                )
+                torch.save(
+                    {"hidden_states": hidden_states, "batches": batches},
+                    self.config.path,
+                )
+                logger.info("Saved IterIS hidden states to %s", self.config.path)
+
+        available = None
+        if hidden_states:
+            available = set.intersection(
+                *(set(per_layer.keys()) for per_layer in hidden_states.values())
+            )
+            layer_names = [layer for layer in layer_names if layer in available]
+
+        if model is not None and int(self.config.max_iter) > 1 and not handles:
+            # collect_hidden_states removes its hooks; re-register for X̃ passes.
+            handles = self._track_hidden_states(model, device="cpu")
+        elif model is None and batches and int(self.config.max_iter) > 1:
+            from mttl.arguments import ExpertConfig
+
+            first = experts[0]
+            training_config = ExpertConfig.from_dict(first.training_config)
+            self._update_args(training_config, default_args)
+            device_map = getattr(training_config, "device_map", None) or (
+                "cuda" if torch.cuda.is_available() else "cpu"
+            )
+            model = MultiExpertModel(
+                MultiExpertModelConfig(base_model=training_config.model),
+                device_map=device_map,
+            )
+            model.add_expert_instance(first, is_default=True)
+            model.disable_adapters()
+            handles = self._track_hidden_states(model, device="cpu")
+            w0 = self._snapshot_base_weights(model)
+
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        max_iter = int(self.config.max_iter)
+        if model is None or not batches:
+            max_iter = 1
+
+        hidden_tilde = hidden_states
+        merged_out_in = None
+        try:
+            for step in range(max_iter):
+                logger.info("IterIS iteration %s / %s", step + 1, max_iter)
+                merged_out_in = self._solve_once(
+                    experts, layer_names, hidden_states, hidden_tilde, w0, device
+                )
+                if step == max_iter - 1 or model is None:
+                    break
+                self._apply_deltas(
+                    model,
+                    merged_out_in,
+                    w0,
+                    replace=False,
+                )
+                hidden_tilde = {}
+                for expert in experts:
+                    hidden_tilde[expert.name] = self._encode_batches(
+                        model,
+                        batches[expert.name],
+                        device="cpu",
+                        desc=f"IterIS X̃ [{expert.name}] iter={step + 1}",
+                    )
+                self._restore_base_weights(model, w0)
+        finally:
+            for handle in handles:
+                handle.remove()
+            if model is not None:
+                del model
+
+        # Return (in, out) so task_vector_apply matches Linear.weight.
+        return {layer: delta.T.contiguous() for layer, delta in merged_out_in.items()}
+
+
+@dataclass
 class KnotMergeConfig(WeightedLinearMergeConfig):
     path: str = "knot_ingredients.pt"  # path to store SVD components
 
