@@ -107,13 +107,25 @@ def get_regular_sparse_mask(m):
     parameter-wise sparse calculation
     """
     num_params_to_keep = int(torch.numel(m.sparse_layer.weight_mask) * m.keep_ratio)
-    threshold, _ = torch.topk(
-        m.sparse_layer.weight_mask.grad.flatten(), num_params_to_keep, sorted=True
-    )
-    accepted_score = threshold[-1]
-    keep_masks = (m.sparse_layer.weight_mask.grad >= accepted_score).float()
+    keep_masks = _get_topk_mask(m.sparse_layer.weight_mask.grad, num_params_to_keep)
 
     return keep_masks
+
+
+def _get_topk_mask(scores, num_to_keep):
+    flat_scores = scores.flatten()
+    if not 0 <= num_to_keep <= flat_scores.numel():
+        raise ValueError(
+            f"num_to_keep must be between 0 and {flat_scores.numel()}, "
+            f"got {num_to_keep}"
+        )
+
+    keep_mask = torch.zeros_like(flat_scores)
+    if num_to_keep:
+        topk_indices = torch.topk(flat_scores, num_to_keep, sorted=False).indices
+        keep_mask.scatter_(0, topk_indices, 1)
+
+    return keep_mask.reshape_as(scores)
 
 
 def make_sparse_model_during_training(
@@ -157,6 +169,7 @@ def make_sparse_model_during_training(
     elif parameter_selection_procedure == "model":
         num_params_to_keep = 0
         grads = []
+        sparse_modules = []
         for m in module.modules():
             if isinstance(m, SparseMaskModule):
                 assert (
@@ -166,16 +179,19 @@ def make_sparse_model_during_training(
                     torch.numel(m.sparse_layer.weight_mask) * m.keep_ratio
                 )
                 grads.append(m.sparse_layer.weight_mask.grad.flatten().cpu())
+                sparse_modules.append(m)
 
-        threshold, _ = torch.topk(
-            torch.stack(grads).flatten(), num_params_to_keep, sorted=True
-        )
-        accepted_score = threshold[-1]
+        keep_mask = _get_topk_mask(torch.cat(grads), num_params_to_keep)
         # b.2 mask
-        for m in module.modules():
-            if isinstance(m, SparseMaskModule):
-                keep_masks = (m.sparse_layer.weight_mask.grad >= accepted_score).float()
-                m.revert_weight_grad_and_update_mask(keep_masks)
+        offset = 0
+        for m in sparse_modules:
+            mask_numel = m.sparse_layer.weight_mask.numel()
+            module_keep_mask = keep_mask[offset : offset + mask_numel]
+            module_keep_mask = module_keep_mask.reshape_as(
+                m.sparse_layer.weight_mask
+            ).to(m.sparse_layer.weight_mask.device)
+            m.revert_weight_grad_and_update_mask(module_keep_mask)
+            offset += mask_numel
 
 
 def mod_forward(self, x):

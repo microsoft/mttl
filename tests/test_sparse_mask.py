@@ -12,8 +12,17 @@ from mttl.models.modifiers import modify_transformer
 from mttl.models.modifiers.sparse_mask import (
     SparseMaskAdapter,
     SparseMaskConfig,
+    _get_topk_mask,
     make_sparse_model_during_training,
 )
+
+
+def test_topk_mask_keeps_exact_count_when_scores_are_tied():
+    scores = torch.ones(10)
+
+    keep_mask = _get_topk_mask(scores, 3)
+
+    assert keep_mask.sum() == 3
 
 
 def test_sm_adapter():
