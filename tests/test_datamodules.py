@@ -1,6 +1,6 @@
+import datasets
 import numpy as np
 import pytest
-import datasets
 
 from mttl.datamodule.alpaca_data_module import AlpacaDataModule
 from mttl.datamodule.base import DatasetConfig

@@ -2,31 +2,17 @@
 #
 # pip install kvpress
 
-import math
 import json
 import logging
+import math
+import os
 from pathlib import Path
 from typing import Optional
+
+import numpy as np
 import torch
 from datasets import load_dataset
 from fire import Fire
-from tqdm import tqdm
-import os
-import torch
-from transformers import pipeline
-
-from mttl.dataloader.ni_metrics import compute_metrics
-from mttl.dist_utils import (
-    is_main_process,
-    get_device,
-    get_world_size,
-    get_data_sampler,
-    get_local_rank,
-    distributed_mean,
-)
-import projects.kms.utils.press_pipeline
-
-import numpy as np
 from kvpress import (
     AdaKVPress,
     ExpectedAttentionPress,
@@ -38,7 +24,19 @@ from kvpress import (
     ThinKPress,
     TOVAPress,
 )
+from tqdm import tqdm
+from transformers import pipeline
 
+import projects.kms.utils.press_pipeline
+from mttl.dataloader.ni_metrics import compute_metrics
+from mttl.dist_utils import (
+    distributed_mean,
+    get_data_sampler,
+    get_device,
+    get_local_rank,
+    get_world_size,
+    is_main_process,
+)
 
 logger = logging.getLogger(__name__)
 

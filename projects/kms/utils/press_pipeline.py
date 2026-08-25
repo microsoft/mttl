@@ -2,17 +2,16 @@ import contextlib
 import logging
 from typing import Optional
 
-from mttl.dist_utils import is_main_process
-
 import torch
-from transformers import AutoModelForCausalLM, Cache, DynamicCache, Pipeline
-from transformers.pipelines import PIPELINE_REGISTRY
-from transformers.pipelines.base import GenericTensor
-
 from kvpress.presses.base_press import BasePress
 from kvpress.presses.key_rerotation_press import KeyRerotationPress
 from kvpress.presses.observed_attention_press import ObservedAttentionPress
 from kvpress.presses.per_layer_compression_press import PerLayerCompressionPress
+from transformers import AutoModelForCausalLM, Cache, DynamicCache, Pipeline
+from transformers.pipelines import PIPELINE_REGISTRY
+from transformers.pipelines.base import GenericTensor
+
+from mttl.dist_utils import is_main_process
 
 logger = logging.getLogger(__name__)
 

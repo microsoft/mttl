@@ -1,6 +1,7 @@
 import os
-import torch
+
 import pytorch_lightning as pl
+import torch
 from pytorch_lightning import seed_everything
 
 from mttl.arguments import RankerConfig
