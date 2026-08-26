@@ -191,6 +191,17 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
         module.load_state_dict(checkpoint)
         trainer.test(module, dm)
 
+        # Extracting the LoRA expert after a long test pass can OOM or hang
+        # if the 8B backbone is still on GPU with cached activations.
+        import gc
+
+        try:
+            module.cpu()
+        except Exception:
+            pass
+        torch.cuda.empty_cache()
+        gc.collect()
+
         @rank_zero_only_and_wait(before=False, after=True)
         def upload_library(expert_library, module):
             if expert_library is not None:

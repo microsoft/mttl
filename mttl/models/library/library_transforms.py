@@ -7,7 +7,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 
 import numpy as np
 import sklearn.decomposition
@@ -1969,6 +1969,269 @@ class UniformMergeAfter(LibraryTransform):
             ]
             task_merged_vectors[layer] = sum(task_vectors) / len(experts)
         return task_merged_vectors
+
+
+def _clone_expert_with_weights(base_expert: Expert, new_weights: dict, name: str) -> Expert:
+    expert = copy.deepcopy(base_expert)
+    expert.name = name
+    for key, value in new_weights.items():
+        expert.expert_weights[key] = value
+    if expert.expert_config is not None:
+        expert.expert_config.tie_params = None
+    return expert
+
+
+def _apply_dare_to_weights(weights: dict, drop_rate: float, generator: torch.Generator):
+    """Drop delta parameters with probability `drop_rate` and rescale the rest by 1/(1-p)."""
+    if drop_rate <= 0.0:
+        return {k: v.clone() for k, v in weights.items()}
+    if drop_rate >= 1.0:
+        raise ValueError("dare_drop_rate must be in [0, 1)")
+    scale = 1.0 / (1.0 - drop_rate)
+    dared = {}
+    for key, value in weights.items():
+        mask = (
+            torch.rand(value.shape, generator=generator, dtype=torch.float32)
+            > drop_rate
+        ).to(device=value.device, dtype=value.dtype)
+        dared[key] = value * mask * scale
+    return dared
+
+
+def _slerp_tensors(t: float, v0: torch.Tensor, v1: torch.Tensor, eps: float = 1e-8):
+    """Spherical linear interpolation between two tensors of equal shape."""
+    v0_flat = v0.reshape(-1).float()
+    v1_flat = v1.reshape(-1).float()
+    v0_norm = torch.linalg.norm(v0_flat)
+    v1_norm = torch.linalg.norm(v1_flat)
+    if v0_norm < eps or v1_norm < eps:
+        return ((1.0 - t) * v0 + t * v1).to(v0.dtype)
+    v0_n = v0_flat / v0_norm
+    v1_n = v1_flat / v1_norm
+    dot = torch.clamp((v0_n * v1_n).sum(), -1.0, 1.0)
+    omega = torch.acos(dot)
+    so = torch.sin(omega)
+    if so.abs() < eps:
+        return ((1.0 - t) * v0 + t * v1).to(v0.dtype)
+    out = (
+        torch.sin((1.0 - t) * omega) / so * v0_flat
+        + torch.sin(t * omega) / so * v1_flat
+    )
+    return out.reshape(v0.shape).to(v0.dtype)
+
+
+@dataclass
+class TaskArithmeticConfig(LibraryTransformConfig):
+    """Task Arithmetic (Ilharco et al.): θ' = θ_0 + λ Σ_t τ_t.
+
+    For LoRA experts, τ_t is the adapter itself. Unlike uniform averaging this
+    does **not** divide by the number of tasks; `ta_scaling` is λ.
+    """
+
+    ta_scaling: float = 1.0
+
+
+@LibraryTransform.register("task_arithmetic", TaskArithmeticConfig)
+class TaskArithmeticMerge(LibraryTransform):
+    def __init__(self, config: TaskArithmeticConfig = None):
+        super().__init__(config or TaskArithmeticConfig())
+
+    @torch.no_grad()
+    def transform(self, library) -> Expert:
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+
+        experts = [library[name] for name in library.keys()]
+        logger.info("Task arithmetic over {} experts, λ={}".format(len(experts), self.config.ta_scaling))
+
+        merged_weights = {
+            k: v.clone() * self.config.ta_scaling for k, v in experts[0].expert_weights.items()
+        }
+        for expert in experts[1:]:
+            for key, value in expert.expert_weights.items():
+                merged_weights[key] = merged_weights[key] + value * self.config.ta_scaling
+        return _clone_expert_with_weights(experts[0], merged_weights, "task_arithmetic_expert")
+
+
+@dataclass
+class DareMergeConfig(LibraryTransformConfig):
+    """DARE (Yu et al., 2024): randomly drop delta weights then rescale.
+
+    `dare_merge_method` is applied after sparsification:
+      - "task_arithmetic" (DARE-TA)
+      - "ties" (DARE-TIES)
+      - "uniform" (DARE + weight average)
+    """
+
+    dare_drop_rate: float = 0.7
+    dare_merge_method: str = "ties"
+    ta_scaling: float = 1.0
+    ties_top_k: float = 0.2
+    dare_seed: int = 42
+
+
+@LibraryTransform.register("dare_merge", DareMergeConfig)
+class DareMerge(LibraryTransform):
+    def __init__(self, config: DareMergeConfig = None):
+        super().__init__(config or DareMergeConfig())
+
+    @torch.no_grad()
+    def transform(self, library) -> Expert:
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+
+        expert_names = list(library.keys())
+        experts = [library[name] for name in expert_names]
+        generator = torch.Generator().manual_seed(int(self.config.dare_seed))
+        logger.info(
+            "DARE drop_rate={} merge={} over {} experts".format(
+                self.config.dare_drop_rate, self.config.dare_merge_method, len(experts)
+            )
+        )
+
+        dared_experts = []
+        for expert in experts:
+            dared_weights = _apply_dare_to_weights(
+                expert.expert_weights, float(self.config.dare_drop_rate), generator
+            )
+            dared_experts.append(
+                _clone_expert_with_weights(expert, dared_weights, expert.name)
+            )
+
+        # stash dared experts in a virtual library-like dict wrapper
+        class _ListLib:
+            def __init__(self, items):
+                self._items = {e.name: e for e in items}
+
+            def keys(self):
+                return self._items.keys()
+
+            def __iter__(self):
+                return iter(self._items)
+
+            def __getitem__(self, name):
+                return self._items[name]
+
+        dared_lib = _ListLib(dared_experts)
+        method = str(self.config.dare_merge_method).lower()
+        if method in ("ties", "dare_ties"):
+            return TiesMerge(TiesMergeConfig(top_k=float(self.config.ties_top_k))).transform(dared_lib)
+        if method in ("uniform", "average"):
+            return WeightedLinearMerge(WeightedLinearMergeConfig()).transform(dared_lib)
+        if method in ("task_arithmetic", "ta", "dare_ta"):
+            return TaskArithmeticMerge(
+                TaskArithmeticConfig(ta_scaling=float(self.config.ta_scaling))
+            ).transform(dared_lib)
+        raise ValueError(f"Unknown dare_merge_method {self.config.dare_merge_method}")
+
+
+@dataclass
+class SlerpMergeConfig(LibraryTransformConfig):
+    """Iterative spherical linear interpolation over LoRA experts (Goddard et al.)."""
+
+    slerp_t: Optional[float] = None  # if None, use equal-weight sequential SLERP t=1/(i+1)
+
+
+@LibraryTransform.register("slerp_merge", SlerpMergeConfig)
+class SlerpMerge(LibraryTransform):
+    def __init__(self, config: SlerpMergeConfig = None):
+        super().__init__(config or SlerpMergeConfig())
+
+    @torch.no_grad()
+    def transform(self, library) -> Expert:
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+
+        experts = [library[name] for name in library.keys()]
+        if len(experts) == 1:
+            return copy.deepcopy(experts[0])
+
+        logger.info("SLERP over {} experts".format(len(experts)))
+        merged_weights = {k: v.clone() for k, v in experts[0].expert_weights.items()}
+        for i, expert in enumerate(experts[1:], start=1):
+            t = (
+                float(self.config.slerp_t)
+                if self.config.slerp_t is not None
+                else 1.0 / (i + 1)
+            )
+            for key in merged_weights:
+                merged_weights[key] = _slerp_tensors(t, merged_weights[key], expert.expert_weights[key])
+        return _clone_expert_with_weights(experts[0], merged_weights, "slerp_expert")
+
+
+@dataclass
+class RegMeanMergeConfig(LibraryTransformConfig):
+    """RegMean (Jin et al., 2023) on linearized LoRA deltas.
+
+    If calibration activations are unavailable, Gram matrices default to I and
+    the operator reduces to uniform averaging of task vectors.
+    """
+
+    regmean_lambda: float = 1.0
+    regmean_max_samples: int = 1000
+
+
+@LibraryTransform.register("regmean_merge", RegMeanMergeConfig)
+class RegMeanMerge(LibraryTransform):
+    def __init__(self, config: RegMeanMergeConfig = None):
+        super().__init__(config or RegMeanMergeConfig())
+
+    def _get_task_vectors(self, expert: Expert) -> dict:
+        layers = sorted({k.split(".lora_")[0] for k in expert.expert_weights.keys()})
+        vectors = {}
+        for layer in layers:
+            lora_a = expert.expert_weights[f"{layer}.lora_a"]
+            lora_b = expert.expert_weights[f"{layer}.lora_b"]
+            vectors[layer] = lora_a.data @ lora_b.data
+        return vectors
+
+    @torch.no_grad()
+    def transform(self, library, grams: dict = None) -> dict:
+        """Return {layer: merged_delta} in (in, out) orientation like UniformMergeAfter.
+
+        `grams` is an optional mapping {expert_name: {layer: G}} where G is
+        (in_features, in_features). Missing grams default to identity.
+        """
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+
+        experts = [library[name] for name in library.keys()]
+        logger.info("RegMean over {} experts, λ={}".format(len(experts), self.config.regmean_lambda))
+
+        layer_names = sorted(
+            {name.split(".lora_")[0] for name in experts[0].expert_weights.keys()}
+        )
+        task_vectors = {expert.name: self._get_task_vectors(expert) for expert in experts}
+
+        merged = {}
+        ridge = float(self.config.regmean_lambda)
+        for layer in layer_names:
+            num = None
+            den = None
+            for expert in experts:
+                tau = task_vectors[expert.name][layer].float()
+                gram = None
+                if grams is not None:
+                    gram = grams.get(expert.name, {}).get(layer)
+                if gram is None:
+                    gram = torch.eye(tau.shape[0], dtype=tau.dtype, device=tau.device)
+                else:
+                    gram = gram.float().to(tau.device)
+                    if gram.shape[0] != tau.shape[0]:
+                        gram = torch.eye(tau.shape[0], dtype=tau.dtype, device=tau.device)
+                contrib = gram @ tau
+                num = contrib if num is None else num + contrib
+                den = gram.clone() if den is None else den + gram
+            den = den + ridge * torch.eye(den.shape[0], dtype=den.dtype, device=den.device)
+            try:
+                merged[layer] = torch.linalg.solve(den, num).to(task_vectors[experts[0].name][layer].dtype)
+            except Exception as exc:
+                logger.warning("RegMean solve failed for %s (%s); falling back to mean", layer, exc)
+                stacked = torch.stack(
+                    [task_vectors[e.name][layer].float() for e in experts], dim=0
+                )
+                merged[layer] = stacked.mean(0).to(task_vectors[experts[0].name][layer].dtype)
+        return merged
 
 
 @dataclass

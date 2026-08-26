@@ -49,6 +49,14 @@ from mttl.models.library.library_transforms import (
     CPMergeConfig,
     CPMergeAfter,
     CPMergeAfterConfig,
+    TaskArithmeticMerge,
+    TaskArithmeticConfig,
+    DareMerge,
+    DareMergeConfig,
+    SlerpMerge,
+    SlerpMergeConfig,
+    RegMeanMerge,
+    RegMeanMergeConfig,
 )
 from mttl.models.lightning.callbacks import LossCallback
 from mttl.models.lightning.expert_module import ExpertModule, MultiExpertModule
@@ -407,6 +415,63 @@ def run_eval(args: EvaluationConfig):
         )
         cfg = AnalyticalWudiMergeConfig()
         task_merged_vectors = AnalyticalWudiMerge(cfg).transform(library)
+        model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
+
+    elif args.merge_or_route in ["task_arithmetic", "ta"]:
+        ta_scaling = getattr(args, "ta_scaling", 1.0)
+        if not isinstance(ta_scaling, (int, float)):
+            ta_scaling = 1.0
+        expert = TaskArithmeticMerge(TaskArithmeticConfig(ta_scaling=float(ta_scaling))).transform(library)
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        model.add_expert_instance(expert, is_default=True)
+    elif args.merge_or_route in ["dare", "dare_ties", "dare_task_arithmetic", "dare_ta"]:
+        drop_rate = getattr(args, "dare_drop_rate", 0.7)
+        if not isinstance(drop_rate, (int, float)):
+            drop_rate = 0.7
+        ta_scaling = getattr(args, "ta_scaling", 1.0)
+        if not isinstance(ta_scaling, (int, float)):
+            ta_scaling = 1.0
+        merge_method = (
+            "task_arithmetic"
+            if args.merge_or_route in ["dare_task_arithmetic", "dare_ta"]
+            else "ties"
+        )
+        expert = DareMerge(
+            DareMergeConfig(
+                dare_drop_rate=float(drop_rate),
+                dare_merge_method=merge_method,
+                ta_scaling=float(ta_scaling),
+            )
+        ).transform(library)
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        model.add_expert_instance(expert, is_default=True)
+    elif args.merge_or_route == "slerp":
+        slerp_t = getattr(args, "slerp_t", None)
+        if not isinstance(slerp_t, (int, float)):
+            slerp_t = None
+        expert = SlerpMerge(SlerpMergeConfig(slerp_t=slerp_t)).transform(library)
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        model.add_expert_instance(expert, is_default=True)
+    elif args.merge_or_route == "regmean":
+        model = MultiExpertModel(
+            MultiExpertModelConfig(base_model=base_model),
+            **loading_kwargs,
+        )
+        ridge = getattr(args, "regmean_lambda", 1.0)
+        if not isinstance(ridge, (int, float)):
+            ridge = 1.0
+        task_merged_vectors = RegMeanMerge(
+            RegMeanMergeConfig(regmean_lambda=float(ridge))
+        ).transform(library)
         model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
 
     elif args.merge_or_route == "uniform_lora_after_op":
