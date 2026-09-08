@@ -330,6 +330,7 @@ class TrainingArgs(DataArgs):
     device_map: str = "cpu"
     load_in_4bit: bool = False
     load_in_8bit: bool = False
+    gradient_checkpointing: bool = False
     do_train: bool = True
 
     # output directories

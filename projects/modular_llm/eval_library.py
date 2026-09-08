@@ -346,12 +346,20 @@ def run_eval(args: EvaluationConfig):
         cfg = WuDiMerge2Config(iter=300, lr=1e-5)
         WuDiMerge2(cfg).transform(library, model.model)
         model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
-    elif args.merge_or_route == "knots":
+    elif args.merge_or_route in ["knots", "knots_linear", "knots_ties"]:
         model = MultiExpertModel(
             MultiExpertModelConfig(base_model=base_model),
             **loading_kwargs,
         )
-        cfg = KnotMergeConfig(path=f"{args.library_id}/knot_ingredients.pt")
+        knot_method = "linear" if args.merge_or_route == "knots_linear" else "ties"
+        retained = getattr(args, "retained_rank", -1)
+        if not isinstance(retained, int):
+            retained = -1
+        cfg = KnotMergeConfig(
+            path=f"{args.library_id}/knot_ingredients.pt",
+            merge_method=knot_method,
+            retained_rank=int(retained),
+        )
         task_merged_vectors = KnotMerge(cfg).transform(library, recompute=args.recompute_prototypes)
         model.task_vector_apply(task_merged_vectors, scaling_coefficient=args.scaling_coefficient)
     elif args.merge_or_route in ["osrm", "osrm_ties"]:

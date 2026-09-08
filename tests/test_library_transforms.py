@@ -68,8 +68,6 @@ def test_knot_merge(tmp_path, create_dummy_expert):
             "lora_init_b_random": True,  # this is important otw phatgoose gates are 0 given that the experts are not trained
         }
     )
-    model = ExpertModel(ExpertModelConfig(base_model="EleutherAI/gpt-neo-125m"))
-
     config.finetune_task_name = "cot_creak"
     expert1 = create_dummy_expert(config, "cot_creak")
 
@@ -88,16 +86,23 @@ def test_knot_merge(tmp_path, create_dummy_expert):
     library.add_expert(expert2)
 
     transform = KnotMerge(KnotMergeConfig(path=f"{tmp_path}/knot_ingredients.pt"))
-    exp = transform.transform(library)
-    state_dict = model.model.state_dict()
+    deltas = transform.transform(library)
+    assert isinstance(deltas, dict) and len(deltas) == 1
+    layer = next(iter(deltas))
+    lora_a = expert1.expert_weights[f"{layer}.lora_a"]
+    lora_b = expert1.expert_weights[f"{layer}.lora_b"]
+    # KnotMerge returns (out, in); LoRA product is (in, out).
+    assert deltas[layer].shape == (lora_b.shape[1], lora_a.shape[0])
 
-    # TODO: this can be implemented as a seperate modifier maybe or utils func.
-    merged_layers = []
-    for p_name, value in exp.expert_weights.items():
-        if p_name in state_dict:
-            merged_layers.append(p_name)
-            state_dict[p_name] += value
-    assert len(merged_layers) == len(exp.expert_weights.keys()) == 1
+    linear = KnotMerge(
+        KnotMergeConfig(
+            path=f"{tmp_path}/knot_ingredients.pt",
+            merge_method="linear",
+            retained_rank=4,
+        )
+    ).transform(library, recompute=False)
+    assert linear[layer].shape[0] == deltas[layer].shape[0]
+    assert linear[layer].shape[1] == deltas[layer].shape[1]
 
 
 def test_osrm_merge(tmp_path, create_dummy_expert):

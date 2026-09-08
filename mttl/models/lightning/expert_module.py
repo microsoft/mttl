@@ -136,6 +136,14 @@ class ExpertModule(LightningTrainingMixin, LightningEfficientCheckpoint):
             load_in_4bit=getattr(self.hparams, "load_in_4bit", False),
             load_in_8bit=getattr(self.hparams, "load_in_8bit", False),
         )
+        if getattr(self.hparams, "gradient_checkpointing", False):
+            inner = getattr(self.model, "model", None)
+            if inner is not None and hasattr(inner, "gradient_checkpointing_enable"):
+                if hasattr(inner, "config"):
+                    inner.config.use_cache = False
+                inner.gradient_checkpointing_enable()
+                if hasattr(inner, "enable_input_require_grads"):
+                    inner.enable_input_require_grads()
 
     @property
     def generation_config(self):

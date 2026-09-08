@@ -156,6 +156,7 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
             int(args.precision) if args.precision in ["16", "32"] else args.precision
         ),
         val_check_interval=val_check_interval,
+        enable_model_summary=False,
     )
 
     # initial validation only for a bunch of datasets... ?
@@ -189,10 +190,11 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
             checkpoint = torch.load(checkpoint, weights_only=False)["state_dict"]
 
         module.load_state_dict(checkpoint)
-        trainer.test(module, dm)
+        # Do not run trainer.test() here. On 8B/32B/MoE it can hang for days
+        # with the backbone still on GPU, so add_expert never runs. MedMerge
+        # evaluation is a separate job.
 
-        # Extracting the LoRA expert after a long test pass can OOM or hang
-        # if the 8B backbone is still on GPU with cached activations.
+        # Extracting the LoRA expert can OOM if the backbone is still on GPU.
         import gc
 
         try:

@@ -1,14 +1,23 @@
-"""Merge LoRA experts trained on the six audio-classification tasks and report
+"""Merge LoRA experts trained on audio-classification tasks and report
 top-1 accuracy of the merged AST backbone on every task.
 
-Audio counterpart of ``projects/vision_merging/merge_vision_experts.py``: the
-same MTTL merge transforms are reused (uniform / ties / wudi / *_merge_after).
-Each task keeps its own trained classification head; only the AST attention
-backbone is merged.
+Audio counterpart of ``projects/vision_merging/merge_vision_experts.py`` and of
+``projects/modular_llm/eval_library.py``: the same MTTL merge transforms are
+reused. Each task keeps its own trained classification head; only the AST
+attention backbone is merged.
+
+SOATA in the ICASSP draft is this codebase's KnotMerge:
+  * ``knots`` / ``knots_ties``  -> shared-basis SVD + TIES on coordinates
+  * ``knots_linear``            -> shared-basis SVD + linear coordinate blend
 """
 
+from __future__ import annotations
+
 import argparse
+import json
 import os
+import sys
+import time
 
 import torch
 from tqdm.auto import tqdm
@@ -18,10 +27,14 @@ from mttl.logging import logger, setup_logging
 from mttl.models.library.expert import Expert
 from mttl.models.library.expert_library import ExpertLibrary
 from mttl.models.library.library_transforms import (
+    DareMerge,
+    DareMergeConfig,
     ISOMerge,
     ISOMergeConfig,
     KnotMerge,
     KnotMergeConfig,
+    TaskArithmeticMerge,
+    TaskArithmeticConfig,
     TiesMerge,
     TiesMergeConfig,
     TiesMergeAfter,
@@ -37,9 +50,40 @@ from mttl.models.library.library_transforms import (
     WudiMergeConfig,
 )
 
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if _SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPT_DIR)
+
 from audio_data import get_audio_dataloaders
 
 BACKBONE_PREFIX = "audio_spectrogram_transformer."
+
+MERGE_METHODS = [
+    "base",
+    "individual",
+    "uniform",
+    "task_arithmetic",
+    "ties",
+    "dare_ties",
+    "dare_task_arithmetic",
+    "uniform_merge_after",
+    "ties_merge_after",
+    "wudi",
+    "wudi_merge_after",
+    "iso",
+    "tsv",
+    "knots",
+    "knots_ties",
+    "knots_linear",
+    "delta_linear",
+]
+
+
+def library_fs_path(library_id: str) -> str:
+    for prefix in ("local://", "hf://"):
+        if library_id.startswith(prefix):
+            return library_id[len(prefix) :]
+    return library_id
 
 
 def expert_to_layer_deltas(expert: Expert) -> dict:
@@ -53,14 +97,71 @@ def expert_to_layer_deltas(expert: Expert) -> dict:
     return deltas
 
 
+def _knot_path(library_id: str) -> str:
+    return os.path.join(library_fs_path(library_id), "knot_ingredients.pt")
+
+
 def compute_merged_deltas(
-    method: str, library: ExpertLibrary, wudi_iter: int = 300, wudi_lr: float = 1e-5
+    method: str,
+    library: ExpertLibrary,
+    library_id: str = "local://audio_library",
+    wudi_iter: int = 300,
+    wudi_lr: float = 1e-5,
+    ta_scaling: float = 1.0,
+    dare_drop_rate: float = 0.7,
+    ties_top_k: float = 0.2,
+    retained_rank: int = -1,
+    recompute: bool = True,
+    weights: dict | None = None,
+    knot_path: str | None = None,
 ) -> dict:
+    knot_path = knot_path or _knot_path(library_id)
     if method == "uniform":
-        expert = WeightedLinearMerge(WeightedLinearMergeConfig()).transform(library)
+        expert = WeightedLinearMerge(
+            WeightedLinearMergeConfig(weights=weights)
+        ).transform(library)
+        return expert_to_layer_deltas(expert)
+    if method in ("delta_linear", "product_linear"):
+        # Average LoRA *products* (the theorem's ΔW* = Σ λ_k ΔW_k), not LoRA factors.
+        names = list(library.keys())
+        if weights is None:
+            coeff = {n: 1.0 / max(len(names), 1) for n in names}
+        else:
+            coeff = {n: float(weights[n]) for n in names}
+        acc = None
+        for name in names:
+            deltas = expert_to_layer_deltas(library[name])
+            if acc is None:
+                acc = {layer: coeff[name] * delta for layer, delta in deltas.items()}
+            else:
+                for layer, delta in deltas.items():
+                    acc[layer] = acc[layer] + coeff[name] * delta
+        return acc
+    if method in ("task_arithmetic", "ta"):
+        expert = TaskArithmeticMerge(
+            TaskArithmeticConfig(ta_scaling=float(ta_scaling))
+        ).transform(library)
         return expert_to_layer_deltas(expert)
     if method == "ties":
-        expert = TiesMerge(TiesMergeConfig()).transform(library)
+        expert = TiesMerge(TiesMergeConfig(top_k=float(ties_top_k))).transform(library)
+        return expert_to_layer_deltas(expert)
+    if method in ("dare_ties", "dare"):
+        expert = DareMerge(
+            DareMergeConfig(
+                dare_drop_rate=float(dare_drop_rate),
+                dare_merge_method="ties",
+                ties_top_k=float(ties_top_k),
+            )
+        ).transform(library)
+        return expert_to_layer_deltas(expert)
+    if method in ("dare_task_arithmetic", "dare_ta"):
+        expert = DareMerge(
+            DareMergeConfig(
+                dare_drop_rate=float(dare_drop_rate),
+                dare_merge_method="task_arithmetic",
+                ta_scaling=float(ta_scaling),
+            )
+        ).transform(library)
         return expert_to_layer_deltas(expert)
     if method == "wudi":
         merged = WudiMerge(WudiMergeConfig(iter=wudi_iter, lr=wudi_lr)).transform(library)
@@ -74,16 +175,21 @@ def compute_merged_deltas(
             WudiMergeConfig(iter=wudi_iter, lr=wudi_lr)
         ).transform(library)
     if method == "iso":
-        # ISOMerge returns {layer: delta_W} in (in, out) orientation, like the *_after methods
         return ISOMerge(ISOMergeConfig()).transform(library)
     if method == "tsv":
-        # TSVMerge returns {layer: delta_W} in (in, out) orientation; recompute=True avoids
-        # reusing a stale `tsv_ingredients.pt` cache from a different library.
         return TSVMerge(TSVMergeConfig()).transform(library, recompute=True)
-    if method == "knots":
-        # KnotMerge returns delta_W in (out, in); transpose to (in, out) so it matches the
-        # convention apply_deltas_to_backbone expects (which transposes once more to (out, in)).
-        merged = KnotMerge(KnotMergeConfig()).transform(library, recompute=True)
+    if method in ("knots", "knots_ties", "knots_linear"):
+        # KnotMerge returns delta_W in (out, in); transpose to (in, out) so it matches
+        # apply_deltas_to_backbone (which transposes once more to (out, in)).
+        knot_method = "linear" if method == "knots_linear" else "ties"
+        merged = KnotMerge(
+            KnotMergeConfig(
+                path=knot_path,
+                merge_method=knot_method,
+                retained_rank=int(retained_rank),
+                weights=weights,
+            )
+        ).transform(library, recompute=recompute)
         return {layer: d.T for layer, d in merged.items()}
     raise ValueError(f"Unknown merge method {method}")
 
@@ -144,10 +250,28 @@ def evaluate_task(task, model_name, backbone_state, heads_dir, device, args):
         preds = model(input_values=input_values).logits.argmax(dim=-1)
         correct += (preds == labels).sum().item()
         total += labels.numel()
+    del model
+    torch.cuda.empty_cache()
     return correct / max(total, 1)
 
 
-def main():
+def result_tag(args) -> str:
+    """Filename stem used for JSON dumps (unique per method / rank)."""
+    tag = args.merge_method
+    if args.merge_method in ("knots", "knots_ties", "knots_linear") and args.retained_rank > 0:
+        tag = f"{args.merge_method}_R{args.retained_rank}"
+    return tag
+
+
+def write_latex_row(method: str, scores: dict, tasks) -> str:
+    cells = [f"{scores.get(t, 0.0) * 100:.1f}" for t in tasks]
+    avg = scores.get("avg", 0.0) * 100
+    ret = scores.get("retention")
+    ret_s = f"{ret:.1f}" if isinstance(ret, (int, float)) else "--"
+    return method + " & " + " & ".join(cells) + f" & {avg:.1f} & {ret_s} \\\\"
+
+
+def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--library_id", default="local://audio_library")
     parser.add_argument("--heads_dir", default="audio_library_heads")
@@ -156,25 +280,62 @@ def main():
     )
     parser.add_argument(
         "--merge_method",
-        default="wudi_merge_after",
-        help="base | individual | uniform | ties | wudi | uniform_merge_after | ties_merge_after | wudi_merge_after | iso | tsv | knots",
+        default="knots",
+        choices=MERGE_METHODS,
+        help="base | individual | uniform | task_arithmetic | ties | dare_ties | "
+        "dare_task_arithmetic | wudi | wudi_merge_after | iso | tsv | "
+        "knots | knots_ties | knots_linear",
     )
     parser.add_argument("--scaling_coefficient", type=float, default=1.0)
+    parser.add_argument("--ta_scaling", type=float, default=1.0)
+    parser.add_argument("--dare_drop_rate", type=float, default=0.7)
+    parser.add_argument("--ties_top_k", type=float, default=0.2)
     parser.add_argument(
         "--wudi_iter", type=int, default=300, help="optimization steps for wudi / wudi_merge_after"
     )
     parser.add_argument(
         "--wudi_lr", type=float, default=1e-5, help="learning rate for wudi / wudi_merge_after"
     )
+    parser.add_argument(
+        "--retained_rank",
+        type=int,
+        default=-1,
+        help="KnoT/SOATA truncated SVD rank R; -1 keeps the numerical rank.",
+    )
+    parser.add_argument(
+        "--recompute_prototypes",
+        action="store_true",
+        help="Recompute the joint SVD cache (knot_ingredients.pt).",
+    )
     parser.add_argument("--eval_batch_size", type=int, default=32)
-    parser.add_argument("--num_workers", type=int, default=4)
+    parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--subsample_test", type=int, default=-1)
     parser.add_argument("--output_dir", default="audio_output")
     parser.add_argument("--seed", type=int, default=42)
-    args = parser.parse_args()
+    parser.add_argument(
+        "--expert_scores_json",
+        default=None,
+        help="JSON of single-task expert scores used to compute retention.",
+    )
+    parser.add_argument(
+        "--skip_existing",
+        action="store_true",
+        help="Skip if ${output_dir}/${method}.json already exists.",
+    )
+    return parser.parse_args()
 
+
+def main():
+    args = parse_args()
+    os.makedirs(args.output_dir, exist_ok=True)
     setup_logging(args.output_dir)
     device = "cuda" if torch.cuda.is_available() else "cpu"
+    tag = result_tag(args)
+    out_path = os.path.join(args.output_dir, f"{tag}.json")
+    if args.skip_existing and os.path.isfile(out_path):
+        logger.info("Skipping %s (already have %s)", tag, out_path)
+        print(open(out_path).read())
+        return
 
     library = ExpertLibrary.get_expert_library(repo_id=args.library_id)
     tasks = list(library.keys())
@@ -188,9 +349,9 @@ def main():
     def backbone_only(state):
         return {k: v for k, v in state.items() if k.startswith(BACKBONE_PREFIX)}
 
+    t0 = time.time()
     results = {}
     if args.merge_method == "base":
-        # lower-bound baseline: pretrained backbone with NO deltas, each task's own head
         backbone_state = backbone_only(base_state)
         for task in tasks:
             acc = evaluate_task(
@@ -209,8 +370,20 @@ def main():
             logger.info(f"[individual] {task}: {acc:.4f}")
     else:
         logger.info(f"Merging experts with method `{args.merge_method}`")
+        recompute = args.recompute_prototypes or not os.path.isfile(
+            _knot_path(args.library_id)
+        )
         deltas = compute_merged_deltas(
-            args.merge_method, library, wudi_iter=args.wudi_iter, wudi_lr=args.wudi_lr
+            args.merge_method,
+            library,
+            library_id=args.library_id,
+            wudi_iter=args.wudi_iter,
+            wudi_lr=args.wudi_lr,
+            ta_scaling=args.ta_scaling,
+            dare_drop_rate=args.dare_drop_rate,
+            ties_top_k=args.ties_top_k,
+            retained_rank=args.retained_rank,
+            recompute=recompute,
         )
         merged = apply_deltas_to_backbone(base_state, deltas, args.scaling_coefficient)
         backbone_state = backbone_only(merged)
@@ -221,19 +394,50 @@ def main():
             results[task] = acc
             logger.info(f"[{args.merge_method}] {task}: {acc:.4f}")
 
+    merge_seconds = time.time() - t0
     mean_acc = sum(results.values()) / max(len(results), 1)
-    hparams = f"scaling={args.scaling_coefficient} iter={args.wudi_iter} lr={args.wudi_lr}"
+    results["avg"] = mean_acc
+
+    retention = None
+    if args.expert_scores_json and os.path.isfile(args.expert_scores_json):
+        with open(args.expert_scores_json) as handle:
+            payload = json.load(handle)
+        expert_scores = payload.get("scores", payload)
+        expert_avg = expert_scores.get("avg")
+        if expert_avg:
+            retention = 100.0 * mean_acc / expert_avg
+    elif args.merge_method == "individual":
+        retention = 100.0
+    results["retention"] = retention
+
+    hparams = (
+        f"scaling={args.scaling_coefficient} iter={args.wudi_iter} lr={args.wudi_lr} "
+        f"R={args.retained_rank}"
+    )
     logger.info("==================== RESULTS ====================")
     logger.info(f"method = {args.merge_method} | {hparams}")
-    for task, acc in results.items():
-        logger.info(f"  {task:<16s}: {acc * 100:.2f}")
+    for task in tasks:
+        logger.info(f"  {task:<16s}: {results[task] * 100:.2f}")
     logger.info(f"  {'mean':<16s}: {mean_acc * 100:.2f}")
+    if retention is not None:
+        logger.info(f"  {'retention':<16s}: {retention:.1f}%")
     logger.info("=================================================")
 
-    print(f"\nmethod = {args.merge_method} | {hparams}")
-    for task, acc in results.items():
-        print(f"  {task:<16s}: {acc * 100:.2f}")
-    print(f"  {'mean':<16s}: {mean_acc * 100:.2f}")
+    payload = {
+        "merge_method": args.merge_method,
+        "tag": tag,
+        "library_id": args.library_id,
+        "tasks": tasks,
+        "scores": results,
+        "merge_seconds": merge_seconds,
+        "retained_rank": args.retained_rank,
+        "scaling_coefficient": args.scaling_coefficient,
+        "latex_row": write_latex_row(tag, results, tasks),
+    }
+    with open(out_path, "w") as handle:
+        json.dump(payload, handle, indent=2)
+    logger.info("Saved %s", out_path)
+    print(json.dumps(payload, indent=2))
 
 
 if __name__ == "__main__":

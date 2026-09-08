@@ -55,6 +55,20 @@ class LibraryTransform(abc.ABC, Registrable):
         pass
 
 
+def _safe_quantile(tensor, q, dim=None):
+    """``torch.quantile`` rejects inputs with more than 2**24 elements."""
+    try:
+        return tensor.quantile(q, dim=dim)
+    except RuntimeError as exc:
+        msg = str(exc).lower()
+        if "too large" not in msg and "quantile" not in msg:
+            raise
+        x = tensor.detach().float().cpu().numpy()
+        q_np = float(q.item() if torch.is_tensor(q) else q)
+        val = np.quantile(x, q_np) if dim is None else np.quantile(x, q_np, axis=dim)
+        return torch.as_tensor(val, device=tensor.device, dtype=tensor.dtype)
+
+
 def _hash_field(val):
     # from facebookresearch / ReAgent
     if val is None:
@@ -3089,58 +3103,121 @@ class IterISMerge(LibraryTransform):
 @dataclass
 class KnotMergeConfig(WeightedLinearMergeConfig):
     path: str = "knot_ingredients.pt"  # path to store SVD components
+    # Coordinate merge in the shared right-subspace: "ties" (KnOTS / SOATA-TIES)
+    # or "linear" (average the aligned V_k, SOATA-Linear).
+    merge_method: str = "ties"
+    # Truncate the joint SVD to the top-R components. -1 keeps every singular
+    # value above 1e-5 (full numerical rank of the concatenated adapter).
+    retained_rank: int = -1
 
 
 @LibraryTransform.register("weighted_knot_merge", KnotMergeConfig)
 class KnotMerge(LibraryTransform):
     """
     Computes a weighted KnoT merge for LoRA experts as in https://arxiv.org/pdf/2410.19735
+
+    Joint SVD aligns task adapters onto a shared left basis U; merging then
+    operates on the aligned right coordinates. ``merge_method="ties"`` is the
+    original KnOTS operator; ``merge_method="linear"`` averages coordinates.
     """
 
     def __init__(self, config: KnotMergeConfig = None):
         super().__init__(config or KnotMergeConfig())
         self.ingredients = None
 
-    def transform(self, library, recompute=False) -> Expert:
+    def transform(self, library, recompute=False):
         if type(library) == str:
             library = ExpertLibrary.get_expert_library(library)
         # TODO: this should probably be stored in the library instead of the local path.
         # Current libary.add_auxiliary_data requires that aux data is associated with an expert, this is not associated with any expert.
         if not os.path.exists(self.config.path) or recompute:
-            U, task_Ss, task_sVs, UsV_dict = self.apply_svd(library)
+            U, task_Ss, task_sVs, UsV_dict, expert_names = self.apply_svd(library)
             self.ingredients = {
                 "U": U,
                 "task_Ss": task_Ss,
                 "task_sVs": task_sVs,  # premultiplied with s, cause Vs alone do not have the scale info.
                 "UsV_dict": UsV_dict,
+                "expert_names": expert_names,
             }
 
+            parent = os.path.dirname(self.config.path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
             torch.save(self.ingredients, self.config.path)
-        self.ingredients = torch.load(self.config.path)
+        self.ingredients = torch.load(
+            self.config.path, map_location="cpu", weights_only=False
+        )
         task_sVs = self.ingredients["task_sVs"]
         U = self.ingredients["U"]
-        ties_mergert = TiesMerge()
+        expert_names = self.ingredients.get("expert_names")
+        retained = int(getattr(self.config, "retained_rank", -1) or -1)
+        merge_method = str(getattr(self.config, "merge_method", "ties") or "ties").lower()
 
-        # Prepare for Ties merging of sVs
-        expert_vectors = []
-        for expert, params in enumerate(task_sVs):
-            expert_vectors += [
-                torch.nn.utils.parameters_to_vector(
-                    list(params[k] for k in params.keys())
-                )
+        if retained > 0:
+            U = {k: v[:, : min(retained, v.shape[1])] for k, v in U.items()}
+            task_sVs = [
+                {k: v[: min(retained, v.shape[0]), :] for k, v in params.items()}
+                for params in task_sVs
             ]
-        state_dict = {}
-        expert_vectors = torch.stack(expert_vectors, dim=0)
-        per_exp_th = expert_vectors.abs().quantile(
-            1.0 - ties_mergert.config.top_k, dim=1
-        )
+
+        usv = self.ingredients.get("UsV_dict") or {}
+        if usv:
+            ratios = []
+            for pack in usv.values():
+                s = pack["s"].detach().float().cpu()
+                keep = s.numel() if retained <= 0 else min(retained, s.numel())
+                denom = s.pow(2).sum().clamp_min(1e-12)
+                ratios.append((s[:keep].pow(2).sum() / denom).item())
+            logger.info(
+                "KnoT mean Frobenius energy ratio at R=%s: %.4f",
+                "full" if retained <= 0 else retained,
+                sum(ratios) / max(len(ratios), 1),
+            )
+
         param_names = list(task_sVs[0].keys())
-        for p_name in param_names:
-            expert_weights = torch.stack([expert[p_name] for expert in task_sVs], dim=0)
-            TH = per_exp_th.view(-1, *((1,) * (expert_weights.ndim - 1)))
-            final_param, _, _ = ties_mergert.merge_param(TH, expert_weights)
-            delta_W = U[p_name] @ final_param  # out_features, in_features
-            state_dict[p_name] = delta_W
+        state_dict = {}
+        if merge_method in ("ties", "knots"):
+            ties_mergert = TiesMerge()
+            expert_vectors = torch.stack(
+                [
+                    torch.nn.utils.parameters_to_vector(
+                        list(params[k] for k in param_names)
+                    )
+                    for params in task_sVs
+                ],
+                dim=0,
+            )
+            per_exp_th = _safe_quantile(
+                expert_vectors.abs(), 1.0 - ties_mergert.config.top_k, dim=1
+            )
+            for p_name in param_names:
+                expert_weights = torch.stack(
+                    [expert[p_name] for expert in task_sVs], dim=0
+                )
+                TH = per_exp_th.view(-1, *((1,) * (expert_weights.ndim - 1)))
+                final_param, _, _ = ties_mergert.merge_param(TH, expert_weights)
+                state_dict[p_name] = U[p_name] @ final_param  # out_features, in_features
+        elif merge_method in ("linear", "uniform", "average"):
+            coord_w = None
+            if self.config.weights is not None and expert_names is not None:
+                coord_w = torch.tensor(
+                    [self.config.weights[n] for n in expert_names], dtype=torch.float32
+                )
+                coord_w = coord_w / coord_w.sum().clamp_min(1e-12)
+            for p_name in param_names:
+                expert_weights = torch.stack(
+                    [expert[p_name] for expert in task_sVs], dim=0
+                )
+                if coord_w is None:
+                    final_param = expert_weights.mean(0)
+                else:
+                    w = coord_w.to(dtype=expert_weights.dtype).view(
+                        -1, *((1,) * (expert_weights.ndim - 1))
+                    )
+                    final_param = (expert_weights * w).sum(0)
+                state_dict[p_name] = U[p_name] @ final_param
+        else:
+            raise ValueError(f"Unknown KnotMerge merge_method={merge_method}")
 
         return state_dict
 
@@ -3215,7 +3292,11 @@ class KnotMerge(LibraryTransform):
             U = U[:, s > 1e-5]
             Vt = Vt[s > 1e-5]
             s = s[s > 1e-5]
-            UsV_dict[layer] = {"U": deepcopy(U), "s": deepcopy(s), "V": deepcopy(Vt)}
+            UsV_dict[layer] = {
+                "U": deepcopy(U.cpu()),
+                "s": deepcopy(s.cpu()),
+                "V": deepcopy(Vt.cpu()),
+            }
             # Set all s to be the same scale
             s[s <= 1e-5] = 0
             cat_hidden_dim = Vt.shape[1] // len(experts)
@@ -3227,11 +3308,11 @@ class KnotMerge(LibraryTransform):
                 V = (
                     torch.diag(s) @ V
                 )  # WE use Ties merging hat relies on magnitde info, which is not present in Vs only. Comment from original code base: Simple and safe for all merging methods we use.
-                s_model = s / s
+                s_model = torch.ones_like(s)
 
                 s_compositions_dict[idx][layer] = s_model.cpu()
                 V_compositions_dict[idx][layer] = V.cpu()
-        return basis_dict, s_compositions_dict, V_compositions_dict, UsV_dict
+        return basis_dict, s_compositions_dict, V_compositions_dict, UsV_dict, expert_names
 
 
 @dataclass
@@ -3301,7 +3382,9 @@ class TiesMerge(LibraryTransform):
             ]
 
         expert_vectors = torch.stack(expert_vectors, dim=0)
-        per_exp_th = expert_vectors.abs().quantile(1.0 - self.config.top_k, dim=1)
+        per_exp_th = _safe_quantile(
+            expert_vectors.abs(), 1.0 - self.config.top_k, dim=1
+        )
         keep_param = expert_vectors.abs() >= per_exp_th.view(-1, 1)
 
         mean_valid_per_task = keep_param.float().mean(1)
