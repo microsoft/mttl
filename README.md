@@ -142,7 +142,7 @@ Implemented in `merge_audio_experts.py` (same MTTL transforms as NLP/vision):
 | `wudi` / `wudi_merge_after` | WUDI |
 | `soata_linear` | **SOATA-Linear** |
 | `soata` / `soata_ties` | **SOATA-TIES** |
-| `knots_linear` / `knots` | Legacy aliases for SOATA methods |
+| `knots_linear` / `knots`  | KnotMerge |
 | `delta_linear` | Exact product interpolation $\Delta W^*$ (compositional) |
 
 ## Related: TTS speaker × emotion
