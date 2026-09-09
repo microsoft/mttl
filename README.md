@@ -41,7 +41,6 @@ projects/audio_merging/
   compositional.py           # Theorem 1 + pairwise / λ-sweep
   case_study.py              # ESC-50 × SC figure
   diagnostics.py             # principal-angle / subspace stats
-  aggregate_results.py       # Table 1 TeX from JSONs
   train_audio_experts.sh
   eval_audio_merging.sh
   eval_compositional.sh
@@ -50,8 +49,8 @@ projects/audio_merging/
 audio_library/               # MTTL expert library (*.ckpt)
 audio_library_heads/         # per-task classification heads (*.pt)
 audio_output/
-  train/                     # per-task training metrics
-  eval/                      # merge results (Table 1)
+  train/                     # per-task training metrics 
+  eval/                      # merge results 
   compositional/             # theorem / pairwise / sweep / case study
 ```
 
