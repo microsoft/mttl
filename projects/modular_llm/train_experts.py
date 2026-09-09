@@ -84,10 +84,13 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
         monitor = "val/loss"
         mode = "min"
 
+    skip_upload = os.environ.get("SKIP_LIBRARY_UPLOAD", "0") == "1"
+    # save_last after fit materializes a full 32B/MoE state dict and can hang
+    # for hours; MedMerge salvages best_*.ckpt from disk instead.
     checkpoint_callback = LiveCheckpointCallback(
         dirpath=args.output_dir,
         monitor=monitor,
-        save_last=True,
+        save_last=not skip_upload,
         mode=mode,
         save_each_epoch=args.save_each_epoch,
     )
@@ -166,8 +169,17 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
 
     if args.do_train:
         trainer.fit(module, dm)
-
         torch.cuda.empty_cache()
+
+        # Reloading a 32B/MoE Lightning checkpoint and calling module.cpu()
+        # hangs for days, so add_expert never runs. MedMerge always salvages
+        # last.ckpt via export_expert.py after this process exits.
+        if os.environ.get("SKIP_LIBRARY_UPLOAD", "0") == "1":
+            logger.info(
+                "SKIP_LIBRARY_UPLOAD=1; checkpoint=%s",
+                checkpoint_callback.best_model_path or checkpoint_callback.last_model_path,
+            )
+            return
 
         # reload best model before pushing!
         checkpoint = (
@@ -190,19 +202,6 @@ def train_experts(args: Args, model_class: Type[ExpertModule]):
             checkpoint = torch.load(checkpoint, weights_only=False)["state_dict"]
 
         module.load_state_dict(checkpoint)
-        # Do not run trainer.test() here. On 8B/32B/MoE it can hang for days
-        # with the backbone still on GPU, so add_expert never runs. MedMerge
-        # evaluation is a separate job.
-
-        # Extracting the LoRA expert can OOM if the backbone is still on GPU.
-        import gc
-
-        try:
-            module.cpu()
-        except Exception:
-            pass
-        torch.cuda.empty_cache()
-        gc.collect()
 
         @rank_zero_only_and_wait(before=False, after=True)
         def upload_library(expert_library, module):

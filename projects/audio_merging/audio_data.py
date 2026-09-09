@@ -1,13 +1,15 @@
 """Data utilities for audio-classification model merging with AST (ViT for audio).
 
-We evaluate on six diverse audio classification tasks spanning environmental
-sound, urban sound, music genre, speech emotion and keyword spotting:
-  * ESC-50          - environmental sound (50 classes)
-  * UrbanSound8K     - urban sound (10 classes)
-  * GTZAN            - music genre (10 classes)
-  * RAVDESS          - speech emotion (8 classes)
-  * CREMA-D          - speech emotion (6 classes)
-  * Speech Commands  - keyword spotting (~35 classes)
+General suite (ICASSP / SOATA):
+  * ESC-50, UrbanSound8K, GTZAN, RAVDESS, CREMA-D, Speech Commands
+
+Medical suite (MedMergeBench Path A):
+  * ICBHI 2017 respiratory diagnosis
+  * SPRSound pediatric lung sounds
+  * PhysioNet/CinC 2016 heart sound (normal vs abnormal)
+  * CirCor DigiScope PhysioNet 2022 murmur labels
+  * CoughVid cough status
+  * FluSense cough / sneeze / related events
 
 Audio is decoded and resampled to 16 kHz and turned into log-mel spectrograms by
 the AST feature extractor (``input_values`` of shape (1024, 128)).
@@ -25,11 +27,14 @@ import torch
 from datasets import Audio, load_dataset
 from transformers import AutoFeatureExtractor
 
-# task_name -> dict(repo, config, label_col, split)
+# task_name -> dict(repo, config, label_col, split, ...)
 # split strategy:
 #   "native"  -> dataset already provides train/test
 #   "fold:N"  -> column 'fold' present; fold == N is the test set
 #   "ratio"   -> single split; deterministic 80/20 split
+# Optional keys:
+#   audio_col   – column holding waveform / HF Audio (default: "audio")
+#   wf_sr       – sampling rate when audio_col is a raw float list
 AUDIO_TASKS = {
     "esc50": dict(repo="ashraq/esc50", config=None, label_col="target", split="fold:5"),
     "urbansound8k": dict(
@@ -53,8 +58,69 @@ AUDIO_TASKS = {
         split="native",
         fallback_repos=(("pollen-robotics/speech-commands-v0.02", None),),
     ),
+    # ---- Medical audio (MedMergeBench Path A / AST classification) ----
+    "icbhi": dict(
+        repo="quinnlue/icbhi-2017",
+        config=None,
+        label_col="label_text",
+        audio_col="wf",
+        wf_sr=16000,
+        split="fold:4",
+    ),
+    "sprsound": dict(
+        repo="Treza12/sprsound-classification",
+        config=None,
+        label_col="label",
+        audio_col="audio",
+        split="ratio",
+    ),
+    "physionet2016": dict(
+        repo="quinnlue/physionet_challenge_2016",
+        config=None,
+        label_col="label_text",
+        audio_col="wf",
+        split="fold:3",
+    ),
+    "circor": dict(
+        repo="miguellmartins/circor-digiscope-physionet22",
+        config=None,
+        label_col="recording_label",
+        audio_col="recording",
+        split="ratio",
+    ),
+    "coughvid": dict(
+        repo="CoughMamba/coughvid",
+        config=None,
+        label_col="label",
+        audio_col="audio",
+        split="ratio",
+    ),
+    "flusense": dict(
+        repo="vtsouval/flusense",
+        config=None,
+        label_col="label",
+        audio_col="audio",
+        split="ratio",
+    ),
 }
 
+# General AST library (ICASSP) vs medical-only suite (MedMergeBench).
+GENERAL_AUDIO_TASKS = [
+    "esc50",
+    "urbansound8k",
+    "gtzan",
+    "ravdess",
+    "cremad",
+    "speech_commands",
+]
+MEDICAL_AUDIO_TASKS = [
+    "icbhi",
+    "sprsound",
+    "physionet2016",
+    "circor",
+    "coughvid",
+    "flusense",
+]
 ALL_TASKS = list(AUDIO_TASKS.keys())
 
 TARGET_SR = 16000
@@ -386,11 +452,28 @@ def _read_wav_compressed(source):
     raise ValueError(f"unsupported WAVE format {audio_format}")
 
 
-def load_mono_wav(audio, target_sr=TARGET_SR):
-    """Decode an HF audio example without torchcodec/torchaudio/soundfile."""
+def load_mono_wav(audio, target_sr=TARGET_SR, default_sr=None):
+    """Decode an HF audio example without torchcodec/torchaudio/soundfile.
+
+    Accepts:
+      * HF Audio dict ``{array, sampling_rate}`` / ``{bytes|path}``
+      * raw 1-D float / int waveform lists (uses ``default_sr`` or ``target_sr``)
+      * nested ``[{path/bytes/...}]`` viewer payloads
+    """
+    if isinstance(audio, list) and audio and isinstance(audio[0], dict):
+        audio = audio[0]
+
+    if isinstance(audio, (list, tuple, np.ndarray)) and not isinstance(audio, dict):
+        arr = np.asarray(audio)
+        if arr.dtype == object:
+            raise ValueError("object-array audio payload not supported")
+        wav = _to_mono(_pcm_to_float(arr))
+        sr = int(default_sr or target_sr)
+        return _resample(wav, sr, target_sr)
+
     if isinstance(audio, dict) and audio.get("array") is not None:
         wav = _to_mono(audio["array"])
-        sr = audio.get("sampling_rate") or target_sr
+        sr = audio.get("sampling_rate") or default_sr or target_sr
         return _resample(wav, sr, target_sr)
 
     source = None
@@ -399,6 +482,11 @@ def load_mono_wav(audio, target_sr=TARGET_SR):
             source = io.BytesIO(audio["bytes"])
         elif audio.get("path"):
             source = audio["path"]
+        elif audio.get("src") and str(audio["src"]).startswith("http"):
+            # Datasets-server cached asset URL (rare offline path).
+            import urllib.request
+
+            source = io.BytesIO(urllib.request.urlopen(audio["src"], timeout=60).read())
     else:
         source = audio
     if source is None:
@@ -453,18 +541,32 @@ def _train_test_split(spec, dataset, seed):
 
 
 class AudioClassificationDataset(torch.utils.data.Dataset):
-    def __init__(self, hf_dataset, feature_extractor, label_col, label2id):
+    def __init__(
+        self,
+        hf_dataset,
+        feature_extractor,
+        label_col,
+        label2id,
+        audio_col="audio",
+        wf_sr=None,
+    ):
         self.ds = hf_dataset
         self.fe = feature_extractor
         self.label_col = label_col
         self.label2id = label2id
+        self.audio_col = audio_col
+        self.wf_sr = wf_sr
 
     def __len__(self):
         return len(self.ds)
 
     def __getitem__(self, idx):
         example = self.ds[idx]
-        wav = load_mono_wav(example["audio"], target_sr=TARGET_SR)
+        wav = load_mono_wav(
+            example[self.audio_col],
+            target_sr=TARGET_SR,
+            default_sr=self.wf_sr,
+        )
         features = self.fe(
             wav, sampling_rate=TARGET_SR, return_tensors="pt"
         )["input_values"][0]
@@ -511,11 +613,20 @@ def get_audio_dataloaders(
     feature_extractor = AutoFeatureExtractor.from_pretrained(model_name)
 
     dataset = _load_full(spec)
+    audio_col = spec.get("audio_col", "audio")
+    wf_sr = spec.get("wf_sr")
     # Keep encoded bytes/paths; decode in ``load_mono_wav`` (no torchcodec).
+    # Skip cast when the column is a raw float waveform list (e.g. ICBHI ``wf``).
     for split in list(dataset.keys()):
-        dataset[split] = dataset[split].cast_column(
-            "audio", Audio(sampling_rate=TARGET_SR, decode=False)
-        )
+        feats = dataset[split].features
+        if audio_col in feats and getattr(feats[audio_col], "dtype", None) != "list":
+            try:
+                dataset[split] = dataset[split].cast_column(
+                    audio_col, Audio(sampling_rate=TARGET_SR, decode=False)
+                )
+            except Exception:
+                # Some medical dumps already store decoded arrays / custom audio.
+                pass
 
     train_hf, test_hf = _train_test_split(spec, dataset, seed)
 
@@ -537,7 +648,14 @@ def get_audio_dataloaders(
         test_hf = test_hf.shuffle(seed=seed).select(range(n))
 
     train_loader = torch.utils.data.DataLoader(
-        AudioClassificationDataset(train_hf, feature_extractor, label_col, label2id),
+        AudioClassificationDataset(
+            train_hf,
+            feature_extractor,
+            label_col,
+            label2id,
+            audio_col=audio_col,
+            wf_sr=wf_sr,
+        ),
         batch_size=train_batch_size,
         shuffle=True,
         collate_fn=collate_fn,
@@ -545,7 +663,14 @@ def get_audio_dataloaders(
         **_dataloader_kwargs(num_workers),
     )
     test_loader = torch.utils.data.DataLoader(
-        AudioClassificationDataset(test_hf, feature_extractor, label_col, label2id),
+        AudioClassificationDataset(
+            test_hf,
+            feature_extractor,
+            label_col,
+            label2id,
+            audio_col=audio_col,
+            wf_sr=wf_sr,
+        ),
         batch_size=eval_batch_size,
         shuffle=False,
         collate_fn=collate_fn,

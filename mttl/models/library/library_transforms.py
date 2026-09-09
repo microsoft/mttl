@@ -3316,6 +3316,70 @@ class KnotMerge(LibraryTransform):
 
 
 @dataclass
+class SoataMergeConfig(KnotMergeConfig):
+    # Optional SOATA-specific post-processing: match each merged layer norm to the
+    # weighted mean norm of source task deltas (computed in out,in coordinates).
+    preserve_energy: bool = True
+    eps: float = 1e-12
+
+
+@LibraryTransform.register("soata_merge", SoataMergeConfig)
+class SoataMerge(KnotMerge):
+    """
+    SOATA wrapper over KnotMerge with an explicit method identity and optional
+    energy-preserving post-process.
+
+    This class intentionally differs from KnotMerge: after coordinate merging it
+    can re-scale each layer to preserve the weighted mean adapter energy of the
+    source experts.
+    """
+
+    def __init__(self, config: SoataMergeConfig = None):
+        super().__init__(config or SoataMergeConfig())
+
+    @torch.no_grad()
+    def transform(self, library, recompute=False):
+        merged = super().transform(library, recompute=recompute)
+        if not bool(getattr(self.config, "preserve_energy", True)):
+            return merged
+
+        if type(library) == str:
+            library = ExpertLibrary.get_expert_library(library)
+
+        expert_names = list(library.keys())
+        coord_w = None
+        if self.config.weights is not None:
+            coord_w = torch.tensor(
+                [float(self.config.weights[n]) for n in expert_names], dtype=torch.float32
+            )
+            coord_w = coord_w / coord_w.sum().clamp_min(float(self.config.eps))
+
+        # Match ||ΔW_merged||_F to weighted mean ||ΔW_k||_F per layer.
+        layer_to_target = {}
+        for layer in merged.keys():
+            per_exp = []
+            for name in expert_names:
+                lora_a = library[name].expert_weights[f"{layer}.lora_a"]
+                lora_b = library[name].expert_weights[f"{layer}.lora_b"]
+                # Knot/Soata merged deltas are in (out, in), so use the same layout.
+                per_exp.append((lora_a @ lora_b).T.float().norm())
+            norms = torch.stack(per_exp)
+            target = norms.mean() if coord_w is None else (coord_w * norms).sum()
+            layer_to_target[layer] = float(target.item())
+
+        out = {}
+        for layer, delta in merged.items():
+            cur = float(delta.float().norm().item())
+            target = layer_to_target[layer]
+            if cur <= float(self.config.eps) or target <= float(self.config.eps):
+                out[layer] = delta
+                continue
+            scale = target / cur
+            out[layer] = delta * scale
+        return out
+
+
+@dataclass
 class TiesMergeConfig(LibraryTransformConfig):
     top_k: float = 0.2
     only_sparsify: bool = False

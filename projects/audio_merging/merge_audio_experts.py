@@ -6,9 +6,10 @@ Audio counterpart of ``projects/vision_merging/merge_vision_experts.py`` and of
 reused. Each task keeps its own trained classification head; only the AST
 attention backbone is merged.
 
-SOATA in the ICASSP draft is this codebase's KnotMerge:
-  * ``knots`` / ``knots_ties``  -> shared-basis SVD + TIES on coordinates
-  * ``knots_linear``            -> shared-basis SVD + linear coordinate blend
+SOATA in the ICASSP draft is exposed via dedicated merge methods:
+  * ``soata`` / ``soata_ties``  -> shared-basis SVD + TIES on coordinates
+  * ``soata_linear``            -> shared-basis SVD + linear coordinate blend
+Legacy aliases (``knots*``) remain for backward compatibility.
 """
 
 from __future__ import annotations
@@ -33,6 +34,8 @@ from mttl.models.library.library_transforms import (
     ISOMergeConfig,
     KnotMerge,
     KnotMergeConfig,
+    SoataMerge,
+    SoataMergeConfig,
     TaskArithmeticMerge,
     TaskArithmeticConfig,
     TiesMerge,
@@ -75,6 +78,9 @@ MERGE_METHODS = [
     "knots",
     "knots_ties",
     "knots_linear",
+    "soata",
+    "soata_ties",
+    "soata_linear",
     "delta_linear",
 ]
 
@@ -191,6 +197,20 @@ def compute_merged_deltas(
             )
         ).transform(library, recompute=recompute)
         return {layer: d.T for layer, d in merged.items()}
+    if method in ("soata", "soata_ties", "soata_linear"):
+        # SOATA has its own class (built on KnotMerge + energy-preserving rescale).
+        # Return orientation matches KnotMerge path: (in, out) for application helper.
+        soata_method = "linear" if method == "soata_linear" else "ties"
+        merged = SoataMerge(
+            SoataMergeConfig(
+                path=knot_path,
+                merge_method=soata_method,
+                retained_rank=int(retained_rank),
+                weights=weights,
+                preserve_energy=True,
+            )
+        ).transform(library, recompute=recompute)
+        return {layer: d.T for layer, d in merged.items()}
     raise ValueError(f"Unknown merge method {method}")
 
 
@@ -258,7 +278,14 @@ def evaluate_task(task, model_name, backbone_state, heads_dir, device, args):
 def result_tag(args) -> str:
     """Filename stem used for JSON dumps (unique per method / rank)."""
     tag = args.merge_method
-    if args.merge_method in ("knots", "knots_ties", "knots_linear") and args.retained_rank > 0:
+    if args.merge_method in (
+        "knots",
+        "knots_ties",
+        "knots_linear",
+        "soata",
+        "soata_ties",
+        "soata_linear",
+    ) and args.retained_rank > 0:
         tag = f"{args.merge_method}_R{args.retained_rank}"
     return tag
 
@@ -284,7 +311,7 @@ def parse_args():
         choices=MERGE_METHODS,
         help="base | individual | uniform | task_arithmetic | ties | dare_ties | "
         "dare_task_arithmetic | wudi | wudi_merge_after | iso | tsv | "
-        "knots | knots_ties | knots_linear",
+        "knots | knots_ties | knots_linear | soata | soata_ties | soata_linear",
     )
     parser.add_argument("--scaling_coefficient", type=float, default=1.0)
     parser.add_argument("--ta_scaling", type=float, default=1.0)
