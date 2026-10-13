@@ -1,6 +1,6 @@
 # LoRA Training-Data Superposition & Privacy
 
-Code for the NAACL draft **Training-Data Superposition in LoRA: Recoverability and Privacy Implications** (`NAACL_privacy_lora.tex`).
+Code for the draft **Training-Data Superposition in LoRA: Recoverability and Privacy Implications**.
 
 Under clean SGD, a LoRA task vector is a trajectory-dependent sum of transformed per-example gradients. Given the initialization and a finite candidate pool, example contributions can be recovered; a clinical audit then measures membership / identifier leakage on public medical text, with a MedMNIST vision check for cross-modality.
 
@@ -8,8 +8,6 @@ Under clean SGD, a LoRA task vector is a trajectory-dependent sum of transformed
 
 ```
 README.md                           # this file
-NAACL_privacy_lora.tex              # paper draft
-naacl.md                            # experiment checklist / P0 notes
 projects/privacy_lora/
   README.md                         # same project docs
   v2/                               # main NLP pipeline (use this)
@@ -17,7 +15,7 @@ projects/privacy_lora/
     modeling.py                     # LoRA attach on HF causal LMs
     train.py / run_arm.py           # clinical audit arms
     attacks.py / defenses.py / dp.py
-    superposition.py                # Table 1–2 clean-SGD recovery (Qwen-14B)
+    superposition.py                # 
     superposition_todos.py          # R_exact, ε_A/ε_G, μ/κ, perturbation sweep
     make_specs.py / submit_all.sh   # Slurm grid
     aggregate.py                    # merge audit JSON → metrics
@@ -55,7 +53,7 @@ python -m pip install medmnist scikit-learn -q
 
 ## Quick start
 
-### 1. NLP superposition (Tables 1–2)
+### 1. NLP superposition
 
 ```bash
 # one (dataset, seed) on Qwen2.5-14B-Instruct
