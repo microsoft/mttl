@@ -1,0 +1,10 @@
+{
+ "dataset": "pathmnist",
+ "clinical": "colorectal histology (pathology)",
+ "seed": 0,
+ "n_mem": 200,
+ "n_non": 800,
+ "epochs": 5,
+ "auc_loss": 0.5515125,
+ "auc_a1": 0.5231375
+}

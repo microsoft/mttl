@@ -1,0 +1,17 @@
+# Large / regenerable runtime artifacts (keep small JSON summaries tracked)
+logs/
+corpora/
+cache/
+results/
+medmnist/
+old_mem/
+old_syn/
+paper/
+specs/
+specs_extra/
+__pycache__/
+*.pt
+*.bin
+*.safetensors
+*.out
+*.err

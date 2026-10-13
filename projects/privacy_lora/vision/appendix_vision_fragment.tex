@@ -1,0 +1,14 @@
+% Medical imaging extension (MedMNIST). Paste into an appendix section if desired.
+% Requires a MedMNIST citation, e.g.:
+% \bibitem[Yang et al.(2023)]{yang2023medmnist}
+% J.~Yang et al. MedMNIST v2: A large-scale lightweight benchmark for 2D and 3D biomedical image classification. \emph{Scientific Data}, 10:41, 2023.
+
+\paragraph{Medical imaging check.}
+To test whether the superposition account is modality-specific, we repeat the clean-SGD protocol on three public MedMNIST corpora~\citep{yang2023medmnist}: PathMNIST (colorectal histology), DermaMNIST (dermatoscopy), and PneumoniaMNIST (pediatric chest X-ray).
+A compact ViT (depth~6, width~256) receives LoRA on one middle-block attention output projection ($M{=}20$, $s{=}4$, $\alpha{=}r$), matching the NLP design.
+Unlike the Qwen-14B text grid, exact support recovery is no longer saturated.
+At $T{=}50$ and $r{=}16$, mean $R_{\mathrm{ff}}$ / support are $0.116$ / $100\%$ (PathMNIST), $0.205$ / $67\%$ (DermaMNIST), and $0.074$ / $67\%$ (PneumoniaMNIST).
+At $T{=}500$ the fixed-feature residual rises further ($0.662$, $0.514$, $0.264$) and exact 4-of-20 support falls to $0\%$ on every corpus.
+Low rank at $T{=}50$ also hurts: $r{=}1$ support is $0\%$ / $33\%$ / $0\%$ on the three corpora.
+Independent initialization again yields $0\%$ support everywhere.
+A small membership audit (200 members, 800 non-members, five epochs) stays near chance (loss/A1 AUC about $0.50$--$0.53$), so under this vision budget the theory-validation signal is the degradation of fixed-feature recovery with horizon and rank, not a strong membership AUC.

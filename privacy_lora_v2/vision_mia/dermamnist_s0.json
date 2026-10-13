@@ -1,0 +1,10 @@
+{
+ "dataset": "dermamnist",
+ "clinical": "dermatoscopy of pigmented skin lesions",
+ "seed": 0,
+ "n_mem": 200,
+ "n_non": 800,
+ "epochs": 5,
+ "auc_loss": 0.5096750000000001,
+ "auc_a1": 0.5065437500000001
+}

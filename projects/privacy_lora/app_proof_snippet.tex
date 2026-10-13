@@ -1,0 +1,44 @@
+\section{Proof of Proposition~\ref{prop:subspace}}\label{app:proof}
+
+We prove the claim for plain SGD; momentum and weight decay are handled
+afterward. Write $A^{(0)}$ for the (Gaussian) initialization and
+$B^{(0)}=0$. At step $t$ on a minibatch $\mathcal{B}_t$, the LoRA
+gradients on a single example $x$ are
+\begin{align*}
+\nabla_B\mathcal{L}(x)
+&=\tfrac{\alpha}{r}\,\delta_t(x)\big(A^{(t)}h_t(x)\big)^{\!\top},\\
+\nabla_A\mathcal{L}(x)
+&=\tfrac{\alpha}{r}\,(B^{(t)})^{\!\top}\delta_t(x)\,h_t(x)^{\!\top},
+\end{align*}
+so each per-example update of $A$ is a sum of outer products with left
+factor $h_t(x)^\top$, and each update of $B$ is a sum of outer products
+with left factor $\delta_t(x)$.
+
+\paragraph{Induction for $B$.}
+$B^{(0)}=0$, so $\colsp(B^{(0)})=\{0\}$. Assume
+$\colsp(B^{(t)})\subseteq\mathrm{span}\{\delta_s(x):s\le t\}$. The SGD
+step $B^{(t+1)}=B^{(t)}-\eta\sum_{x\in\mathcal{B}_t}\nabla_B\mathcal{L}(x)$
+adds only columns that are scalar multiples of some $\delta_t(x)$, so
+the containment is preserved. Summing over $t\le T$ yields the claim.
+
+\paragraph{Induction for $A$.}
+The same argument applies to the \emph{increment}
+$A^{(T)}-A^{(0)}$: every SGD update of $A$ is a sum of rank-one
+matrices whose rows are multiples of $h_t(x)^\top$, so
+$\rowsp(A^{(T)}-A^{(0)})\subseteq\mathrm{span}\{h_t(x)\}$.
+
+\paragraph{Momentum and weight decay.}
+Heavy-ball / Nesterov momentum stores a linear combination of past
+gradients, which does not enlarge the span. Decayed SGD of the form
+$B\leftarrow(1-\lambda)B-\eta g$ multiplies existing columns by a
+scalar and then adds a gradient column, again preserving span
+containment.
+
+\paragraph{Where Adam fails.}
+Adam rescales each coordinate of the gradient by a running RMS estimate.
+That coordinate-wise map is not a linear combination of the original
+gradient columns, so the induction does not go through. Empirically,
+under AdamW the subspace-projection attack (A2) is near chance
+(Table~\ref{tab:mia}), while loss-based attacks remain strong---consistent
+with the geometry being distorted but sample-level memorization
+persisting.

@@ -1,0 +1,1325 @@
+%=====================================================================
+%  ACL / ARR SUBMISSION DRAFT  (two-column)
+%  "Do LoRA Adapters Protect Patient Privacy?"
+%
+%  PAGE BUDGET: long paper = 8 pages of main text (short = 4).
+%  Does NOT count toward the limit:
+%    - Limitations        (MANDATORY -- missing it is a desk reject)
+%    - Ethical Considerations / Broader Impact
+%    - Acknowledgments
+%    - References (unlimited)
+%    - Appendices (after references, unlimited)
+%
+%  Target allocation of the 8 pages:
+%    1 Intro               1.1     6 Defenses          0.8
+%    2 Related work        0.6     7 Setup             0.5
+%    3 Threat model        0.6     8 Results           2.0
+%    4 Why adapters leak   1.2     9 Discussion        0.4
+%    5 Attacks             0.9    10 Conclusion        0.1
+%
+%  BEFORE SUBMITTING -- style files:
+%    Clone https://github.com/acl-org/acl-style-files and put acl.sty and
+%    acl_natbib.bst next to this file. The preamble auto-detects acl.sty.
+%    Until it is present, a geometry fallback approximates the layout so
+%    this compiles -- RE-CHECK THE PAGE COUNT once the real acl.sty is in
+%    place, since the fallback is close but not exact.
+%    Submission uses \usepackage[review]{acl} (adds the line-number ruler);
+%    camera-ready uses \usepackage[final]{acl}.
+%
+%  ANONYMITY: ARR requires anonymized submissions. Keep the author block
+%  as "Anonymous ACL submission", scrub the IRB reference, use an
+%  anonymous repository link, and cite your own prior work in the third
+%  person. (Note: ARR no longer restricts non-anonymous preprints, so
+%  arXiv posting during review is allowed.)
+%
+%  RESPONSIBLE NLP CHECKLIST: filled in the submission form, not in the
+%  paper. It asks about limitations, risks, artifacts/licensing, compute,
+%  and use of AI assistants -- answer the AI-assistance item accurately.
+%
+%  PLACEHOLDERS: search "\tbd" (numbers) and "\todo" (prose).
+%=====================================================================
+
+\documentclass[11pt]{article}
+
+% ---- ACL style if available, otherwise a close two-column approximation
+\newif\ifhaveacl
+\IfFileExists{acl.sty}{
+  \usepackage[review]{acl}
+  \haveacltrue
+}{
+  \usepackage[letterpaper,textwidth=6.3in,textheight=9in]{geometry}
+  \usepackage[numbers,sort&compress]{natbib}  % acl.sty loads natbib itself
+  \haveaclfalse
+}
+
+\usepackage{times}
+\usepackage{latexsym}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{xcolor}
+\usepackage{colortbl}
+% ---- table styling: group bands, highlighted rows, delta rows -------
+\definecolor{bandrose}{HTML}{FCEDEA}   % reference / baseline group
+\definecolor{bandlav}{HTML}{ECEBFA}    % main group
+\definecolor{bandsand}{HTML}{FDF5E4}   % third group
+\definecolor{rowhl}{HTML}{E3E2F6}      % highlighted reference row
+\definecolor{dblue}{HTML}{2F3FA8}      % change in the desired direction
+\definecolor{dorange}{HTML}{C8690F}    % change in the undesired direction
+\definecolor{arrup}{HTML}{2E8B3C}
+\definecolor{arrdn}{HTML}{C0392B}
+\newcommand{\up}{\textcolor{arrup}{$\uparrow$}}
+\newcommand{\dn}{\textcolor{arrdn}{$\downarrow$}}
+\newcommand{\bandoverhang}{\tabcolsep}   % colour overhang into the inter-column padding
+\newcommand{\band}[3]{\rowcolor{#1}[\bandoverhang][\bandoverhang]\multicolumn{#2}{c}{\textbf{\itshape #3}}\\}
+\newcommand{\hlrow}{\rowcolor{rowhl}[\bandoverhang][\bandoverhang]}
+\newcommand{\dpos}[1]{{\color{dblue}\bfseries\boldmath #1}}
+\newcommand{\dneg}[1]{{\color{dorange}\bfseries\boldmath #1}}
+\newcommand{\dlabel}[1]{{\itshape #1}}
+\newcommand{\B}[1]{\textbf{\boldmath #1}}
+\usepackage{url}
+\usepackage{enumitem}
+\providecommand{\resTBD}{\textcolor{red!65!black}{TBD}}
+
+% The ACL template ships with inconsolata; skip it if not installed.
+\IfFileExists{inconsolata.sty}{\usepackage{inconsolata}}{}
+
+\ifhaveacl\else
+  \twocolumn
+  \setlength{\columnsep}{0.2in}
+\fi
+
+% ---- drafting helpers (DELETE BEFORE SUBMISSION) --------------------
+\newcommand{\tbd}{\textcolor{red}{XX.X}}
+\newcommand{\todo}[1]{\textcolor{orange}{[TODO: #1]}}
+\newcommand{\note}[1]{\textcolor{gray}{\small #1}}
+
+% ---- notation --------------------------------------------------------
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Wz}{W_0}
+\newcommand{\dW}{\Delta W}
+\newcommand{\D}{\mathcal{D}}
+\newcommand{\rowsp}{\operatorname{rowsp}}
+\newcommand{\colsp}{\operatorname{colsp}}
+
+\theoremstyle{plain}
+\newtheorem{proposition}{Proposition}
+\theoremstyle{definition}
+\newtheorem{remark}{Remark}
+\usepackage{amsmath, amsthm}
+
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}{Lemma}
+\newtheorem{definition}{Definition}
+\newtheorem{corollary}{Corollary}
+
+% two-column text is narrow; give TeX room on paragraphs with long
+% inline math rather than letting them spill into the gutter
+\emergencystretch=1.5em
+
+%=====================================================================
+\title{Training-Data Superposition in LoRA: Recoverability and Privacy Implications}
+
+\author{Anonymous ACL submission}
+
+\begin{document}
+\maketitle
+
+%=====================================================================
+\begin{abstract}
+Low-rank adaptation (LoRA) turns training data into a small task vector. What does that vector keep about the data? We give a theory of training-data superposition in LoRA. Under plain SGD, the task vector is exactly a sum of transformed per-example gradients along the training path. Given the initialization and a finite pool of candidate records, we state conditions under which each record's contribution can be recovered uniquely and bound the effect of approximation error, and a rank-one construction shows that low rank alone does not protect the data. A likelihood readout links the parameters to observable behavior. Controlled experiments on Qwen2.5-14B confirm the theory: the one-step task vector equals the fixed-feature sum, the relative error stays below 0.09 after 500 steps, and all hidden records are recovered from a pool of 20. A clinical audit on public PMC-Patients narratives with fabricated identifiers shows the consequences. Base-calibrated membership inference on Llama-3.1-8B reaches an AUC of 0.77 at early stopping, a ten-epoch adapter reveals 20\% of the planted identifiers, and differentially private training is the only defense that brings membership leakage back to chance.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:introduction}
+
+Fine-tuning turns training data into a parameter update that adapts a pretrained model to a task.
+Low-rank adaptation (LoRA; \citealp{hu2022lora}) keeps the base model frozen and learns a small update, which makes this cheap.
+The update is often treated as a task vector that can be stored, reused, and merged with others \citep{ilharco2023editing,yadav2023ties,yu2024language}.
+In that view, adaptation turns a dataset into a useful vector.
+We ask the opposite question: \textbf{beyond the skill it encodes, what does a task vector reveal about the data it was trained on?}
+The focus moves from what an adapter lets a model do to what it lets an observer learn about the training records.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\textwidth]{figures/lora_superposition_contours.pdf}
+    \caption{Two views of a LoRA update. The usual view sees a task skill. Our view sees a sum of transformed training-example contributions. The fixed-feature sum is exact only for one step of plain SGD, and recovery needs extra conditions. The contours are schematic, not measured loss surfaces, and the colors do not mark a proven boundary between skill and memorization.}
+    \label{fig:placeholder}
+\end{figure*}
+
+The question matters most in clinical NLP, where training records describe real patients.
+Clinical notes contain diagnoses, treatments, and histories, so sharing them is tightly controlled \citep{johnson2016mimic}.
+Sharing an adapter instead of the notes does not by itself keep the notes private.
+An observer does not need the whole dataset.
+Recovering one identifier, linking a person to a condition, or learning that someone belongs to a disease cohort is already a disclosure.
+So the information in a clinical task vector should be audited, not assumed safe because the records themselves were never shared \citep{lehman2021does}.
+
+Prior work gives several routes from a trained system back to its training data: gradient inversion \citep{zhu2019deep,geiping2020inverting}, memorization and extraction \citep{carlini2019secret,carlini2021extracting}, and membership inference, whose results depend on example difficulty and on how members and non-members are sampled \citep{carlini2022membership,duan2024membership}.
+Closest to us, \citet{ran2025loraleak} run membership inference against LoRA-tuned language models and show that the public base model is a useful reference for the attack.
+We ask what stays readable in a released adapter and how that changes with the training setup, guided by two points.
+First, \textbf{parameter efficiency is not privacy}: a low rank limits the directions an update can use, but it does not remove sensitive information, and an adapter that depends on its training data is not automatically one from which records can be recovered.
+Second, leakage must be measured under a stated training condition: membership inference at an early-stopped checkpoint and identifier extraction after long training answer different questions, so we keep these regimes apart and test rank both at a matched budget and at each rank's own early stop.
+
+This paper combines a structural analysis with a systematic audit of LoRA task vectors.
+The observer has white-box access to the released adapter, its public base model, and some public data, but not to gradients, optimizer states, or intermediate checkpoints.
+The audit covers membership inference, canary exposure, extraction of sensitive spans, and inference of dataset properties.
+Experiments use several model families and three corpora: public, de-identified PMC-Patients narratives with fabricated identifiers, synthetic clinical notes, and Enron e-mails as a non-clinical control.
+On PMC-Patients with Llama-3.1-8B, base-calibrated membership inference reaches an AUC of 0.77 at early stopping, and an adapter trained for ten epochs reveals 20\% of the planted identifiers.
+Leakage remains at rank one, although its size depends on the training regime.
+Differentially private fine-tuning brings membership leakage close to chance, while post-hoc rank truncation gives little protection.
+These are results on controlled experiments. They do not show that a full private clinical dataset can be recovered.
+
+Our contributions are (i) a theory of training-data superposition in LoRA: an exact sum over the training path (Theorem~\ref{thm:exact_superposition}), conditions under which each record's contribution can be recovered (Theorem~\ref{thm:identifiability}), a rank-one counterexample to confidentiality by rank alone (Corollary~\ref{cor:rank_one}), and a likelihood readout that links parameters to behavior (Eq.~\eqref{eq:kernel_readout}); (ii) a multi-target audit of membership inference, canary exposure, identifier extraction, and dataset-property inference across model families, adaptation methods, ranks, dataset sizes, and training budgets, which separates the attacks that work (likelihood scores) from those that do not (subspace probes and reconstruction search); and (iii) a comparison of DP-LoRA, rank truncation, frozen-factor training, adapter merging, and \textsc{AdaptGuard} against a public-data-only baseline, each reported with its held-out next-token loss so that empirical mitigation stays separate from a formal guarantee.
+
+%=====================================================================
+\section{Related Work}
+%=====================================================================
+A longer discussion is in Appendix~\ref{app:related}.
+
+\paragraph{PEFT and task vectors.}
+LoRA \citep{hu2022lora} restricts the update to $\dW=BA$ with $r \ll \min(d,k)$, and the result is often used as a portable task vector that can be merged across tasks \citep{ilharco2023task,yadav2023ties,yu2024dare}.
+That work studies task vectors as a way to combine skills. We study them as a source of disclosure, and we test merging as a defense in \S\ref{sec:defense}.
+
+\paragraph{Membership inference and memorization.}
+From \citet{shokri2017membership} to LiRA \citep{carlini2022lira}, the hard part of membership inference is correcting for example difficulty, usually with shadow models, and many reported successes on LLMs disappear once this is done \citep{duan2024mia}.
+In our setting $\Wz$ is public, so the loss difference before and after adaptation gives this correction for free.
+Canary exposure \citep{carlini2019secret} and verbatim extraction \citep{carlini2021extracting,nasr2023scalable} measure memorization, and \citet{lehman2021bert} find leakage from a fully fine-tuned clinical encoder that is real but hard to trigger.
+Gradient inversion \citep{zhu2019dlg,geiping2020inverting,balle2022reconstructing} recovers inputs from single-batch gradients in federated learning, whereas a released adapter is a sum of gradients over a whole training run.
+
+\paragraph{DP fine-tuning.}
+DP-SGD \citep{abadi2016dpsgd} is the only defense with a formal guarantee and works at moderate $\varepsilon$ for LLMs \citep{yu2022dpft,li2022llmdp}. PATE \citep{papernot2018scalable} privatizes the output instead.
+We use DP-LoRA as the reference and ask how much of its protection cheaper methods can give.
+To our knowledge, no prior work audits a released LoRA adapter as the leaking object in a clinical setting, or tests whether rank works as a privacy control.
+
+
+\section{Training-Data Superposition in LoRA}
+\label{sec:superposition}
+
+This section asks one question: how does a LoRA task vector combine information from its training examples?
+We give three answers.
+The task vector is an exact sum over the training path.
+It is close to a sum of fixed features computed at initialization.
+And under stated conditions, the share of each example can be read back out.
+Throughout, \emph{data superposition} means a sum of transformed example gradients, not a mixture of raw token sequences.
+
+\subsection{Learning Setting}
+\label{sec:superposition_setting}
+
+Let $\mathcal D=\{x_i\}_{i=1}^n$ be the training set and $W_0\in\mathbb R^{d\times k}$ a frozen weight matrix.
+LoRA learns $A_t\in\mathbb R^{r\times k}$ and $B_t\in\mathbb R^{d\times r}$, giving the effective task vector
+\begin{equation}
+\Delta W_t=\gamma B_tA_t,\qquad \gamma=\alpha/r,\qquad B_0=0.
+\label{eq:effective_task_vector}
+\end{equation}
+We drop the layer index; the argument holds for each adapted layer \citep{hu2022lora}.
+At step $t$ the loss is $L_t=\sum_iq_{t,i}\ell_i$, where $q_{t,i}\geq0$, $\sum_iq_{t,i}=1$, and $q_{t,i}=0$ for examples outside the minibatch.
+Let $G_{t,i}\in\mathbb R^{d\times k}$ be the gradient of example $i$ with respect to the layer's dense weight, computed in the current network.
+The derivation assumes plain SGD with simultaneous updates of $A$ and $B$, no weight decay, no clipping or noise, and no adapter dropout.
+It does not assume fixed activations, a linear network, or convergence.
+
+We keep the mathematics of training separate from what an observer knows.
+The observer gets the final adapter, the public base model, and the configuration. It does not get the training path or the gradients.
+In the controlled recovery experiments, the observer also gets $A_0$ and a pool of candidate records with hidden membership.
+Training logs are used only by us, to check the decomposition.
+
+\subsection{Exact and Fixed-Feature Superposition}
+\label{sec:exact_superposition}
+
+Writing $G_t=\sum_iq_{t,i}G_{t,i}$, the chain rule gives
+\begin{equation}
+\begin{aligned}
+B_{t+1}&=B_t-\eta_t\gamma G_tA_t^\top,\\
+A_{t+1}&=A_t-\eta_t\gamma B_t^\top G_t.
+\end{aligned}
+\label{eq:factor_dynamics}
+\end{equation}
+These two coupled updates give an exact formula for the final task vector.
+
+\begin{theorem}[Trajectory-dependent superposition]
+\label{thm:exact_superposition}
+Under the setting above, after $T$ steps,
+\begin{equation}
+\boxed{\displaystyle
+\Delta W_T=-\gamma^2\sum_{t=0}^{T-1}\sum_{i=1}^n
+\eta_tq_{t,i}\,G_{t,i}A_t^\top A_T.}
+\label{eq:exact_superposition}
+\end{equation}
+\end{theorem}
+\begin{proof}
+Because $B_0=0$, summing the first update in Eq.~\eqref{eq:factor_dynamics} gives
+$B_T=-\gamma\sum_{t,i}\eta_tq_{t,i}G_{t,i}A_t^\top$.
+Multiplying on the right by $\gamma A_T$ gives the identity.
+Nothing about the path of $A_t$ is approximated.
+\end{proof}
+
+When the layer is used once per example, $G_{t,i}=\delta_{t,i}h_{t,i}^\top$, so each term has the form
+\begin{equation}
+G_{t,i}A_t^\top A_T
+=\delta_{t,i}\bigl(A_T^\top A_t h_{t,i}\bigr)^\top.
+\label{eq:outer_product_atom}
+\end{equation}
+For a sequence, the gradient is the sum of such outer products over token positions, with the loss normalization inside $\delta$.
+The task vector is therefore a sum of training error signals, each paired with a transformed training activation.
+All terms share the right factor $A_T$. That keeps the sum low-rank, but it does not remove the dependence on individual examples.
+
+The sum is linear in its terms \emph{given the training path that was actually taken}.
+The terms themselves depend on joint training, so the theorem does not say that training on two datasets together equals adding two adapters trained apart.
+It is LoRA's version of unrolled gradient accumulation, related to gradient-descent superposition and path-kernel views \citep{domingos2020every}.
+It is not a claim that optimization is linear in the raw data.
+
+\paragraph{A fixed-feature approximation.}
+To get features that do not need the hidden training path, define
+\begin{equation}
+\begin{aligned}
+\Phi_i&=-\gamma^2G_{0,i}A_0^\top A_0,\\
+c_i&=\sum_{t=0}^{T-1}\eta_tq_{t,i},\\
+\Delta W_T&=\sum_i c_i\Phi_i+E_T.
+\end{aligned}
+\label{eq:fixed_feature_model}
+\end{equation}
+$\Phi_i$ can be computed from the base model, a known $A_0$, and one candidate record. $c_i$ is the total training weight the record received.
+
+\begin{proposition}[Approximation error]
+\label{prop:drift_bound}
+Let $a=\max_{0\leq t\leq T}\|A_t\|_2$, $a_0=\|A_0\|_2$, $g=\max_i\|G_{0,i}\|_F$, and $\Lambda=\sum_t\eta_t$.
+Define $\epsilon_A=\max_t\|A_t-A_0\|_2$ and $\epsilon_G=\max_{t,i:q_{t,i}>0}\|G_{t,i}-G_{0,i}\|_F$.
+Then
+\begin{equation}
+\|E_T\|_F\leq\gamma^2\Lambda
+\left[a^2\epsilon_G+g(a+a_0)\epsilon_A\right].
+\label{eq:drift_bound}
+\end{equation}
+In particular, $E_1=0$: the first SGD step is an exact fixed-feature mixture because $B_0=0$ implies $A_1=A_0$.
+\end{proposition}
+
+The proof is in Appendix~\ref{app:drift_proof}.
+For longer training, Eq.~\eqref{eq:drift_bound} says exactly what must stay small. A frozen backbone alone does not keep the drift small.
+AdamW rescales each coordinate along the path, which gives a different, path-dependent weighting of the example gradients (Appendix~\ref{app:adamw_superposition}; \citealp{loshchilov2019decoupled}).
+The plain-SGD formulas and the bound above should not be used for AdamW without change.
+
+\subsection{When Are Example Contributions Recoverable?}
+\label{sec:identifiability}
+
+A sum is not always invertible.
+Suppose the observer has a pool $\mathcal C=\{z_j\}_{j=1}^M$ that contains the training records, but does not know which ones they are.
+For each candidate with a nonzero feature matrix $\Phi(z_j)$, let
+\begin{equation}
+\begin{aligned}
+\nu_j&=\|\Phi(z_j)\|_F,&
+ u_j&=\operatorname{vec}(\Phi(z_j))/\nu_j,\\
+U&=[u_1,\ldots,u_M],&
+ v&=\operatorname{vec}(\Delta W_T).
+\end{aligned}
+\label{eq:candidate_dictionary}
+\end{equation}
+Then Eq.~\eqref{eq:fixed_feature_model} reads $v=U\beta+e$, with $\beta_j=c_j\nu_j\geq0$ and $\|e\|_2=\|E_T\|_F$.
+A nonzero coefficient marks a record that received positive training weight.
+A candidate with a zero feature cannot be identified this way, and two candidates with the same feature cannot be told apart.
+
+\begin{theorem}[Conditional identification]
+\label{thm:identifiability}
+Suppose at most $s$ candidate coefficients are nonzero and the normalized dictionary has coherence
+$\mu=\max_{i\ne j}|u_i^\top u_j|$.
+If $\kappa=1-(2s-1)\mu>0$, then the exact equation $v=U\beta$ has at most one $s$-sparse solution.
+If $\|e\|_2\leq\varepsilon$, any $s$-sparse estimate $\widehat\beta$ satisfying $\|v-U\widehat\beta\|_2\leq\varepsilon$ obeys
+\begin{equation}
+\|\widehat\beta-\beta\|_2
+\leq\frac{2\varepsilon}{\sqrt\kappa}.
+\label{eq:recovery_stability}
+\end{equation}
+\end{theorem}
+The proof is in Appendix~\ref{app:identification_details}. It is a special case of the standard uniqueness argument for sparse representations \citep{donoho2003optimally}.
+It ties recoverability to two things: how different the candidate features are, and how large the approximation error is.
+It does not promise an efficient inversion of arbitrary clinical text, and it does not say that a large clinical corpus meets the coherence condition.
+
+\begin{corollary}[Rank one does not ensure confidentiality]
+\label{cor:rank_one}
+There exists a rank-one LoRA training problem in which the final task vector exactly reveals training-record participation weights.
+\end{corollary}
+The construction is in Appendix~\ref{app:rank_one_proof}: a linear layer with $M$ candidate records whose one-step update is a rank-one matrix that lists every record weight in its first column.
+So rank alone cannot support a general claim of confidentiality.
+The construction is a counterexample with a finite candidate set. It is not a theorem that a rank-one language-model adapter can reproduce any patient note.
+
+\subsection{Reading the Superposition Through Model Behavior}
+\label{sec:kernel_readout}
+
+The decomposition also predicts something an observer can measure.
+For a candidate record $x$ with negative log-likelihood $\ell_x(W)$, define the adaptation gain $s(x)=\ell_x(W_0)-\ell_x(W_0+\Delta W_T)$.
+A first-order expansion gives
+\begin{equation}
+\begin{aligned}
+s(x)&=\gamma^2\sum_i c_iK_{A_0}(x,x_i)+r_x,\\
+K_{A_0}(x,x_i)&=\langle G_{0,x}A_0^\top,G_{0,i}A_0^\top\rangle_F.
+\end{aligned}
+\label{eq:kernel_readout}
+\end{equation}
+where the remainder $r_x$ is bounded by the approximation error $\|E_T\|_F$ plus a second-order term in $\|\Delta W_T\|_F$ (Appendix~\ref{app:readout_proof}, Eq.~\eqref{eq:readout_remainder}).
+So a base-calibrated membership score \citep{carlini2022membership,duan2024membership,ran2025loraleak} measures how similar a record is to the training mixture, not whether it was in the training set. A non-member that looks like the training data can also score high.
+
+%=====================================================================
+\section{Experimental Setup}\label{sec:setup}
+%=====================================================================
+
+The experiments have two parts.
+The first tests the theory of Section~\ref{sec:superposition} under the clean-SGD assumptions it is stated for.
+The second audits adapters trained the way clinical adapters are trained in practice, with AdamW and dropout, and measures what each defense costs.
+Full details are in Appendices~\ref{app:attack} and~\ref{app:setup}.
+
+\paragraph{Data.}
+We use three corpora: \textbf{PMC-Patients} \citep{zhao2023pmcpatients}, $167$K public, de-identified patient narratives, which is the primary corpus; \textbf{synthetic} discharge summaries from a template generator, used where the data distribution must be controlled; and \textbf{Enron} e-mails \citep{klimt2004enron} as a non-clinical control.
+Every PMC note receives a fake PHI header (name, MRN, date of birth), so identifier extraction has a ground truth.
+Per seed, the private set has $|\D|{=}10^3$ notes (also $10^2$ and $10^4$), with $5{,}000$ non-members from the same source and length distribution, $200$ validation notes for early stopping, and a disjoint public set $\D_{\text{pub}}$ of $3{,}000$ notes.
+Planted canaries and decoys are added to the private set and excluded from every membership split.
+
+\paragraph{Controlled superposition experiments.}
+These runs use plain SGD with simultaneous updates and no momentum, weight decay, dropout, clipping, or noise, on one attention output projection in a middle block of Qwen2.5-14B-Instruct, with $\alpha=r$.
+Each run draws $M{=}20$ candidate records from one corpus and trains on a hidden subset of $s{=}4$ of them for $T\in\{1,10,50,200,500\}$ steps at $r{=}16$, plus $r\in\{1,4\}$ and frozen-$A$ variants at $T{=}50$.
+The recovery procedure receives only the final adapter, the public base model, the adapter seed (hence $A_0$), and the candidate pool.
+It builds the dictionary of Eq.~\eqref{eq:candidate_dictionary} and solves the nonnegative $s$-sparse fit $\min_{b\geq0,\,\|b\|_0\leq s}\|v-Ub\|_2^2$ exactly, by enumerating all $\binom{20}{4}$ supports.
+We report the fixed-feature error $R_{\mathrm{ff}}=\|\Delta W_T-\sum_ic_i\Phi_i\|_F/\|\Delta W_T\|_F$, exact support recovery, the relative coefficient error $E_c$ against the training-implied weights, the fit residual $R_{\mathrm{fit}}$, and the readout error $E_{\mathrm{read}}$, the mean absolute gap in nats per token between the measured adaptation gain $s(x)$ and the prediction of Eq.~\eqref{eq:kernel_readout}.
+All numbers are means over three seeds. Exact definitions and our own check of Theorem~\ref{thm:exact_superposition} from training logs are in Appendix~\ref{app:setup}.
+
+\paragraph{Clinical leakage audit.}
+Adapters are trained with AdamW under two objectives: \textbf{LM}, the causal-LM loss on the full note, and \textbf{Inst}, note completion, where the prompt is the first ${\sim}65\%$ of the note and the loss covers the rest.
+The primary backbone is Llama-3.1-8B-Instruct with LoRA on the attention projections.
+We also run Llama-3.2-1B/3B, Mistral-7B, BioMistral-7B, and Qwen2.5-7B/14B/32B, and, at matched data and epochs, full fine-tuning, IA$^3$, and head-only tuning.
+Main arms train for $10$ epochs and are audited after every epoch. \emph{Early stop} is the epoch with the lowest validation NLL, where a practitioner would release the adapter.
+The grid covers $r\in\{1,2,4,8,16,64\}$, $|\D|\in\{10^2,10^3,10^4\}$, attention, MLP, and all-linear target modules, SGD versus AdamW, and the defenses below, with three seeds for the main, rank, method, and defense arms.
+
+\paragraph{Attacks.}
+The observer holds the released adapter, the public base model, and $\D_{\text{pub}}$, but no gradients, optimizer states, or checkpoints.
+\textbf{A1}, the main membership score, is the per-token adaptation gain $s(x)$ of Section~\ref{sec:kernel_readout}: the log-likelihood of $x$ under $\Wz+\dW$ minus that under $\Wz$.
+The public base model thus corrects for example difficulty, and no shadow models are needed \citep{carlini2022lira,duan2024mia,ran2025loraleak}.
+We compare A1 with the adapter-only scores: the loss threshold \citep{yeom2018privacy}, the zlib ratio \citep{carlini2021extracting}, Min-$K$\% \citep{shi2024detecting}, and Min-$K$\%++ \citep{zhang2024minkpp}.
+\textbf{A2} is a geometric score: the fraction of a candidate's activation energy that lies in $\rowsp(A_\ell)$, averaged over the adapted layers.
+\textbf{A3} measures canary exposure \citep{carlini2019secret} over a $10^7$-element MRN space, with untrained decoy canaries as the null.
+\textbf{A4} extracts identifiers by greedy decoding from clinical templates and, as a comparison, by GCG-style prefix search \citep{zou2023gcg}. Success is the recall of planted PHI spans and the number of distinct training-set identifiers emitted.
+\textbf{A5} samples notes from the adapted model and compares their sex ratio and diagnosis distribution with the training cohort.
+
+\paragraph{Defenses.}
+\textbf{D1} is DP-LoRA \citep{abadi2016dpsgd,yu2022dpft} with an RDP accountant \citep{mironov2019rdp} at $\varepsilon\in\{1,3,8\}$, plus an $\varepsilon{=}\infty$ control that uses the same recipe without clipping or noise. It is the only defense with a formal guarantee.
+\textbf{D2} truncates the released update to rank $r'$ by SVD.
+\textbf{D3} trains only $B$ and keeps $A$ at its random initialization.
+\textbf{D4} trains $k{=}8$ adapters on disjoint shards and releases their merge, uniform or TIES \citep{yadav2023ties}.
+\textbf{D5}, \textsc{AdaptGuard}, releases a fresh adapter distilled from the private one on $\D_{\text{pub}}$ through a privatized output channel; it has no $(\varepsilon,\delta)$ guarantee.
+A \textbf{public-only} adapter trained on $\D_{\text{pub}}$ with no teacher shows how much utility public data provides on its own.
+
+\paragraph{Metrics and controls.}
+Membership is reported as AUC and TPR at $1\%$ and $0.1\%$ FPR over $1{,}000$ members and $5{,}000$ non-members, with $95\%$ intervals from a bootstrap combined with the across-seed variance.
+Utility is held-out next-token NLL (lower is better); it is not a clinical task metric.
+Three \emph{blind} scores that ignore the adapter (token count, zlib ratio, and base-model loss) stay at chance, AUC $0.50$--$0.52$, on every corpus. This checks for a member/non-member shift, the usual confound in membership evaluation \citep{duan2024mia}.
+
+%=====================================================================
+\section{Results}\label{sec:results}
+%=====================================================================
+
+% Full-width main result matrix.
+\begin{table*}[t]
+\centering\footnotesize
+\setlength{\tabcolsep}{2.8pt}
+\renewcommand{\arraystretch}{1.16}
+\caption{\textbf{Clean-SGD task vectors stay close to their fixed-feature sum, and hidden records are recovered exactly, until the horizon grows long.} Qwen2.5-14B-Instruct, $M{=}20$, $s{=}4$, $\alpha{=}r$; $R_{\mathrm{ff}}$ and $E_{\mathrm{read}}$ (nats/token) shown ${\times}10^{3}$; Supp.\ is exact 4-of-20 support recovery (\%); means over three seeds.}
+\label{tab:theory_evidence}
+\label{tab:superposition_main}
+\begin{tabular}{lcc*{9}{c}}
+\toprule
+ & & & \multicolumn{3}{c}{\textbf{PMC-Patients}} & \multicolumn{3}{c}{\textbf{Synthetic notes}} & \multicolumn{3}{c}{\textbf{Enron}} \\
+\cmidrule(lr){4-6}\cmidrule(lr){7-9}\cmidrule(lr){10-12}
+Training & $r$ & Steps & $10^{3}R_{\mathrm{ff}}$\,\dn & Supp.\,\up & $10^{3}E_{\mathrm{read}}$\,\dn & $10^{3}R_{\mathrm{ff}}$\,\dn & Supp.\,\up & $10^{3}E_{\mathrm{read}}$\,\dn & $10^{3}R_{\mathrm{ff}}$\,\dn & Supp.\,\up & $10^{3}E_{\mathrm{read}}$\,\dn \\
+\midrule
+\band{bandlav}{12}{Training horizon ($r{=}16$)}
+SGD & 16 & 1   & 0.00 & 100 & 0.00 & 0.00 & 100 & 0.00 & 0.00 & 100 & 0.00 \\
+SGD & 16 & 10  & 4.49 & 100 & 0.00 & 4.09 & 100 & 0.02 & 3.76 & 100 & 0.00 \\
+\hlrow \B{SGD} & \B{16} & \B{50} & \B{7.24} & \B{100} & \B{0.35} & \B{6.39} & \B{100} & \B{0.61} & \B{15} & \B{100} & \B{0.17} \\
+SGD & 16 & 200 & 16 & 100 & 1.72 & 17 & 100 & 1.85 & 21 & 100 & 1.32 \\
+SGD & 16 & 500 & 78 & 100 & 2.10 & 89 & 100 & 1.54 & 28 & 100 & 1.71 \\
+\band{bandrose}{12}{Rank ($T{=}50$)}
+SGD & 1 & 50 & 2.53 & 100 & 0.00 & 2.50 & 100 & 0.00 & 2.97 & 100 & 0.00 \\
+SGD & 4 & 50 & 6.59 & 100 & 0.10 & 4.95 & 100 & 0.08 & 7.56 & 100 & 0.10 \\
+\band{bandsand}{12}{Factor freezing ($T{=}50$)}
+Frozen-$A$ SGD & 16 & 50 & 7.17 & 100 & 0.43 & 6.36 & 100 & 0.72 & 15 & 100 & 0.09 \\
+\bottomrule
+\end{tabular}
+\par\vspace{3pt}
+\begin{minipage}{\textwidth}\footnotesize
+\textit{Notes:} the highlighted row is the reference configuration of Table~\ref{tab:recovery_ablation}; paired conditions share candidate pools and initialization; 0.00 denotes a value below $10^{-4}$ in these units.
+\end{minipage}
+\end{table*}
+
+% Full-width identifiability/observation ablation.
+\begin{table*}[t]
+\centering\footnotesize
+\setlength{\tabcolsep}{3.9pt}
+\renewcommand{\arraystretch}{1.18}
+\caption{\textbf{Recovery depends on knowing the initialization; the projection and the sparsity constraint are not binding at this pool size.} Qwen2.5-14B-Instruct, $r{=}16$, $T{=}50$ (highlighted row of Table~\ref{tab:superposition_main}); $E_c$ (against $c^\star{=}{-}\eta T/s$) and $R_{\mathrm{fit}}$ shown ${\times}10^{3}$; each ablation changes one ingredient; same three seeds.}
+\label{tab:recovery_ablation}
+\begin{tabular}{l*{9}{c}}
+\toprule
+ & \multicolumn{3}{c}{\textbf{PMC-Patients}} & \multicolumn{3}{c}{\textbf{Synthetic notes}} & \multicolumn{3}{c}{\textbf{Enron}} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}\cmidrule(lr){8-10}
+Recovery configuration & $10^{3}E_c$\,\dn & Supp.\,\up & $10^{3}R_{\mathrm{fit}}$\,\dn & $10^{3}E_c$\,\dn & Supp.\,\up & $10^{3}R_{\mathrm{fit}}$\,\dn & $10^{3}E_c$\,\dn & Supp.\,\up & $10^{3}R_{\mathrm{fit}}$\,\dn \\
+\midrule
+\band{bandlav}{10}{Reference estimator}
+\hlrow \B{Known $A_0$ + sparse fit} & \B{2.00} & \B{100} & \B{7.24} & \B{2.50} & \B{100} & \B{6.39} & \B{1.38} & \B{100} & \B{15} \\
+\band{bandrose}{10}{Dictionary ablations}
+Final $A_T$ as a proxy & 2.48 & 100 & 7.27 & 4.66 & 100 & 6.69 & 1.61 & 100 & 15 \\
+Independent initialization & \dneg{1082} & \dneg{0} & \dneg{960} & \dneg{1202} & \dneg{0} & \dneg{987} & \dneg{1070} & \dneg{0} & \dneg{994} \\
+No LoRA projection & 2.00 & 100 & 7.24 & 2.51 & 100 & 6.39 & 1.38 & 100 & 15 \\
+\band{bandsand}{10}{Estimator and observation ablations}
+No sparsity constraint & 0.95 & 100 & 7.16 & 2.69 & 100 & 6.29 & 1.42 & 100 & 15 \\
+Perturbed observation (1\%) & 2.01 & 100 & 12 & 2.59 & 100 & 12 & 1.35 & 100 & 18 \\
+\bottomrule
+\end{tabular}
+\par\vspace{3pt}
+\begin{minipage}{\textwidth}\footnotesize
+\textit{Notes:} rows other than the reference lie outside the guarantee of Theorem~\ref{thm:identifiability}; a small residual alone does not certify recovery, and $E_c$ need not be zero for a correct fit (Appendix~\ref{app:setup}). Orange marks the failing configuration.
+\end{minipage}
+\end{table*}
+
+Unless noted, audit numbers are for Llama-3.1-8B-Instruct on PMC-Patients with $r{=}16$ attention LoRA and $|\D|{=}10^3$.
+Intervals are $95\%$ (bootstrap plus three seeds), and canaries are excluded from every membership split.
+
+\subsection{The task vector is a recoverable superposition}
+\label{sec:results_superposition}
+
+Table~\ref{tab:superposition_main} tests the fixed-feature approximation on Qwen2.5-14B-Instruct with a pool of $M{=}20$ candidates, $s{=}4$ hidden records, and training horizons from $1$ to $500$ steps.
+After one SGD step, $R_{\mathrm{ff}}$ is zero up to numerical precision on every corpus.
+It then grows with the horizon. At $500$ steps the mean is $0.078$ on PMC-Patients, $0.089$ on synthetic notes, and $0.028$ on Enron.
+At $T{=}50$, rank and freezing $A$ matter little: $r\in\{1,4,16\}$ and Frozen-$A$ all stay within a few thousandths of each other.
+The likelihood readout stays tight throughout ($E_{\mathrm{read}}\leq0.002$ nats/token).
+Exact 4-of-20 support recovery is $100\%$ in every cell. What varies in this table is the quality of the fixed-feature sum, not whether the records are found.
+As a researcher-side check of Theorem~\ref{thm:exact_superposition}, the logged-path residual $R_{\mathrm{exact}}$ is numerically zero (mean $<10^{-12}$) at $T\in\{1,50,500\}$. The drift coordinates of Proposition~\ref{prop:drift_bound} stay small at the reference horizon ($\varepsilon_A\approx8.9{\times}10^{-5}$, $\varepsilon_G\approx0.020$ at $T{=}50$) and grow by $T{=}500$ ($\varepsilon_A\approx0.010$, $\varepsilon_G\approx0.026$), where the fixed-feature residual $\|E_T\|_F/\|\Delta W_T\|_F$ averages $0.121$. Every run stays inside the Proposition~\ref{prop:drift_bound} bound. A scale-matched subset-versus-union control (four singletons versus the joint adapter, correcting for the $1/s$ mean-batch weight) gives $R_{\mathrm{add}}\approx1.1{\times}10^{-7}$ at $T{=}1$ and $0.005$ at $T{=}50$, so path dependence appears only after the first step and remains small in this regime.
+
+Table~\ref{tab:recovery_ablation} asks which ingredients the recovery depends on, using the same Qwen-14B runs at $r{=}16$ and $50$ steps.
+$E_c$ is measured against the training-implied weights $c^\star{=}{-}\eta T/s$, so even a correct sparse fit need not report zero.
+With the true $A_0$, $E_c$ stays at or below $0.003$ and the support is recovered exactly. The final $A_T$ works almost as well as a stand-in.
+An independent initialization fails completely: $E_c>1$, $R_{\mathrm{fit}}\approx0.96$--$0.99$, and exact support recovery is $0\%$ on all three corpora.
+Dropping the LoRA projection or the sparsity constraint, or adding a $1\%$ perturbation to the observation, leaves the support and $E_c$ almost unchanged at this pool size.
+On the $T{=}50$ dictionaries, normalized coherence is corpus-dependent: $\mu\approx0.104$ on Enron (so $\kappa\approx0.272>0$ on every seed), but $\mu\approx0.613$ / $0.781$ on PMC-Patients / synthetic notes, where $\kappa<0$. Exact support recovery is nevertheless $100\%$ in Table~\ref{tab:superposition_main}, so Theorem~\ref{thm:identifiability}'s coherence condition is sufficient, not necessary, for these pools. Extending the observation perturbation beyond $1\%$ leaves support intact through $5\%$ and $10\%$ (Supp.\ $100\%$; $R_{\mathrm{fit}}$ rises to $0.051$ and $0.100$), and even at $20\%$ noise the support remains exact while $R_{\mathrm{fit}}\approx0.196$, consistent with the stability bound of Eq.~\eqref{eq:recovery_stability}.
+
+The rank-one construction of Corollary~\ref{cor:rank_one} also has a language-model counterpart.
+A rank-one adapter on a single Llama-3.1-8B output projection, with $8{,}192$ trainable parameters, reproduces a $96$-token training note word for word after $100$ steps, while a non-member prefix of the same length stays unmatched (Appendix~\ref{app:rank1}).
+Low rank limits the directions an update can use. It does not stop a record from being stored in them.
+
+\subsection{Membership leaks before the adapter overfits}
+\label{sec:results_membership}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fig_audit_panels.pdf}
+\caption{\textbf{Membership leaks before overfitting, grows with rank and training budget, and is removed only by DP-LoRA.} Llama-3.1-8B-Instruct on PMC-Patients, LM objective, $|\D|{=}10^3$; the dotted line is chance. (a) Membership AUC of each score at early stop (epoch $2$, with $95\%$ intervals) and after $10$ epochs ($r{=}16$). (b) A1 AUC versus rank at a matched $3$-epoch budget and at each rank's own early stop. (c) A1 AUC per adaptation method at matched $3$ epochs and at its own early stop. (d) A1 AUC per defense at $r{=}16$ and $3$ epochs (DP: $20$ epochs). NLL, TPR at low FPR, parameter counts, and guarantees are in Appendix~\ref{app:extra} (Tables~\ref{tab:rank}, \ref{tab:method}, \ref{tab:defense}, and~\ref{tab:mia-full}).}
+\label{fig:audit}
+\end{figure*}
+
+Figure~\ref{fig:audit}(a) reports membership inference at early stop and after ten epochs; Figure~\ref{fig:auc-epoch} in Appendix~\ref{app:extra} shows every epoch.
+The realistic operating point is early stop, epoch $2$ for the LM objective. This is where validation NLL is lowest and where a practitioner would release the adapter.
+There, the raw loss is only slightly above chance (AUC $0.577$) and Min-$K$\%++ reaches $0.629$.
+The base-calibrated score A1 reaches $0.773$, with $5.1\%$ TPR at $1\%$ FPR and $0.8\%$ TPR at $0.1\%$ FPR.
+Instruction-style note completion gives the same picture, with A1 at $0.784$ at early stop (Table~\ref{tab:mia-full}).
+After ten epochs every likelihood score saturates at AUC $1.0$.
+That regime measures memorization rather than attack quality, so we do not use it to rank methods.
+The geometric score A2 stays at chance ($0.505$) in all its variants, and fusing it with A1 lowers the AUC to $0.673$.
+So the membership signal that survives early stopping is a likelihood signal, as the readout of Eq.~\eqref{eq:kernel_readout} suggests. The row space of $A$ carries no usable signal in these runs.
+
+\subsection{Rank and adaptation method}
+\label{sec:results_rank}
+
+Figure~\ref{fig:audit}(b) sweeps the rank at a matched three-epoch budget (full values in Table~\ref{tab:rank}).
+Leakage grows steadily with rank. A1 AUC rises from $0.633$ at $r{=}1$ to $0.996$ at $r{=}64$, TPR at $1\%$ FPR rises from $2.3\%$ to $89.9\%$, and every TOST against $r{=}16$ rejects equivalence, while NLL stays between $1.863$ and $1.891$.
+Exposure of the $\times16$ canary follows the same trend, from $0.4$ at $r{=}1$ to $4.4$ at $r{=}64$.
+At each rank's own early stop, utility is matched (NLL ${\approx}1.86$) and the curve flattens: AUC is $0.70$, $0.69$, $0.69$, $0.71$, $0.77$, and $0.79$ for $r\in\{1,2,4,8,16,64\}$.
+Here $r{=}64$ can no longer be told apart from $r{=}16$, but every $r\le8$ still fails the equivalence test.
+Two conclusions follow.
+At a fixed training budget, a larger rank leaks more.
+At matched utility, a small rank is not a safeguard. A rank-1 attention adapter still gives AUC $0.63$ at three epochs and $0.70$ at its early stop (epoch $4.3$), and a rank-1 single-layer adapter reproduces a training note word for word (Appendix~\ref{app:rank1}).
+
+The adaptation method matters as much as the rank (Figure~\ref{fig:audit}(c); Table~\ref{tab:method}).
+At three epochs, full fine-tuning and head-only tuning reach AUC $1.00$, IA$^3$ reaches $0.86$, and LoRA-$16$ reaches $0.90$.
+At each method's own early stop, full fine-tuning still leaks far more (AUC $0.98$ at epoch $1$) than LoRA-$16$ ($0.77$ at epoch $2$) at similar NLL.
+LoRA leaks less than a full update, but it still leaks.
+
+\subsection{Planted identifiers can be extracted}
+\label{sec:results_extraction}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{figures/loraleak_recon_example.pdf}
+\caption{Qualitative A4 example (synthetic canary only). After 10 epochs
+the released adapter greedily regenerates the planted name, MRN, DOB,
+and diagnosis marker verbatim.}
+\label{fig:recon}
+\end{figure}
+
+Greedy decoding from a ten-epoch PMC adapter regenerates $20\%$ of the planted canary identifiers and two distinct training-set MRNs, and no non-member MRN, so the hits are not just well-formed guesses (Table~\ref{tab:recon}, Appendix~\ref{app:extra}).
+GCG search does not improve on this baseline ($7\%$ with the likelihood term, nothing once the subspace term is added), so we report it as a negative result.
+Exposure of the $\times16$ canary grows from $1.0$ at early stop to $2.2$ after three epochs and $10.3$ after ten, with decoys near $1$. Full fine-tuning reaches $16.1$ in three epochs, and the defended adapters D3 and D4 extract nothing.
+Figure~\ref{fig:recon} shows a synthetic canary reproduced word for word after ten epochs.
+Extraction therefore needs long training, whereas membership already leaks at early stop.
+
+\subsection{What defenses cost}
+\label{sec:defense}
+
+Figure~\ref{fig:audit}(d) and Table~\ref{tab:defense} compare defenses at the same data, rank, and (outside DP) epoch budget; Figure~\ref{fig:frontier} in Appendix~\ref{app:extra} plots the full privacy--utility frontier.
+DP-LoRA at $\varepsilon{=}8$ is the only method that combines a formal guarantee with near-chance membership: AUC $0.534$ at NLL $1.948$, against $1.865$ undefended and $2.229$ for the base model.
+Tighter budgets cost more utility and add little protection: $\varepsilon{=}3$ gives AUC $0.528$ at NLL $1.982$, and $\varepsilon{=}1$ gives $0.519$ at $2.036$.
+The $\varepsilon{=}\infty$ control, trained with the same large-batch recipe, still leaks (AUC $0.867$). The protection comes from the noise, not from the optimizer.
+Post-hoc rank truncation barely moves the frontier. With $r'{=}2$, NLL stays at $1.867$ and AUC at $0.865$, which matches Section~\ref{sec:results_rank}, where rank alone did not remove leakage.
+Frozen-$A$ (AUC $0.612$, NLL $1.894$) and uniform shard merging ($0.570$, $1.905$) are the cheapest useful options. TIES merging is slightly worse on both axes.
+\textsc{AdaptGuard} lowers the AUC from $0.902$ to $0.759$ at NLL $1.921$, but the public-only adapter trained on $\D_{\text{pub}}$ with no teacher reaches AUC $0.510$ with a better NLL of $1.873$.
+On this corpus, the private teacher therefore adds leakage and no utility. Changing the noise scale, top-$k$, or $|\D_{\text{pub}}|$ never reverses that comparison (Appendix~\ref{app:extra}).
+
+\subsection{Transfer and further ablations}
+\label{sec:results_transfer}
+
+The same picture holds on seven other backbones, on Enron e-mail, and on synthetic notes: training budget matters more than rank, A1 beats the loss score at early stop, and A2 stays at chance (Appendix~\ref{app:extra}, Table~\ref{tab:backbone}).
+Adapters also reveal cohort-level properties such as the training sex ratio, MLP targets overfit faster than attention targets, and a private set of only $|\D|{=}100$ notes already gives A1 AUC $0.94$ at early stop, so small private sets are the most exposed (Appendix~\ref{app:extra}).
+
+%=====================================================================
+\section{Discussion}
+%=====================================================================
+
+Four practices follow from these results.
+Treat an adapter release as a disclosure that needs an audit.
+Do not read a small $r$ as a safeguard, even though a larger $r$ leaks more at a matched budget.
+Prefer merged or DP-trained weights over a single overfit adapter.
+And assume memorization when the corpus is small, contains duplicates, or was trained past early stopping, which is the common case for clinical adapters.
+Adapters are shared because the data cannot be, so making release harder has a real cost.
+We therefore argue not for less sharing but for sharing whose privacy properties have been measured, with defenses cheap enough that sharing survives them. This is why every defense is reported with its utility cost.
+We also propose a short leakage block for model cards (attacks run, TPR at low FPR, canary exposure, defense and $\varepsilon$); a filled example is in Appendix~\ref{app:card}.
+
+%=====================================================================
+\section{Conclusion}
+%=====================================================================
+
+Sharing a LoRA adapter instead of a dataset changes the form of the disclosure, not necessarily its size.
+The adapter is a low-rank sum of transformed training gradients whose capacity far exceeds one patient record, and the public base model gives an attacker a free calibration signal.
+Our audit makes the risk measurable, and our defense comparison shows what removing it costs.
+Clinical adapters should keep being shared, together with evidence of what they leak.
+
+%=====================================================================
+%  MANDATORY. Missing this section is grounds for desk rejection.
+%  Does NOT count toward the 8-page limit.
+%  ARR guidance: methodological caveats a reader needs in order to
+%  interpret the findings -- not a future-work list.
+%=====================================================================
+\section*{Limitations}
+
+Attack success is a lower bound on leakage. A failed reconstruction does not show that an adapter is safe.
+Every defense except DP-LoRA lacks a formal guarantee.
+On this corpus, the public-only ablation of \textsc{AdaptGuard} beats the sanitized adapter, so we report that result instead of claiming a general post-hoc sanitizer.
+
+Theorem~\ref{thm:exact_superposition} and Proposition~\ref{prop:drift_bound} are stated for plain SGD. The clinical audit, like almost all practice, uses AdamW.
+Appendix~\ref{app:adamw_superposition} gives the AdamW identity, which does not yield a fixed public dictionary.
+We test the geometric channel under both optimizers: A2 stays at chance in both, so the subspace of $A$ is not what drives A1.
+
+Membership inference is sensitive to a shift between members and non-members \citep{duan2024mia}.
+We match source and length, exclude canaries from the membership splits, and report blind baselines at chance, but some residual shift may remain.
+Absolute AUCs should be compared across our own rows, not against published numbers obtained with different controls.
+
+PMC-Patients narratives are public, de-identified case reports, not credentialed EHR data, and Enron is a non-clinical control.
+Leakage may differ for MIMIC-style notes, other languages, or other specialties.
+The attacker's access to an in-distribution $\D_{\text{pub}}$ holds for some real attackers and not others; without it, our reconstruction numbers are optimistic for the attacker.
+Utility is held-out NLL, not a clinical task metric such as ROUGE, MedQA, or NER-F1, so we do not claim a downstream privacy--utility frontier.
+GCG did not beat template-greedy extraction within our budget; a stronger discrete optimizer might.
+We did not audit third-party clinical adapters.
+
+
+%=====================================================================
+%  Does NOT count toward the page limit.
+%=====================================================================
+\section*{Ethical Considerations}
+
+The primary corpus is PMC-Patients \citep{zhao2023pmcpatients}, a public set of de-identified case narratives.
+We add \emph{fabricated} names, MRNs, and dates of birth, and we never display a real identifier.
+Synthetic notes and Enron e-mails are controls.
+We did not use any credentialed corpus such as MIMIC.
+The reconstructions we show (Figure~\ref{fig:recon}) use only synthetic canaries that we inserted.
+We attack only adapters that we trained ourselves.
+
+We release the audit suite because defenders need it and the techniques are already public.
+We withhold the tuned reconstruction seeds that would make verbatim extraction easy out of the box, and we will not release the adapters trained on PMC-Patients or Enron.
+The dual-use risk is real. We judge that disclosure is the better side of that trade, because adapters are currently released with no way to assess the risk at all.
+We did not audit third-party model hubs in this submission.
+
+Code, synthetic-canary adapters, and full experimental configurations will be linked from an anonymous repository at submission time.
+Proofs are in Appendices~\ref{app:drift_proof}--\ref{app:rank1}, attack hyperparameters in Appendix~\ref{app:attack}, the setup in Appendix~\ref{app:setup}, and extra tables in Appendix~\ref{app:extra}.
+
+%=====================================================================
+% \section*{Acknowledgments}   % uncomment for camera-ready only;
+%                              % does not count toward the page limit
+%=====================================================================
+
+%=====================================================================
+\bibliographystyle{acl_natbib}   % uncomment when you move to a .bib
+\bibliography{custom}
+\begin{thebibliography}{99}
+\small
+
+\bibitem[Abadi et al.(2016)]{abadi2016dpsgd}
+M.~Abadi, A.~Chu, I.~Goodfellow, H.~B. McMahan, I.~Mironov, K.~Talwar, and L.~Zhang.
+\newblock Deep learning with differential privacy. \emph{ACM CCS}, 2016.
+
+\bibitem[Balle et al.(2022)]{balle2022reconstructing}
+B.~Balle, G.~Cherubin, and J.~Hayes.
+\newblock Reconstructing training data with informed adversaries. \emph{IEEE S\&P}, 2022.
+
+\bibitem[Carlini et al.(2019)]{carlini2019secret}
+N.~Carlini, C.~Liu, {\'U}.~Erlingsson, J.~Kos, and D.~Song.
+\newblock The secret sharer: Evaluating and testing unintended memorization in neural networks. \emph{USENIX Security}, 2019.
+
+\bibitem[Carlini et al.(2021)]{carlini2021extracting}
+N.~Carlini, F.~Tram{\`e}r, E.~Wallace, M.~Jagielski, A.~Herbert-Voss, K.~Lee, A.~Roberts, T.~Brown, D.~Song, {\'U}.~Erlingsson, A.~Oprea, and C.~Raffel.
+\newblock Extracting training data from large language models. \emph{USENIX Security}, 2021.
+
+\bibitem[Carlini et al.(2022)]{carlini2022lira}
+N.~Carlini, S.~Chien, M.~Nasr, S.~Song, A.~Terzis, and F.~Tram{\`e}r.
+\newblock Membership inference attacks from first principles. \emph{IEEE S\&P}, 2022.
+
+\bibitem[Duan et al.(2024)]{duan2024mia}
+M.~Duan, A.~Suri, N.~Mireshghallah, S.~Min, W.~Shi, L.~Zettlemoyer, Y.~Tsvetkov, Y.~Choi, D.~Evans, and H.~Hajishirzi.
+\newblock Do membership inference attacks work on large language models? \emph{COLM}, 2024.
+
+\bibitem[Geiping et al.(2020)]{geiping2020inverting}
+J.~Geiping, H.~Bauermeister, H.~Dr{\"o}ge, and M.~Moeller.
+\newblock Inverting gradients -- how easy is it to break privacy in federated learning? \emph{NeurIPS}, 2020.
+
+\bibitem[Hu et al.(2022)]{hu2022lora}
+E.~J. Hu, Y.~Shen, P.~Wallis, Z.~Allen-Zhu, Y.~Li, S.~Wang, L.~Wang, and W.~Chen.
+\newblock {LoRA}: Low-rank adaptation of large language models. \emph{ICLR}, 2022.
+
+\bibitem[Ilharco et al.(2023)]{ilharco2023task}
+G.~Ilharco, M.~T. Ribeiro, M.~Wortsman, S.~Gururangan, L.~Schmidt, H.~Hajishirzi, and A.~Farhadi.
+\newblock Editing models with task arithmetic. \emph{ICLR}, 2023.
+
+\bibitem[Johnson et al.(2016)]{johnson2016mimic}
+A.~E.~W. Johnson, T.~J. Pollard, L.~Shen, L.-W.~H. Lehman, M.~Feng, M.~Ghassemi, B.~Moody, P.~Szolovits, L.~A. Celi, and R.~G. Mark.
+\newblock {MIMIC-III}, a freely accessible critical care database. \emph{Scientific Data}, 3:160035, 2016.
+
+\bibitem[Klimt and Yang(2004)]{klimt2004enron}
+B.~Klimt and Y.~Yang.
+\newblock The {Enron} corpus: A new dataset for email classification research. \emph{ECML}, 2004.
+
+\bibitem[Lehman et al.(2021)]{lehman2021bert}
+E.~Lehman, S.~Jain, K.~Pichotta, Y.~Goldberg, and B.~C. Wallace.
+\newblock Does {BERT} pretrained on clinical notes reveal sensitive data? \emph{NAACL}, 2021.
+
+\bibitem[Li et al.(2022)]{li2022llmdp}
+X.~Li, F.~Tram{\`e}r, P.~Liang, and T.~Hashimoto.
+\newblock Large language models can be strong differentially private learners. \emph{ICLR}, 2022.
+
+\bibitem[Domingos(2020)]{domingos2020every}
+P. Domingos. Every model learned by gradient descent is approximately a kernel machine. \emph{arXiv:2012.00152}, 2020.
+
+\bibitem[Donoho and Elad(2003)]{donoho2003optimally}
+D. L. Donoho and M. Elad. Optimally sparse representation in general (nonorthogonal) dictionaries via $\ell^1$ minimization. \emph{Proceedings of the National Academy of Sciences}, 100(5):2197--2202, 2003.
+
+\bibitem[Loshchilov and Hutter(2019)]{loshchilov2019decoupled}
+I. Loshchilov and F. Hutter. Decoupled weight decay regularization. \emph{ICLR}, 2019.
+
+\bibitem[Mironov et al.(2019)]{mironov2019rdp}
+I.~Mironov, K.~Talwar, and L.~Zhang.
+\newblock R{\'e}nyi differential privacy of the sampled {G}aussian mechanism. \emph{arXiv:1908.10530}, 2019.
+
+\bibitem[Mireshghallah et al.(2022)]{mireshghallah2022quantifying}
+F.~Mireshghallah, K.~Goyal, A.~Uniyal, T.~Berg-Kirkpatrick, and R.~Shokri.
+\newblock Quantifying privacy risks of masked language models using membership inference attacks. \emph{EMNLP}, 2022.
+
+\bibitem[Nasr et al.(2023)]{nasr2023scalable}
+M.~Nasr, N.~Carlini, J.~Hayase, M.~Jagielski, A.~F. Cooper, D.~Ippolito, C.~A. Choquette-Choo, E.~Wallace, F.~Tram{\`e}r, and K.~Lee.
+\newblock Scalable extraction of training data from (production) language models. \emph{arXiv:2311.17035}, 2023.
+
+\bibitem[Papernot et al.(2018)]{papernot2018scalable}
+N.~Papernot, S.~Song, I.~Mironov, A.~Raghunathan, K.~Talwar, and {\'U}.~Erlingsson.
+\newblock Scalable private learning with {PATE}. \emph{ICLR}, 2018.
+
+\bibitem[Shi et al.(2024)]{shi2024detecting}
+W.~Shi, A.~Ajith, M.~Xia, Y.~Huang, D.~Liu, T.~Blevins, D.~Chen, and L.~Zettlemoyer.
+\newblock Detecting pretraining data from large language models. \emph{ICLR}, 2024.
+
+\bibitem[Shokri et al.(2017)]{shokri2017membership}
+R.~Shokri, M.~Stronati, C.~Song, and V.~Shmatikov.
+\newblock Membership inference attacks against machine learning models. \emph{IEEE S\&P}, 2017.
+
+\bibitem[Yadav et al.(2023)]{yadav2023ties}
+P.~Yadav, D.~Tam, L.~Choshen, C.~Raffel, and M.~Bansal.
+\newblock {TIES}-Merging: Resolving interference when merging models. \emph{NeurIPS}, 2023.
+
+\bibitem[Yeom et al.(2018)]{yeom2018privacy}
+S.~Yeom, I.~Giacomelli, M.~Fredrikson, and S.~Jha.
+\newblock Privacy risk in machine learning: Analyzing the connection to overfitting. \emph{IEEE CSF}, 2018.
+
+\bibitem[Yu et al.(2022)]{yu2022dpft}
+D.~Yu, S.~Naik, A.~Backurs, S.~Gopi, H.~A. Inan, G.~Kamath, J.~Kulkarni, Y.~T. Lee, A.~Manoel, L.~Wutschitz, S.~Yekhanin, and H.~Zhang.
+\newblock Differentially private fine-tuning of language models. \emph{ICLR}, 2022.
+
+\bibitem[Yu et al.(2024)]{yu2024dare}
+L.~Yu, B.~Yu, H.~Yu, F.~Huang, and Y.~Li.
+\newblock Language models are super mario: Absorbing abilities from homologous models as a free lunch. \emph{ICML}, 2024.
+
+\bibitem[Zhang et al.(2025)]{zhang2024minkpp}
+J.~Zhang, J.~Sun, E.~Yeats, Y.~Ouyang, M.~Kuo, J.~Zhang, H.~F. Yang, and H.~Li.
+\newblock {Min-K\%++}: Improved baseline for detecting pre-training data from large language models. \emph{ICLR}, 2025.
+
+\bibitem[Zhao et al.(2023)]{zhao2023pmcpatients}
+Z.~Zhao, Q.~Jin, F.~Chen, T.~Peng, and S.~Yu.
+\newblock {PMC-Patients}: A large-scale dataset of patient summaries and relations for benchmarking retrieval-based clinical decision support systems. \emph{arXiv:2202.13876}, 2023.
+
+\bibitem[Zou et al.(2023)]{zou2023gcg}
+A.~Zou, Z.~Wang, N.~Carlini, M.~Nasr, J.~Z. Kolter, and M.~Fredrikson.
+\newblock Universal and transferable adversarial attacks on aligned language models. \emph{arXiv:2307.15043}, 2023.
+
+\bibitem[Zhu et al.(2019)]{zhu2019dlg}
+L.~Zhu, Z.~Liu, and S.~Han.
+\newblock Deep leakage from gradients. \emph{NeurIPS}, 2019.
+
+\end{thebibliography}
+
+%=====================================================================
+\appendix
+\section{Extended Related Work}\label{app:related}
+
+The related work in the main text is short on purpose. Beyond the citations there, the closest prior lines are:
+(i) membership inference on full LLM fine-tunes and on pretraining corpora \citep{mireshghallah2022quantifying,duan2024mia,shi2024detecting};
+(ii) extraction and canary audits \citep{carlini2019secret,carlini2021extracting,nasr2023scalable}; and
+(iii) probing of clinical encoders \citep{lehman2021bert}.
+None of these treats the \emph{released LoRA adapter} as the object that leaks, or tests whether rank itself is a privacy control.
+Task-vector merging \citep{ilharco2023task,yadav2023ties,yu2024dare} is usually studied as a way to combine skills; we reuse those operators as candidate defenses (D4).
+
+\section{Proof of the Fixed-Feature Error Bound}
+\label{app:drift_proof}
+
+Subtract Eq.~\eqref{eq:fixed_feature_model} from Theorem~\ref{thm:exact_superposition}.
+For each active example-step pair,
+\begin{align*}
+&G_{t,i}A_t^\top A_T-G_{0,i}A_0^\top A_0\\
+&=(G_{t,i}-G_{0,i})A_t^\top A_T\\
+&\quad+G_{0,i}(A_t-A_0)^\top A_T
++G_{0,i}A_0^\top(A_T-A_0).
+\end{align*}
+Using $\|XYZ\|_F\leq\|X\|_F\|Y\|_2\|Z\|_2$ bounds the three terms by
+$a^2\epsilon_G$, $ga\epsilon_A$, and $ga_0\epsilon_A$.
+Summing their bounds with weights $\gamma^2\eta_tq_{t,i}$ and using $\sum_iq_{t,i}=1$ proves Eq.~\eqref{eq:drift_bound}.
+For $T=1$, the only gradient is $G_{0,i}$ and $A_1=A_0$ by Eq.~\eqref{eq:factor_dynamics}, proving $E_1=0$.
+
+\section{Proof of Conditional Identification}
+\label{app:identification_details}
+
+\begin{proof}[Proof of Theorem~\ref{thm:identifiability}]
+The difference of two $s$-sparse vectors has at most $2s$ nonzero entries.
+For such a vector $z$, the unit diagonal of $U^\top U$ and the bound $\mu$ on its off-diagonal entries give
+$\|Uz\|_2^2\geq[1-(2s-1)\mu]\|z\|_2^2$.
+In the exact case, $Uz=0$ forces $z=0$.
+In the noisy case, the two residual bounds give $\|Uz\|_2\leq2\varepsilon$.
+\end{proof}
+
+In more detail, for a vector $z$ supported on $m\leq2s$ entries,
+\begin{align*}
+\|Uz\|_2^2
+&\geq \|z\|_2^2-\mu\sum_{i\ne j}|z_i z_j|\\
+&\geq [1-(m-1)\mu]\|z\|_2^2\\
+&\geq \kappa\|z\|_2^2.
+\end{align*}
+The second inequality uses $\|z\|_1^2\leq m\|z\|_2^2$.
+For $z=\widehat\beta-\beta$, the triangle inequality gives
+$\|Uz\|_2\leq\|U\widehat\beta-v\|_2+\|v-U\beta\|_2\leq2\varepsilon$.
+This proves the stability bound.
+If the true support size is $s$ and its smallest nonzero coefficient exceeds $4\varepsilon/\sqrt\kappa$, the $s$ largest-magnitude estimated coefficients recover that support.
+This follows because every coordinate error is at most $2\varepsilon/\sqrt\kappa$.
+These conditions are sufficient, not necessary, and nothing here implies that a large candidate dictionary satisfies them.
+
+\section{Proof of the Rank-One Corollary}
+\label{app:rank_one_proof}
+
+\begin{proof}[Proof of Corollary~\ref{cor:rank_one}]
+Take a linear layer with input and output dimension $M$, a common input $h=e_1$, $W_0=0$, $A_0=e_1^\top$, and $B_0=0$.
+Candidate record $j$ has target $e_j$, the $j$th coordinate vector, under squared loss.
+At initialization, $G_{0,j}=-e_je_1^\top$.
+One SGD step with record weights $q_j$ gives
+\begin{equation}
+\Delta W_1=\eta_0\gamma^2\left(\sum_{j=1}^M q_j e_j\right)e_1^\top.
+\label{eq:rank_one_construction}
+\end{equation}
+This is a rank-one $M\times M$ matrix. Its first column lists every $q_j$ once the scale is known.
+\end{proof}
+
+\section{Proof of the Likelihood Readout}
+\label{app:readout_proof}
+
+Assume $\ell_x$ is twice differentiable along the update segment and that its Hessian has operator norm at most $H_x$ there.
+Then the remainder in Eq.~\eqref{eq:kernel_readout} satisfies
+\begin{equation}
+|r_x|\leq\|G_{0,x}\|_F\|E_T\|_F
++\tfrac12H_x\|\Delta W_T\|_F^2.
+\label{eq:readout_remainder}
+\end{equation}
+For clarity, consider one adapted layer and let $G_{0,x}=\nabla_W\ell_x(W_0)$.
+Taylor's theorem yields
+\[
+s(x)=-\langle G_{0,x},\Delta W_T\rangle_F+\rho_x,
+\qquad |\rho_x|\leq\tfrac12H_x\|\Delta W_T\|_F^2.
+\]
+Substitute $\Delta W_T=-\gamma^2\sum_i c_iG_{0,i}A_0^\top A_0+E_T$ and use
+\[
+\langle G_{0,x},G_{0,i}A_0^\top A_0\rangle_F
+=\langle G_{0,x}A_0^\top,G_{0,i}A_0^\top\rangle_F.
+\]
+The remaining linear term is bounded by
+$|\langle G_{0,x},E_T\rangle_F|\leq\|G_{0,x}\|_F\|E_T\|_F$.
+For multiple adapted layers, vectorize and concatenate all updates before applying Taylor's theorem.
+The linear term is a sum over layers, with each layer's own $\gamma_\ell$, $A_{0,\ell}$, and local gradients; the Hessian bound is for the joint update and includes cross-layer interactions.
+The result concerns changes in the chosen loss normalization, so per-token scores require consistently normalized per-record losses and gradients.
+
+\section{An Exact AdamW Superposition}
+\label{app:adamw_superposition}
+
+Our validation also covers AdamW, whose per-coordinate rescaling breaks the plain-SGD argument.
+Here we derive a different, exact identity for the standard AdamW recurrence \citep{loshchilov2019decoupled}.
+Assume zero initial first and second moments, $B_0=0$, constant moment coefficients $\beta_1,\beta_2\in[0,1)$, learning rates $\eta_t$, decoupled decay $\lambda$, and no gradient clipping or injected privacy noise.
+All products and divisions involving moment arrays below are elementwise.
+For $B$,
+\begin{align}
+g_t^B&=\gamma\sum_iq_{t,i}G_{t,i}A_t^\top,\\
+m_t&=\beta_1m_{t-1}+(1-\beta_1)g_t^B,\\
+v_t&=\beta_2v_{t-1}+(1-\beta_2)(g_t^B)^{\odot2},\\
+\widehat m_t&=m_t/(1-\beta_1^{t+1}),\\
+\widehat v_t&=v_t/(1-\beta_2^{t+1}),\\
+P_t&=(\sqrt{\widehat v_t}+\epsilon)^{-1},\\
+B_{t+1}&=(1-\eta_t\lambda)B_t-\eta_tP_t\odot\widehat m_t.
+\label{eq:adamw_recurrence}
+\end{align}
+Set $m_{-1}=v_{-1}=0$ and define
+\begin{align}
+D_{t,T}&=\prod_{u=t+1}^{T-1}(1-\eta_u\lambda),\\
+C_{T,s}&=\sum_{t=s}^{T-1}
+D_{t,T}\eta_t\frac{(1-\beta_1)\beta_1^{t-s}}{1-\beta_1^{t+1}}P_t.
+\label{eq:adamw_coefficients}
+\end{align}
+The empty product equals one.
+Unrolling the update gives
+\[
+B_T=-\sum_{t=0}^{T-1}D_{t,T}\eta_tP_t\odot\widehat m_t.
+\]
+Expanding the first moment and exchanging the finite sums gives
+$B_T=-\sum_{s=0}^{T-1}C_{T,s}\odot g_s^B$.
+Consequently,
+\begin{equation}
+\boxed{\displaystyle
+\Delta W_T=-\gamma^2\sum_{s,i}q_{s,i}
+\left[C_{T,s}\odot(G_{s,i}A_s^\top)\right]A_T.}
+\label{eq:adamw_superposition}
+\end{equation}
+This is an exact sum of coordinatewise transformed example gradients, given the optimizer's path.
+The arrays $C_{T,s}$ depend nonlinearly on the whole gradient history through the second moments.
+So this is not a fixed, scalar-weighted mixture over the initialization dictionary, and Theorem~\ref{thm:identifiability} does not carry over automatically.
+
+If adapter dropout is enabled, replace $G_{t,i}$ in this derivation by the sum of local outer products $\delta\widetilde h^\top$ using the \emph{realized dropout inputs} $\widetilde h$ on the adapter branch.
+Then $g_t^B=\gamma\sum_iq_{t,i}G_{t,i}A_t^\top$ still holds and the identity remains exact in real arithmetic.
+It does not give a public fixed dictionary when the masks are unknown.
+Gradient clipping, injected privacy noise, low-precision rounding, and other optimizer recurrences must be modeled separately. They cannot be folded into a blanket claim that the update is linear in the raw data.
+
+\section{Rank-1 Memorization}\label{app:rank1}
+
+We train a rank-1 LoRA module on a \emph{single} Llama-3.1-8B
+$o$-projection (layer 16; $8{,}192$ trainable parameters) to copy one
+training note, then measure greedy continuation of that note's prefix
+against a non-member control prefix of the same length.
+
+\begin{table}[h]
+\centering\small
+\caption{Single-layer $r{=}1$ copy probe. Token match is the fraction of
+generated tokens that equal the reference continuation; longest prefix
+is exact match length over a 96-token target.}
+\label{tab:memorize}
+\begin{tabular}{lcccc}
+\toprule
+Corpus & Steps & Token match (ctrl) & Prefix & NLL \\
+\midrule
+PMC-Patients & 50 & $0.94$ ($0.07$) & $0/96$ & $2.69$ \\
+PMC-Patients & 100 & $1.00$ ($0.10$) & $96/96$ & $2.97$ \\
+Synthetic & 50 & $1.00$ ($0.38$) & $96/96$ & $1.89$ \\
+Synthetic & 100 & $1.00$ ($0.38$) & $96/96$ & $2.06$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+After $100$ steps the adapter emits the 96-token training continuation word for word on both corpora, while the control prefix does not.
+The same copy succeeds at $50$ steps if all attention projections are trained at $r{=}1$ ($\approx$0.85M parameters).
+This is the language-model counterpart of Corollary~\ref{cor:rank_one}: rank $1$ on one layer is already enough to store a record.
+It is a copy of a training note, not extraction of a held-out note.
+We do not give an explicit parameterization (a prefix-detecting $a$ and a steering $b$); the demonstration is the claim we rely on.
+
+\section{Attack Hyperparameters}\label{app:attack}
+
+\paragraph{A1/A2.}
+Max length $384$ tokens. A1 is
+$s(x)=\log p_{\Wz+\dW}(x)-\log p_{\Wz}(x)$ averaged per token; A2
+averages projection energy onto $\rowsp(A_\ell)$ over attention LoRA
+modules (QR basis), with $A{-}A^{(0)}$ and $B$-side variants. We score
+$1{,}000$ members and $5{,}000$ non-members. Min-$K$\% uses $k{=}20\%$.
+A2 is evaluated on epochs $\{1,3,5,10\}$ in the main loop and at the
+early-stop checkpoint in a follow-up pass.
+
+\paragraph{A3.}
+Canaries are 7-digit MRNs in a $10^7$ space. Exposure is estimated from
+$2{,}000$ sampled candidates with a skew-normal tail fit
+\citep{carlini2019secret}; we also report the empirical rank among
+samples. Five untrained decoys give the null. Repetitions
+$\{1,2,4,8,16\}$.
+
+\paragraph{A4.}
+Warm-start prompts are clinical section headers and $\D_{\text{pub}}$
+templates; greedy decoding with $128$ new tokens; PHI recall via regex
+for planted MRN / DOB / name spans. GCG \citep{zou2023gcg} optimizes a
+$24$-token prefix for $500$ steps, batch $32$, with ablations of the LM
+term, the subspace term, and both (Eq.~$5$). Reported numbers include
+this search; it did not beat greedy.
+
+\paragraph{A5.}
+$200$ samples from ``\texttt{Discharge Summary \#}''; regex parse of sex
+and primary diagnosis; TV distance to the training mix; base-model and
+alternate-cohort controls.
+
+\paragraph{Compute.}
+NVIDIA GH200 120GB. The completed grid is $\approx$90 GPU-hours
+($192$ arms). DP $\varepsilon\in\{1,3\}$ and $B{=}512$ are seed-$0$
+only; Qwen2.5-14B main arms use three seeds; all other Llama-8B main,
+rank, method and defense arms use three seeds.
+
+\section{Full Experimental Setup}\label{app:setup}
+
+\paragraph{Corpora.}
+PMC-Patients narratives of $900$--$2{,}600$ characters from open-access PubMed Central articles, with a fabricated PHI header (name, MRN, date of birth) on every note, member and non-member.
+Synthetic discharge summaries come from a template generator with section structure and free-text slots; they are used for canary repetition, cohort skew, and the rank-1 copy probe.
+Enron e-mails contain real personal identifiers and serve as a non-clinical control.
+Per seed: $|\D|{=}10^3$ (also $10^2$, $10^4$), $5{,}000$ non-members, $200$ validation notes, and $\D_{\text{pub}}$ of $3{,}000$ disjoint notes from the same source; a shifted $\D_{\text{pub}}$ comes from MTSamples transcriptions.
+Canaries at repetitions $\{1,2,4,8,16\}$, two whole-note duplicates ($\times4$ and $\times16$), and five untrained decoy canaries are added to the private set and excluded from every membership split.
+
+\paragraph{Controlled superposition experiments.}
+To check Theorem~\ref{thm:exact_superposition} on our side, we log per-example gradients, factors, minibatch weights, and learning rates, rebuild $\widehat{\Delta W}_T$ from Eq.~\eqref{eq:exact_superposition}, and report
+\begin{equation}
+R_{\mathrm{exact}}=
+\frac{\|\Delta W_T-\widehat{\Delta W}_T\|_F}
+{\max(\|\Delta W_T\|_F,\tau)},
+\label{eq:identity_metric}
+\end{equation}
+with a small $\tau>0$. AdamW is checked against its own coordinatewise expression (Appendix~\ref{app:adamw_superposition}).
+The recovery procedure never sees these logs.
+It solves
+\begin{equation}
+\widehat\beta\in\arg\min_{b\geq0,\,\|b\|_0\leq s}
+\|v-Ub\|_2^2
+\label{eq:verification_estimator}
+\end{equation}
+by enumerating all supports of size $s$ with least squares ($\binom{20}{4}=4845$ candidates).
+Support recovery is the share of seeds in which the four hidden records are identified with no false positive.
+$E_c=\|\widehat c-c^\star\|_2/\|c^\star\|_2$ compares the recovered coefficients to the training-implied weights $c^\star_i={-}\eta T/s$ on the true support (and $0$ elsewhere), rather than to a same-dictionary least-squares oracle, so even a correct sparse fit need not report zero.
+$R_{\mathrm{fit}}=\|v-U\widehat\beta\|_2/\|v\|_2$ is the residual of the fit.
+$E_{\mathrm{read}}$ is computed over members and source- and length-matched non-members.
+
+\paragraph{Training.}
+\texttt{meta-llama/Llama-3.1-8B-Instruct} (also Llama-3.2-1B/3B,
+Mistral-7B-Instruct-v0.3, BioMistral-7B, Qwen2.5-7B/14B/32B-Instruct). LoRA on
+\texttt{q\_proj|k\_proj|v\_proj|o\_proj}; $\alpha{=}r$; dropout $0.05$;
+bf16; AdamW lr $10^{-4}$; batch $8$; max length $384$ ($512$ Inst).
+Main arms: $10$ epochs, audit every epoch; early-stop $=$ min
+validation NLL. Full fine-tuning uses 8-bit AdamW. DP-LoRA: per-example clip $C{=}1$, Poisson sampling
+with expected batch $256$ (also $512$), Gaussian noise, RDP accountant,
+$\delta=n^{-1.1}$, $20$ epochs, $\varepsilon\in\{1,3,8,\infty\}$.
+
+\paragraph{Defense details.}
+D2 takes an SVD of the effective update $\tfrac{\alpha}{r}BA$, keeps the top $r'$ components, and re-factorizes them with unit scaling so that the retained spectrum is unchanged.
+D4 trains $k{=}8$ adapters on disjoint shards and merges them uniformly or with TIES.
+D5 keeps the private adapter internal and distills a fresh adapter on $\D_{\text{pub}}$ from the teacher's next-token distribution after top-$k$ truncation and Gaussian logit noise; the ablations in Appendix~\ref{app:extra} vary the noise scale, top-$k$, $|\D_{\text{pub}}|$, and a shifted $\D_{\text{pub}}$.
+The public-only baseline trains the same adapter on $\D_{\text{pub}}$ with no teacher.
+
+\paragraph{Metrics and controls.}
+Intervals combine a $1{,}000$-sample bootstrap with the across-seed variance.
+Rank comparisons use a TOST equivalence test with a margin of $0.05$ AUC.
+Log--log ROC curves are in Appendix~\ref{app:extra}.
+Cost is trainable parameters and GPU-hours, about $90$ for the completed grid.
+Non-members are drawn from the same source and the same length distribution as members.
+
+\paragraph{Artifacts.}
+JSON metrics only in the anonymous release; PMC and Enron adapters are
+not shipped. No credentialed clinical dumps.
+
+\section{Example Model-Card Leakage Report}\label{app:card}
+
+\noindent\textbf{Model.} Llama-3.1-8B-Instruct + LoRA ($r{=}16$,
+attention q/k/v/o).\\
+\textbf{Training data.} PMC-Patients, $|\D|{=}10^3$, early-stop at
+epoch $2$ (canaries at $\{1..16\}$ reps, excluded from MIA).\\
+\textbf{Attacks run.} Loss / Min-$K$\% / Min-$K$\%++; A1; A2; blind
+baselines; A3 canary exposure ($10^7$ MRN space); A4 greedy + GCG.\\
+\textbf{Membership (early-stop).} A1 AUC $0.773{\scriptstyle\pm0.010}$;
+TPR@$1\%$FPR $5.1\%$; TPR@$0.1\%$FPR $0.8\%$; loss AUC $0.577$;
+A2 AUC $0.505$; fusion $0.673$; blind base-loss AUC $0.502$.\\
+\textbf{Canaries.} $\times16$ exposure $1.0$ (early-stop) / $2.2$ (3 ep)
+/ $10.3$ (10 ep); decoys $\approx1$.\\
+\textbf{Reconstruction.} Planted-identifier recall $20\%$ (10-ep greedy);
+GCG did not improve.\\
+\textbf{Defense.} None released. DP-LoRA $\varepsilon{=}8$: A1 AUC
+$0.534$, NLL $1.95$; $\varepsilon{=}3$: $0.528$ / $1.98$ (undefended
+$1.87$). Recommend audit before sharing.
+
+\section{Additional Results}\label{app:extra}
+
+\paragraph{Transfer across backbones and corpora.}
+The same picture holds across backbones. Training budget matters more than rank, A1 beats the loss score at early stop, and A2 stays at chance on Llama-3.2-1B/3B, Mistral-7B, BioMistral-7B, and Qwen2.5-7B/14B/32B (Table~\ref{tab:backbone}).
+The larger Qwen models early stop at epoch $1$ with a milder A1 ($0.57$ and $0.56$ on 14B and 32B), but they still reach AUC $1.00$ by epoch $10$, and at three epochs $r{=}64$ still leaks far more than $r{=}1$ ($0.99$ and $0.97$ versus $0.57$ and $0.56$).
+Enron e-mail gives A1 AUC $0.712$ at early stop and $0.922$ after ten epochs.
+Synthetic notes follow a template and are easy to learn, so they understate membership (A1 $0.52$ at early stop) and overstate verbatim memorization (duplicate-note match $1.00$).
+
+\paragraph{Full attack table and instruction format.}
+Table~\ref{tab:mia-full} reports every score, including Inst.\ note
+completion; Figures~\ref{fig:auc-epoch} and~\ref{fig:auc-epoch-inst} show the per-epoch curves for both objectives. At Inst.\ early-stop A1 remains the strongest attack
+($0.784$) with a wider seed interval; A2 is $0.51$ and fusion
+($0.70$) does not beat A1. At $10$ epochs every likelihood
+attack saturates.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/fig_auc_vs_epoch.pdf}
+\caption{Membership AUC versus training epoch on PMC-Patients
+($r{=}16$, LM objective). Vertical dotted line: early stop. Held-out NLL (grey
+dashed, right axis) already rises after epoch $2$; after epoch $6$ every
+likelihood score saturates. The note-completion objective is in Figure~\ref{fig:auc-epoch-inst}.}
+\label{fig:auc-epoch}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/fig_auc_vs_epoch_inst.pdf}
+\caption{Membership AUC versus training epoch on PMC-Patients ($r{=}16$) for the note-completion objective, with the same scores and axes as Figure~\ref{fig:auc-epoch}.}
+\label{fig:auc-epoch-inst}
+\end{figure}
+
+\begin{table}[h]
+\centering\scriptsize
+\setlength{\tabcolsep}{2.2pt}
+\renewcommand{\arraystretch}{1.1}
+\caption{\textbf{Full membership table.} Llama-3.1-8B, PMC-Patients, $r{=}16$. ES is early stop; TPR is in percent at $1\%$ FPR.}
+\label{tab:mia-full}
+\begin{tabular}{lcccccccc}
+\toprule
+ & \multicolumn{2}{c}{\textbf{LM ES}} & \multicolumn{2}{c}{\textbf{LM 10 ep}} & \multicolumn{2}{c}{\textbf{Inst ES}} & \multicolumn{2}{c}{\textbf{Inst 10 ep}} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
+Attack & AUC & TPR & AUC & TPR & AUC & TPR & AUC & TPR \\
+\midrule
+\band{bandrose}{9}{Adapter-only likelihood scores}
+Loss & $0.577$ & $2.2$ & $1.000$ & $99.7$ & $0.596$ & $1.7$ & $1.000$ & $100$ \\
+Zlib & $0.567$ & $1.5$ & $1.000$ & $99.6$ & $0.601$ & $2.3$ & $1.000$ & $100$ \\
+Min-$K$\% & $0.595$ & $2.5$ & $1.000$ & $100$ & $0.615$ & $2.6$ & $1.000$ & $100$ \\
+Min-$K$\%++ & $0.629$ & $3.3$ & $1.000$ & $100$ & $0.632$ & $3.4$ & $1.000$ & $100$ \\
+\band{bandlav}{9}{Base-calibrated, geometric, and fused scores}
+\hlrow \B{A1} & \B{0.773} & \B{5.1} & \B{1.000} & \B{100} & \B{0.784} & \B{8.4} & \B{1.000} & \B{100} \\
+A2 ($A$) & $0.505$ & $0.9$ & $0.511$ & $1.0$ & $0.510$ & $1.0$ & $0.520$ & $1.8$ \\
+Fusion & $0.673$ & $4.0$ & $1.000$ & $100$ & $0.699$ & $5.5$ & $1.000$ & $100$ \\
+\band{bandsand}{9}{Blind controls (ignore the adapter)}
+Blind length & $0.511$ & $0.9$ & $0.511$ & $0.9$ & $0.515$ & $0.8$ & $0.515$ & $0.8$ \\
+Blind zlib & $0.499$ & $1.0$ & $0.499$ & $1.0$ & $0.511$ & $1.1$ & $0.511$ & $1.1$ \\
+Blind base loss & $0.502$ & $1.0$ & $0.502$ & $1.0$ & $0.508$ & $1.2$ & $0.508$ & $1.2$ \\
+\midrule
+NLL / ep & \multicolumn{2}{c}{$1.860$ / $2.0$} & \multicolumn{2}{c}{$2.282$ / $10$} & \multicolumn{2}{c}{$1.909$ / $1.7$} & \multicolumn{2}{c}{$2.979$ / $10$} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Backbones.}
+Table~\ref{tab:backbone} reports the same $r{=}16$ protocol on eight
+models. Ten-epoch A1 is $1.00$ on every backbone. Early-stop A1 ranges
+from $0.56$ (Qwen2.5-32B, epoch 1) to $0.95$ (Llama-3.2-3B). Qwen2.5-14B
+over three seeds early-stops at epochs $1/1/2$ with A1
+$0.57/0.56/0.69$. Rank-1 vs.\ rank-64 at 3 epochs preserves the
+direction on every model ($r{=}1$ $0.56$--$0.73$; $r{=}64$ $0.96$--$1.00$).
+
+\begin{table}[h]
+\centering\scriptsize
+\setlength{\tabcolsep}{2.4pt}
+\renewcommand{\arraystretch}{1.1}
+\caption{\textbf{Backbone transfer.} PMC-Patients LM, seed 0 unless noted. A1 at early stop (ES) and at 10 epochs; $r{=}1$ and $r{=}64$ at 3 epochs. The highlighted row is the primary backbone of the main text.}
+\label{tab:backbone}
+\begin{tabular}{lccccc}
+\toprule
+Backbone & ES ep & A1 (ES) & A1 (10 ep) & $r{=}1$ & $r{=}64$ \\
+\midrule
+\band{bandrose}{6}{Llama}
+Llama-3.2-1B & 2 & $0.70$ & $1.00$ & $0.58$ & $0.97$ \\
+Llama-3.2-3B & 4 & $0.95$ & $1.00$ & $0.61$ & $0.99$ \\
+\hlrow \B{Llama-3.1-8B} & \B{2} & \B{0.78} & \B{1.00} & \B{0.63} & \B{1.00} \\
+\band{bandlav}{6}{Mistral}
+Mistral-7B & 2 & $0.93$ & $1.00$ & $0.73$ & $1.00$ \\
+BioMistral-7B & 1 & $0.68$ & $1.00$ & $0.71$ & $1.00$ \\
+\band{bandsand}{6}{Qwen}
+Qwen2.5-7B & 2 & $0.65$ & $1.00$ & $0.56$ & $0.96$ \\
+Qwen2.5-14B & 1 & $0.57$ & $1.00$ & $0.57$ & $0.99$ \\
+Qwen2.5-32B & 1 & $0.56$ & $1.00$ & $0.56$ & $0.97$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{SGD vs.\ AdamW (A2).}
+At 3 epochs on PMC, AdamW gives A1 $0.902$ and A2 $0.506$; SGD
+($\beta{=}0.9$) underfits (NLL $1.98$ vs.\ $1.87$) and yields A1
+$0.518$ and A2 $0.498$. Frozen-$A$ under AdamW drops A1 to $0.612$.
+The geometric attack is not rescued by using SGD, $A{-}A^{(0)}$, or
+the $B$-side score.
+
+\paragraph{AdaptGuard ablations (PMC, seed 0).}
+Teacher (released undefended): NLL $1.87$, A1 $0.905$, PHI rec.\ $27\%$.
+Default AdaptGuard: $1.93$, $0.756$, $7\%$. Public-only, no teacher:
+$1.87$, $0.510$, $7\%$. Distillation without noise: $1.87$, $0.781$,
+$13\%$. $\sigma{=}2.0$: $1.96$, $0.675$, $0\%$. $|\D_{\text{pub}}|{=}100$:
+$1.93$, $0.724$. Shifted MTSamples $\D_{\text{pub}}$: $1.98$, $0.746$,
+$0\%$ PHI. No setting beats public-only on both NLL and AUC.
+
+\paragraph{Property inference.}
+Cohort A ($75\%$ female, skewed diagnosis): adapter estimates $71\%$
+female (base $20\%$), diagnosis TV $0.18$ vs.\ base $0.60$. Cohort 0
+($50\%$ female): $49\%$ vs.\ base $20\%$. Cohort B ($25\%$ female):
+$18\%$ vs.\ base $20\%$. $n{=}200$ parsed samples each.
+
+\paragraph{Corpus size.}
+$|\D|{=}100$, early-stop: A1 AUC $0.939$, TPR@$1\%$ $30\%$.
+$|\D|{=}10^3$: $0.773$, $5.1\%$. $|\D|{=}10^4$ (seed 0): $0.752$,
+$3.5\%$. Small private sets are the dangerous ones.
+
+\paragraph{Target modules.}
+At 3 epochs, attention LoRA A1 $0.905$; MLP gate/up/down $1.000$
+(NLL $1.93$ vs.\ $1.87$); all-linear $1.000$; rsLoRA $0.997$. MLP
+adapters overfit faster; they are not safer.
+
+\paragraph{Log-log ROC.}
+Figure~\ref{fig:roc} shows TPR vs.\ FPR at early-stop and at 10 epochs
+(seed 0). A1 dominates in the unsaturated panel; every likelihood
+attack hugs the top of the overfit panel; the blind base-loss curve
+tracks the diagonal.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/fig_roc_loglog.pdf}
+\caption{Log--log ROC (PMC-Patients, LoRA-$16$, seed 0).}
+\label{fig:roc}
+\end{figure}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\linewidth]{figures/fig_privacy_utility.pdf}
+\caption{Privacy--utility scatter. Grey trajectory: undefended
+LoRA-$16$ across epochs $1$--$6$. Lower-left is better (low NLL, AUC
+near $0.5$).}
+\label{fig:frontier}
+\end{figure}
+
+\paragraph{Extraction and tabular versions of Figure~\ref{fig:audit}.}
+Table~\ref{tab:recon} reports identifier extraction and canary exposure for Section~\ref{sec:results_extraction}; synthetic notes give $7\%$ recall and exposure $3.4$, and a ten-epoch Enron adapter emits four training-set identifiers and five non-member ones, so extraction outside the clinical template is noisier.
+Tables~\ref{tab:rank}, \ref{tab:method}, and~\ref{tab:defense} list the values plotted in Figure~\ref{fig:audit}(b--d) together with NLL, TPR at $1\%$ FPR, parameter counts, and privacy guarantees; the per-score values of Figure~\ref{fig:audit}(a) are in Table~\ref{tab:mia-full}.
+
+\begin{table}[h]
+\centering\small
+\setlength{\tabcolsep}{2.8pt}
+\renewcommand{\arraystretch}{1.1}
+\caption{\textbf{Greedy template decoding extracts planted identifiers from overtrained adapters; GCG search does not help.} Identifier extraction (A4) and $\times16$ canary exposure (A3). Candidate space $10^7$ MRNs, $2{,}000$ samples plus tail fit. IDs (m/n) counts distinct member and non-member identifiers emitted. GCG (LM) optimizes the likelihood term; GCG (both) adds the subspace term. Decoy canaries are never trained on.}
+\label{tab:recon}
+\begin{tabular}{llccc}
+\toprule
+Adapter & Search & PHI rec. & IDs (m/n) & Expo. \\
+\midrule
+\band{bandlav}{5}{Undefended PMC-Patients adapter, 10 epochs}
+\hlrow \B{PMC, 10 ep} & \B{greedy} & \B{20\%} & \B{2/0} & \B{10.3} \\
+PMC, 10 ep & GCG (LM) & $7\%$ & $2/0$ & -- \\
+PMC, 10 ep & GCG (both) & $0\%$ & $0/0$ & -- \\
+\band{bandrose}{5}{Other corpora and training}
+Syn., 10 ep & greedy & $7\%$ & $2/0$ & $3.4$ \\
+Full FT, 3 ep & greedy & $13\%$ & $2/0$ & $16.1$ \\
+Enron, 10 ep & greedy & -- & $4/5$ & -- \\
+\band{bandsand}{5}{Defended PMC-Patients adapters}
+D3 / D4 TIES & greedy & $0\%$ & $0/0$ & $0.1$ / $1.1$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering\small
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.1}
+\caption{\textbf{At a matched budget, leakage grows monotonically with rank while NLL barely moves.} Rank sweep at a matched $3$-epoch budget (PMC-Patients LM, three seeds). TOST uses a $0.05$ AUC margin against the highlighted $r{=}16$ reference. Expo.\ is $\times16$ canary exposure on the $10^7$ MRN space.}
+\label{tab:rank}
+\begin{tabular}{rrcccc}
+\toprule
+$r$ & Par.\,(M) & NLL\,\dn & AUC (A1) & TPR@1\% & TOST \\
+\midrule
+1 & 0.85 & $1.877$ & $0.633{\scriptstyle\pm0.011}$ & $2.3$ & $\neq$ \\
+2 & 1.70 & $1.863$ & $0.688{\scriptstyle\pm0.012}$ & $3.0$ & $\neq$ \\
+4 & 3.41 & $1.863$ & $0.753{\scriptstyle\pm0.010}$ & $4.4$ & $\neq$ \\
+8 & 6.82 & $1.863$ & $0.821{\scriptstyle\pm0.010}$ & $7.4$ & $\neq$ \\
+\hlrow \B{16} & \B{13.63} & \B{1.865} & \B{0.902}${\scriptstyle\pm0.007}$ & \B{14.6} & ref. \\
+64 & 54.53 & $1.891$ & $0.996{\scriptstyle\pm0.001}$ & $89.9$ & $\neq$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering\small
+\setlength{\tabcolsep}{2.6pt}
+\renewcommand{\arraystretch}{1.1}
+\caption{\textbf{LoRA leaks less than a dense update at its own early stop, but it still leaks.} PEFT vs.\ full fine-tuning (PMC-Patients LM). Matched epochs $=$ 3; early stop $=$ min.\ validation NLL. M is trainable parameters in millions.}
+\label{tab:method}
+\begin{tabular}{lrcccc}
+\toprule
+ &  & \multicolumn{2}{c}{\textbf{3 epochs}} & \multicolumn{2}{c}{\textbf{Early stop}} \\
+\cmidrule(lr){3-4}\cmidrule(lr){5-6}
+Method & M & NLL\,\dn & AUC & ep & AUC \\
+\midrule
+\band{bandrose}{6}{Dense updates}
+Full FT & 8030 & $1.995$ & $1.000$ & $1.0$ & $0.980$ \\
+Head-only & 525 & $2.097$ & $1.000$ & $1.0$ & $0.998$ \\
+\band{bandlav}{6}{Parameter-efficient updates}
+LoRA $r{=}1$ & 0.9 & $1.877$ & $0.633$ & $4.3$ & $0.700$ \\
+\hlrow \B{LoRA $r{=}16$} & \B{13.6} & \B{1.865} & \B{0.902} & \B{2.0} & \B{0.773} \\
+LoRA $r{=}64$ & 54.5 & $1.891$ & $0.996$ & $1.3$ & $0.791$ \\
+IA$^3$ & 0.2 & $1.870$ & $0.862$ & $2.3$ & $0.806$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[h]
+\centering\footnotesize
+\setlength{\tabcolsep}{1.4pt}
+\renewcommand{\arraystretch}{1.12}
+\caption{\textbf{Only DP-LoRA reaches near-chance membership with a guarantee; a public-only adapter matches or beats \textsc{AdaptGuard}.} Privacy--utility frontier at a unified configuration (PMC-Patients, $r{=}16$, 3 epochs except DP: 20 epochs / early stop for $\varepsilon{=}\infty$). AUC and TPR (percent at $1\%$ FPR) are for A1; arrows give the defender's preferred direction. Guar.\ is the accountant's $(\varepsilon,\delta)$ or none. $\Delta$ rows are absolute changes computed from the rows above.}
+\label{tab:defense}
+\begin{tabular}{lcccc}
+\toprule
+Defense & NLL\,\dn & AUC\,\dn & TPR\,\dn & Guar. \\
+\midrule
+\band{bandrose}{5}{No defense}
+Base (no adapter) & $2.229$ & $0.500$ & $1.0$ & -- \\
+\hlrow \B{None (LoRA-16)} & \B{1.865} & \B{0.902} & \B{14.6} & -- \\
+\band{bandlav}{5}{Post-hoc and training-time heuristics}
+D2 $r'{=}2$ & $1.867$ & $0.865$ & $9.9$ & -- \\
+D3 frozen-$A$ & $1.894$ & $0.612$ & $1.7$ & -- \\
+D4 uniform ($k{=}8$) & $1.905$ & $0.570$ & $1.5$ & -- \\
+D4 TIES ($k{=}8$) & $1.970$ & $0.596$ & $2.0$ & -- \\
+D5 \textsc{AdaptGuard} & $1.921$ & $0.759$ & $4.6$ & -- \\
+Public-only (no teacher) & $1.873$ & $0.510$ & $1.1$ & -- \\
+\band{bandsand}{5}{Differential privacy}
+D1 $\varepsilon{=}\infty$ ctrl & $1.878$ & $0.867$ & $9.6$ & -- \\
+D1 DP $\varepsilon{=}8$ & $1.948$ & $0.534$ & $1.2$ & $(8,\delta)$ \\
+D1 DP $\varepsilon{=}3$ & $1.982$ & $0.528$ & $1.1$ & $(3,\delta)$ \\
+D1 DP $\varepsilon{=}1$ & $2.036$ & $0.519$ & $0.7$ & $(1,\delta)$ \\
+\midrule
+\dlabel{$\Delta$ $\varepsilon{=}8$ vs none} & \dneg{$+0.083$} & \dpos{$-0.368$} & \dpos{$-13.4$} & -- \\
+\dlabel{$\Delta$ public-only vs D5} & \dpos{$-0.048$} & \dpos{$-0.249$} & \dpos{$-3.5$} & -- \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\end{document}

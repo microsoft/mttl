@@ -1,0 +1,10 @@
+{
+ "dataset": "pneumoniamnist",
+ "clinical": "pediatric chest X-ray pneumonia",
+ "seed": 0,
+ "n_mem": 200,
+ "n_non": 800,
+ "epochs": 5,
+ "auc_loss": 0.52898125,
+ "auc_a1": 0.52438125
+}
