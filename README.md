@@ -19,15 +19,11 @@ projects/privacy_lora/
     superposition_todos.py          # R_exact, ε_A/ε_G, μ/κ, perturbation sweep
     make_specs.py / submit_all.sh   # Slurm grid
     aggregate.py                    # merge audit JSON → metrics
-    fill_superposition_tex.py       # fill Table 1–2 from JSON
-    fill_todos_tex.py               # summarize diagnostics
   vision/                           # MedMNIST MiniViT + LoRA
     backbone.py / data.py
     superposition.py                # same recovery protocol on images
     mia_vision.py                   # small membership audit
     aggregate_vision.py
-    appendix_vision_fragment.tex    # paste-ready appendix paragraph
-  # legacy v1 scripts (train_adapter.py, run_audit.py, …) — prefer v2/
 privacy_lora_v2/                    # runtime outputs (gitignored bulky dirs)
   superposition_v3/                 # Qwen-14B Table 1–2 JSON
   superposition_todos/              # identity / coherence / perturb JSON
