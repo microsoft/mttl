@@ -1,75 +1,127 @@
-# QuAda
+# LoRA Training-Data Superposition & Privacy
 
-Quantum-generated adapters for parameter-efficient fine-tuning of speech and
-audio models (AST, WavLM, HuBERT).
+Code for the NAACL draft **Training-Data Superposition in LoRA: Recoverability and Privacy Implications** (`NAACL_privacy_lora.tex`).
 
-A small parameterized quantum circuit and a shared MLP **generate** LoRA A/B
-weights during training. After training the adapters are materialized and
-merged into the frozen encoder, so **inference is fully classical**.
-
+Under clean SGD, a LoRA task vector is a trajectory-dependent sum of transformed per-example gradients. Given the initialization and a finite candidate pool, example contributions can be recovered; a clinical audit then measures membership / identifier leakage on public medical text, with a MedMNIST vision check for cross-modality.
 
 ## Layout
 
 ```
-mttl/models/modifiers/quada.py     # PQC, decoder, generator
-mttl/models/modifiers/dora.py      # DoRA baseline
-projects/quantum_adapters/
-  finetune_quada.py                # train linear / LoRA / DoRA / QuAda
-  wave_data.py                     # WavLM / HuBERT waveforms
-tests/test_quada.py
+README.md                           # this file
+NAACL_privacy_lora.tex              # paper draft
+naacl.md                            # experiment checklist / P0 notes
+projects/privacy_lora/
+  README.md                         # same project docs
+  v2/                               # main NLP pipeline (use this)
+    data.py                         # PMC-Patients / synthetic / Enron
+    modeling.py                     # LoRA attach on HF causal LMs
+    train.py / run_arm.py           # clinical audit arms
+    attacks.py / defenses.py / dp.py
+    superposition.py                # Table 1–2 clean-SGD recovery (Qwen-14B)
+    superposition_todos.py          # R_exact, ε_A/ε_G, μ/κ, perturbation sweep
+    make_specs.py / submit_all.sh   # Slurm grid
+    aggregate.py                    # merge audit JSON → metrics
+    fill_superposition_tex.py       # fill Table 1–2 from JSON
+    fill_todos_tex.py               # summarize diagnostics
+  vision/                           # MedMNIST MiniViT + LoRA
+    backbone.py / data.py
+    superposition.py                # same recovery protocol on images
+    mia_vision.py                   # small membership audit
+    aggregate_vision.py
+    appendix_vision_fragment.tex    # paste-ready appendix paragraph
+  # legacy v1 scripts (train_adapter.py, run_audit.py, …) — prefer v2/
+privacy_lora_v2/                    # runtime outputs (gitignored bulky dirs)
+  superposition_v3/                 # Qwen-14B Table 1–2 JSON
+  superposition_todos/              # identity / coherence / perturb JSON
+  vision_superposition/             # MedMNIST recovery JSON
+  vision_mia/                       # MedMNIST MIA JSON
 ```
-
-Outputs go to `quada_output/<backbone>/<method>/<task>/metrics.json`.
 
 ## Setup
 
-Use the `mttl` conda env on a **GPU node** (the env is ARM; login nodes are x86).
+The shared `mttl` conda env is **aarch64**. Run on a **Slurm GPU node** (GH200), not the x86 login node.
 
 ```bash
-conda activate mttl
 cd /path/to/mttl
-export PYTHONPATH=.
+source projects/medmergebench/slurm_env.sh   # activates mttl + CUDA
+export PYTHONPATH=./
 ```
 
-## Tests
-
-`tests/conftest.py` must not load (it pulls in unrelated LLM fixtures):
+Optional for vision:
 
 ```bash
-python -m pytest tests/test_quada.py --noconftest -s --tb=short
+python -m pip install medmnist scikit-learn -q
 ```
 
-## Train one run
+## Quick start
+
+### 1. NLP superposition (Tables 1–2)
 
 ```bash
-# parameter / qubit table (CPU, no data)
-python projects/quantum_adapters/count_params.py
+# one (dataset, seed) on Qwen2.5-14B-Instruct
+sbatch -J ll_q14_pmc_s0 \
+  projects/privacy_lora/v2/run_superposition.slurm qwen14b pmc 0
 
-# AST + QuAda on ESC-50
-python projects/quantum_adapters/finetune_quada.py \
-    --task esc50 --backbone ast --method quada \
-    --n_mlp 1024 --n_circuit_layers 8 \
-    --output_dir quada_output/ast/quada/esc50
-
-# baselines
-python projects/quantum_adapters/finetune_quada.py \
-    --task esc50 --backbone ast --method lora --lora_rank 4
-python projects/quantum_adapters/finetune_quada.py \
-    --task esc50 --backbone ast --method dora --lora_rank 4
-python projects/quantum_adapters/finetune_quada.py \
-    --task esc50 --backbone ast --method linear
+# fill tex once 9/9 JSON exist under privacy_lora_v2/superposition_v3/
+PRIVACY_LORA_SUPERPOS=privacy_lora_v2/superposition_v3 \
+  python projects/privacy_lora/v2/fill_superposition_tex.py
 ```
 
-Tasks: `esc50`, `ravdess`, `speech_commands`.  
-Methods: `linear`, `lora`, `dora`, `quada`.  
-Backbones: `ast`, `wavlm`, `hubert`.
-
-WavLM automatically learns SUPERB layer weights; QuAda generates them too.
-
-
-Or locally:
+Diagnostics (`R_exact`, drift, coherence, perturbation sweep):
 
 ```bash
-SMOKE=1 bash projects/quantum_adapters/run_experiments.sh
-TASKS=esc50 METHODS=quada BACKBONE=ast bash projects/quantum_adapters/run_experiments.sh
+sbatch projects/privacy_lora/v2/run_superposition_todos.slurm qwen14b pmc 0
+python projects/privacy_lora/v2/fill_todos_tex.py
 ```
+
+### 2. Clinical leakage audit (membership / defenses)
+
+```bash
+# build / refresh arm specs
+python -m projects.privacy_lora.v2.make_specs
+
+# submit grid (see submit_all.sh / run_arms.slurm)
+bash projects/privacy_lora/v2/submit_all.sh
+
+# aggregate
+python -m projects.privacy_lora.v2.aggregate
+```
+
+### 3. Medical imaging (MedMNIST)
+
+```bash
+# superposition: PathMNIST / DermaMNIST / PneumoniaMNIST × seeds 0–2
+sbatch projects/privacy_lora/vision/run_vision.slurm pathmnist 0
+
+# membership probe
+sbatch projects/privacy_lora/vision/run_mia.slurm pathmnist 0
+
+python -m projects.privacy_lora.vision.aggregate_vision
+```
+
+## Protocol (theory validation)
+
+| Knob | NLP (paper) | Vision |
+|------|-------------|--------|
+| Backbone | Qwen2.5-14B-Instruct | MiniViT-256 (depth 6) |
+| LoRA site | middle-block `o_proj` | middle-block attn out-proj |
+| Pool | $M{=}20$, $s{=}4$ | same |
+| Optim | clean SGD, no momentum/decay/dropout/clip | same |
+| Steps | 1, 10, 50, 200, 500 | same |
+| Metrics | $R_{\mathrm{ff}}$, Supp., $E_{\mathrm{read}}$, $E_c$ vs $c^\star{=}{-}\eta T/s$ | same |
+
+## Outputs & what is not in git
+
+Bulky runtime data stay local (see `privacy_lora_v2/.gitignore`):
+
+- `logs/`, `corpora/`, `cache/`, `results/`, `medmnist/`
+
+Committed (or regenerable) small JSON summaries:
+
+- `superposition_v3/`, `superposition_todos/`, `vision_superposition/`, `vision_mia/`
+
+## Citation / data notes
+
+- Clinical text: **PMC-Patients** (public), synthetic notes, **Enron** (non-clinical control). No credentialed MIMIC.
+- Vision: **MedMNIST** ([Yang et al., Sci. Data 2023](https://medmnist.com/)).
+- Double-blind draft: keep author info out of the tex when submitting.
